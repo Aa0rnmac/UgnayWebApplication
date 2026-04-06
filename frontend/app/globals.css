@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-start: #050607;
+  --bg-end: #10161d;
+  --brand-red: rgba(244, 19, 40, 0.2);
+  --brand-yellow: rgba(236, 229, 30, 0.2);
+  --brand-green: rgba(73, 182, 73, 0.2);
+  --brand-blue: rgba(70, 85, 166, 0.22);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-display), "Segoe UI", sans-serif;
+}
+
+.bg-grid {
+  background:
+    radial-gradient(circle at 10% 12%, var(--brand-yellow), transparent 35%),
+    radial-gradient(circle at 90% 8%, var(--brand-red), transparent 35%),
+    radial-gradient(circle at 82% 85%, var(--brand-green), transparent 30%),
+    radial-gradient(circle at 8% 88%, var(--brand-blue), transparent 30%),
+    linear-gradient(135deg, var(--bg-start), var(--bg-end));
+}
+
+.panel {
+  @apply rounded-2xl border border-brandWhite/20 bg-panel/85 p-5 shadow-soft backdrop-blur-sm;
+}

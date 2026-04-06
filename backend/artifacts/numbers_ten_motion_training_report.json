@@ -1,0 +1,45 @@
+{
+  "model_path": "C:\\Users\\Marissa Macatangay\\Desktop\\tutorial\\backend\\artifacts\\numbers_ten_motion_model.joblib",
+  "train_rows_seen": 162,
+  "test_rows_seen": 40,
+  "train_samples": 322,
+  "test_samples": 40,
+  "train_class_counts": {
+    "TEN": 32,
+    "NOT_TEN": 290
+  },
+  "test_class_counts": {
+    "TEN": 4,
+    "NOT_TEN": 36
+  },
+  "skipped_train_no_hand": 1,
+  "skipped_test_no_hand": 0,
+  "accuracy": 1.0,
+  "classification_report": {
+    "NOT_TEN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 36.0
+    },
+    "TEN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "accuracy": 1.0,
+    "macro avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 40.0
+    },
+    "weighted avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 40.0
+    }
+  }
+}

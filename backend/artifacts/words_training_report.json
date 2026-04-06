@@ -1,0 +1,739 @@
+{
+  "model_path": "C:\\Users\\Marissa Macatangay\\Desktop\\tutorial\\backend\\artifacts\\words_model.joblib",
+  "dataset_status": {
+    "dataset_root": "C:\\Users\\Marissa Macatangay\\Desktop\\tutorial\\datasets\\fsl_105",
+    "processed_path": "C:\\Users\\Marissa Macatangay\\Desktop\\tutorial\\datasets\\fsl_105\\processed",
+    "clips_root": "C:\\Users\\Marissa Macatangay\\Desktop\\tutorial\\datasets\\fsl_105\\clips_raw",
+    "train_rows": 1219,
+    "test_rows": 306,
+    "train_clips_found": 1219,
+    "test_clips_found": 306,
+    "missing_train_clips": 0,
+    "missing_test_clips": 0,
+    "available_labels": [
+      "APRIL",
+      "AUGUST",
+      "AUNTIE",
+      "BLACK",
+      "BLIND",
+      "BLUE",
+      "BOY",
+      "BROWN",
+      "CORRECT",
+      "COUSIN",
+      "DARK",
+      "DAUGHTER",
+      "DEAF",
+      "DEAF BLIND",
+      "DECEMBER",
+      "DON\u2019T KNOW",
+      "DON\u2019T UNDERSTAND",
+      "FAST",
+      "FATHER",
+      "FEBRUARY",
+      "FRIDAY",
+      "GIRL",
+      "GOOD AFTERNOON",
+      "GOOD EVENING",
+      "GOOD MORNING",
+      "GRANDFATHER",
+      "GRANDMOTHER",
+      "GRAY",
+      "GREEN",
+      "HARD OF HEARING",
+      "HELLO",
+      "HOW ARE YOU",
+      "IM FINE",
+      "JANUARY",
+      "JULY",
+      "JUNE",
+      "KNOW",
+      "LIGHT",
+      "MAN",
+      "MARCH",
+      "MARRIED",
+      "MAY",
+      "MONDAY",
+      "MOTHER",
+      "NICE TO MEET YOU",
+      "NO",
+      "NOVEMBER",
+      "OCTOBER",
+      "ORANGE",
+      "PARENTS",
+      "PINK",
+      "RED",
+      "SATURDAY",
+      "SEE YOU TOMORROW",
+      "SEPTEMBER",
+      "SLOW",
+      "SON",
+      "SUNDAY",
+      "THANK YOU",
+      "THURSDAY",
+      "TODAY",
+      "TOMORROW",
+      "TUESDAY",
+      "UNCLE",
+      "UNDERSTAND",
+      "VIOLET",
+      "WEDNESDAY",
+      "WEELCHAIR PERSON",
+      "WHITE",
+      "WOMAN",
+      "WRONG",
+      "YELLOW",
+      "YES",
+      "YESTERDAY",
+      "YOURE WELCOME"
+    ],
+    "available_label_count": 75,
+    "available_category_count": 7,
+    "excluded_categories": [
+      "DRINK",
+      "FOOD"
+    ],
+    "ready_for_training": true
+  },
+  "custom_words_included": true,
+  "custom_words_labels": [
+    "I LOVE YOU"
+  ],
+  "custom_words_train_clips": 64,
+  "custom_words_test_clips": 16,
+  "train_samples": 2562,
+  "test_samples": 321,
+  "sequence_frames": 20,
+  "min_valid_frames": 8,
+  "max_sampled_frames": 45,
+  "train_class_kept_samples": {
+    "CORRECT": 32,
+    "RED": 32,
+    "HOW ARE YOU": 34,
+    "UNDERSTAND": 32,
+    "YOURE WELCOME": 32,
+    "BOY": 34,
+    "VIOLET": 32,
+    "SATURDAY": 32,
+    "NO": 34,
+    "GREEN": 34,
+    "DARK": 32,
+    "LIGHT": 32,
+    "MAY": 34,
+    "THURSDAY": 32,
+    "APRIL": 32,
+    "YELLOW": 32,
+    "JULY": 34,
+    "HELLO": 32,
+    "AUNTIE": 32,
+    "GOOD AFTERNOON": 34,
+    "YESTERDAY": 32,
+    "WEELCHAIR PERSON": 32,
+    "MOTHER": 32,
+    "UNCLE": 34,
+    "PARENTS": 32,
+    "HARD OF HEARING": 30,
+    "BROWN": 32,
+    "DAUGHTER": 32,
+    "WEDNESDAY": 32,
+    "TUESDAY": 32,
+    "GOOD MORNING": 32,
+    "MAN": 32,
+    "SUNDAY": 32,
+    "FATHER": 32,
+    "DEAF BLIND": 32,
+    "IM FINE": 32,
+    "WRONG": 34,
+    "GOOD EVENING": 34,
+    "GIRL": 32,
+    "ORANGE": 32,
+    "MARRIED": 32,
+    "SON": 32,
+    "DECEMBER": 34,
+    "DEAF": 34,
+    "FEBRUARY": 30,
+    "GRAY": 32,
+    "NOVEMBER": 34,
+    "THANK YOU": 32,
+    "SEPTEMBER": 32,
+    "BLACK": 32,
+    "PINK": 32,
+    "FRIDAY": 32,
+    "BLIND": 32,
+    "GRANDMOTHER": 32,
+    "DON\u2019T UNDERSTAND": 34,
+    "KNOW": 34,
+    "WHITE": 32,
+    "GRANDFATHER": 28,
+    "NICE TO MEET YOU": 34,
+    "AUGUST": 34,
+    "YES": 32,
+    "JANUARY": 32,
+    "WOMAN": 32,
+    "MARCH": 32,
+    "FAST": 34,
+    "MONDAY": 32,
+    "TODAY": 32,
+    "COUSIN": 34,
+    "OCTOBER": 32,
+    "DON\u2019T KNOW": 32,
+    "JUNE": 32,
+    "SLOW": 34,
+    "SEE YOU TOMORROW": 32,
+    "TOMORROW": 34,
+    "BLUE": 32,
+    "I LOVE YOU": 128
+  },
+  "test_class_kept_samples": {
+    "THANK YOU": 4,
+    "UNCLE": 4,
+    "YES": 4,
+    "OCTOBER": 4,
+    "DON\u2019T KNOW": 4,
+    "FEBRUARY": 4,
+    "GRAY": 4,
+    "CORRECT": 5,
+    "GIRL": 4,
+    "SON": 4,
+    "DON\u2019T UNDERSTAND": 4,
+    "WRONG": 4,
+    "WEDNESDAY": 4,
+    "APRIL": 4,
+    "SEPTEMBER": 4,
+    "BOY": 4,
+    "JUNE": 4,
+    "JANUARY": 4,
+    "BROWN": 4,
+    "BLIND": 4,
+    "MAN": 4,
+    "WOMAN": 4,
+    "PINK": 4,
+    "IM FINE": 4,
+    "THURSDAY": 4,
+    "GRANDFATHER": 4,
+    "BLUE": 4,
+    "MARRIED": 4,
+    "GOOD EVENING": 5,
+    "MONDAY": 4,
+    "GOOD MORNING": 4,
+    "AUGUST": 5,
+    "VIOLET": 4,
+    "DARK": 4,
+    "ORANGE": 4,
+    "MOTHER": 4,
+    "TODAY": 4,
+    "GRANDMOTHER": 4,
+    "HARD OF HEARING": 4,
+    "MAY": 4,
+    "DECEMBER": 5,
+    "UNDERSTAND": 4,
+    "MARCH": 4,
+    "HOW ARE YOU": 4,
+    "GREEN": 4,
+    "SUNDAY": 4,
+    "HELLO": 4,
+    "NICE TO MEET YOU": 5,
+    "NOVEMBER": 5,
+    "WHITE": 4,
+    "DAUGHTER": 4,
+    "YESTERDAY": 4,
+    "TUESDAY": 4,
+    "TOMORROW": 4,
+    "RED": 4,
+    "SATURDAY": 4,
+    "DEAF BLIND": 4,
+    "YOURE WELCOME": 4,
+    "AUNTIE": 4,
+    "COUSIN": 4,
+    "BLACK": 4,
+    "DEAF": 4,
+    "JULY": 3,
+    "KNOW": 4,
+    "FRIDAY": 4,
+    "PARENTS": 4,
+    "FAST": 4,
+    "WEELCHAIR PERSON": 4,
+    "SLOW": 4,
+    "NO": 4,
+    "LIGHT": 4,
+    "YELLOW": 4,
+    "FATHER": 4,
+    "SEE YOU TOMORROW": 4,
+    "GOOD AFTERNOON": 4,
+    "I LOVE YOU": 16
+  },
+  "skipped_train_no_hand": 2,
+  "skipped_test_no_hand": 1,
+  "accuracy": 0.881619937694704,
+  "classification_report": {
+    "APRIL": {
+      "precision": 0.5,
+      "recall": 0.5,
+      "f1-score": 0.5,
+      "support": 4.0
+    },
+    "AUGUST": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 5.0
+    },
+    "AUNTIE": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "BLACK": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "BLIND": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "BLUE": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "BOY": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1-score": 0.8571428571428571,
+      "support": 4.0
+    },
+    "BROWN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "CORRECT": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 5.0
+    },
+    "COUSIN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "DARK": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "DAUGHTER": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "DEAF": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "DEAF BLIND": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "DECEMBER": {
+      "precision": 0.75,
+      "recall": 0.6,
+      "f1-score": 0.6666666666666666,
+      "support": 5.0
+    },
+    "DON\u2019T KNOW": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "DON\u2019T UNDERSTAND": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "FAST": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "FATHER": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "FEBRUARY": {
+      "precision": 1.0,
+      "recall": 0.25,
+      "f1-score": 0.4,
+      "support": 4.0
+    },
+    "FRIDAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "GIRL": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "GOOD AFTERNOON": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "GOOD EVENING": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 5.0
+    },
+    "GOOD MORNING": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "GRANDFATHER": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "GRANDMOTHER": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "GRAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "GREEN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "HARD OF HEARING": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1-score": 0.8571428571428571,
+      "support": 4.0
+    },
+    "HELLO": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1-score": 0.8571428571428571,
+      "support": 4.0
+    },
+    "HOW ARE YOU": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "I LOVE YOU": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 16.0
+    },
+    "IM FINE": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1-score": 0.8571428571428571,
+      "support": 4.0
+    },
+    "JANUARY": {
+      "precision": 0.2857142857142857,
+      "recall": 0.5,
+      "f1-score": 0.36363636363636365,
+      "support": 4.0
+    },
+    "JULY": {
+      "precision": 0.5,
+      "recall": 0.6666666666666666,
+      "f1-score": 0.5714285714285714,
+      "support": 3.0
+    },
+    "JUNE": {
+      "precision": 0.5,
+      "recall": 0.5,
+      "f1-score": 0.5,
+      "support": 4.0
+    },
+    "KNOW": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "LIGHT": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "MAN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "MARCH": {
+      "precision": 1.0,
+      "recall": 0.25,
+      "f1-score": 0.4,
+      "support": 4.0
+    },
+    "MARRIED": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "MAY": {
+      "precision": 0.5,
+      "recall": 0.5,
+      "f1-score": 0.5,
+      "support": 4.0
+    },
+    "MONDAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "MOTHER": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "NICE TO MEET YOU": {
+      "precision": 0.8333333333333334,
+      "recall": 1.0,
+      "f1-score": 0.9090909090909091,
+      "support": 5.0
+    },
+    "NO": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "NOVEMBER": {
+      "precision": 0.25,
+      "recall": 0.4,
+      "f1-score": 0.3076923076923077,
+      "support": 5.0
+    },
+    "OCTOBER": {
+      "precision": 0.75,
+      "recall": 0.75,
+      "f1-score": 0.75,
+      "support": 4.0
+    },
+    "ORANGE": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "PARENTS": {
+      "precision": 0.6,
+      "recall": 0.75,
+      "f1-score": 0.6666666666666666,
+      "support": 4.0
+    },
+    "PINK": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "RED": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "SATURDAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "SEE YOU TOMORROW": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1-score": 0.8571428571428571,
+      "support": 4.0
+    },
+    "SEPTEMBER": {
+      "precision": 0.5,
+      "recall": 0.25,
+      "f1-score": 0.3333333333333333,
+      "support": 4.0
+    },
+    "SLOW": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "SON": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "SUNDAY": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "THANK YOU": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "THURSDAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "TODAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "TOMORROW": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "TUESDAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "UNCLE": {
+      "precision": 0.75,
+      "recall": 0.75,
+      "f1-score": 0.75,
+      "support": 4.0
+    },
+    "UNDERSTAND": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "VIOLET": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1-score": 0.8571428571428571,
+      "support": 4.0
+    },
+    "WEDNESDAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "WEELCHAIR PERSON": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "WHITE": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "WOMAN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "WRONG": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "YELLOW": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "YES": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "f1-score": 0.8888888888888888,
+      "support": 4.0
+    },
+    "YESTERDAY": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 4.0
+    },
+    "YOURE WELCOME": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1-score": 0.8571428571428571,
+      "support": 4.0
+    },
+    "accuracy": 0.881619937694704,
+    "macro avg": {
+      "precision": 0.893671679197995,
+      "recall": 0.8804824561403507,
+      "f1-score": 0.876559405506774,
+      "support": 321.0
+    },
+    "weighted avg": {
+      "precision": 0.8941106660732828,
+      "recall": 0.881619937694704,
+      "f1-score": 0.8778382572775097,
+      "support": 321.0
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: FastAPI",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env"
+    },
+    {
+      "name": "Frontend: Next.js",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm.cmd run serve",
+      "cwd": "${workspaceFolder}/frontend"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Run Full Stack",
+      "configurations": [
+        "Backend: FastAPI",
+        "Frontend: Next.js"
+      ],
+      "stopAll": true
+    }
+  ]
+}
