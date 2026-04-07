@@ -1,3 +1,4 @@
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
@@ -85,7 +86,12 @@ SEED_MODULES = [
             {
                 "id": "m3-q1",
                 "question": "What is the best goal when reviewing daily interaction signs?",
-                "choices": ["Consistency and clear meaning", "Fast random signing", "Minimal hand movement", "Skipping practice"],
+                "choices": [
+                    "Consistency and clear meaning",
+                    "Fast random signing",
+                    "Minimal hand movement",
+                    "Skipping practice",
+                ],
                 "answer": "Consistency and clear meaning",
             }
         ],
@@ -112,9 +118,36 @@ def seed_modules(db: Session) -> None:
 def seed_demo_user(db: Session) -> None:
     existing_user = db.query(User).filter(User.username == "student_demo").first()
     if existing_user:
+        if not existing_user.role:
+            existing_user.role = "student"
+            db.add(existing_user)
+            db.commit()
         return
-    db.add(User(username="student_demo", password_hash=hash_password("student123")))
+    db.add(User(username="student_demo", password_hash=hash_password("student123"), role="student"))
     db.commit()
+
+
+def seed_teacher_user(db: Session) -> None:
+    existing_user = db.query(User).filter(User.username == "teacher_demo").first()
+    if existing_user:
+        if existing_user.role != "teacher":
+            existing_user.role = "teacher"
+            db.add(existing_user)
+            db.commit()
+        return
+    db.add(User(username="teacher_demo", password_hash=hash_password("teacher123"), role="teacher"))
+    db.commit()
+
+
+def ensure_user_role_column() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    with engine.begin() as connection:
+        if "role" not in columns:
+            connection.execute(
+                text("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'")
+            )
+        connection.execute(text("UPDATE users SET role = 'student' WHERE role IS NULL OR role = ''"))
 
 
 def init_db() -> None:
@@ -122,6 +155,8 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    ensure_user_role_column()
     with SessionLocal() as db:
         seed_modules(db)
         seed_demo_user(db)
+        seed_teacher_user(db)

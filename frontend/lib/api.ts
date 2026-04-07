@@ -43,6 +43,54 @@ export type ModuleItem = {
   assessment_score: number | null;
 };
 
+export type TeacherModuleRosterSummary = {
+  module_id: number;
+  module_slug: string;
+  module_title: string;
+  total_students: number;
+  in_progress_students: number;
+  completed_students: number;
+  completion_rate_percent: number;
+  average_progress_percent: number;
+  average_assessment_score: number | null;
+};
+
+export type TeacherStudentModuleProgress = {
+  user_id: number;
+  username: string;
+  status: string;
+  progress_percent: number;
+  completed_lessons_count: number;
+  assessment_score: number | null;
+  updated_at: string;
+};
+
+export type TeacherStudentProgressList = {
+  module_id: number;
+  module_slug: string;
+  module_title: string;
+  students: TeacherStudentModuleProgress[];
+};
+
+export type TeacherAssessmentDistributionBucket = {
+  label: string;
+  count: number;
+};
+
+export type TeacherAssessmentMetrics = {
+  module_id: number;
+  module_slug: string;
+  module_title: string;
+  total_students_with_scores: number;
+  average_score: number | null;
+  min_score: number | null;
+  max_score: number | null;
+  passing_score_threshold: number;
+  passing_count: number;
+  passing_rate_percent: number;
+  distribution: TeacherAssessmentDistributionBucket[];
+};
+
 export type LabPrediction = {
   prediction: string;
   confidence: number;
@@ -165,11 +213,16 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-    cache: "no-store"
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      cache: "no-store"
+    });
+  } catch {
+    throw new Error(`Unable to reach backend API at ${API_BASE}.`);
+  }
 
   if (!response.ok) {
     const fallback = "Request failed";
@@ -203,6 +256,30 @@ export function getProgressSummary(token?: string): Promise<ProgressSummary> {
 
 export function getModules(token?: string): Promise<ModuleItem[]> {
   return request<ModuleItem[]>("/modules", undefined, token);
+}
+
+export function getTeacherModuleRosterSummary(
+  token?: string
+): Promise<TeacherModuleRosterSummary[]> {
+  return request<TeacherModuleRosterSummary[]>("/teacher/modules/roster-summary", undefined, token);
+}
+
+export function getTeacherModuleStudentProgress(
+  moduleId: number,
+  token?: string
+): Promise<TeacherStudentProgressList> {
+  return request<TeacherStudentProgressList>(`/teacher/modules/${moduleId}/students`, undefined, token);
+}
+
+export function getTeacherModuleAssessmentMetrics(
+  moduleId: number,
+  token?: string
+): Promise<TeacherAssessmentMetrics> {
+  return request<TeacherAssessmentMetrics>(
+    `/teacher/modules/${moduleId}/assessment-metrics`,
+    undefined,
+    token
+  );
 }
 
 export function updateModuleProgress(

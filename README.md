@@ -35,6 +35,9 @@ Available launch profiles:
 - User: `fsl_app`
 - Password: `admin123`
 
-## Student Mode
-- The app is configured for student-side flow without login/logout in the UI.
-- Backend uses a default `student_demo` account when no auth token is sent.
+## Demo Access
+- Student-facing pages still work in guest mode without login.
+- The sidebar now includes demo account switching for:
+  - `student_demo` / `student123`
+  - `teacher_demo` / `teacher123`
+- Backend still falls back to `student_demo` when no auth token is sent to student endpoints.

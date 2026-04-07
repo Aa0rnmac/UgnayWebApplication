@@ -3,18 +3,39 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", short: "D" },
-  { href: "/modules", label: "Modules", short: "M" },
-  { href: "/lab", label: "Free Signing Gesture", short: "F" }
-] as const;
+import { AuthSwitcher } from "@/components/auth-switcher";
+import { useAuth } from "@/components/auth-context";
+
+type NavItem = {
+  href: string;
+  label: string;
+  short: string;
+};
+
+const STUDENT_NAV_ITEMS: NavItem[] = [
+  { href: "/student", label: "Dashboard", short: "D" },
+  { href: "/student/modules", label: "Modules", short: "M" },
+  { href: "/student/lab", label: "Signing Lab", short: "L" },
+];
+
+const TEACHER_NAV_ITEMS: NavItem[] = [
+  { href: "/teacher", label: "Class Overview", short: "C" },
+  { href: "/teacher/modules", label: "Module Management", short: "M" },
+  { href: "/teacher/progress", label: "Learner Progress", short: "P" },
+  { href: "/teacher/classes", label: "Class Roster", short: "R" },
+];
 
 export function AppNav() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { role, username, loading } = useAuth();
+
+  const navItems = useMemo(() => {
+    return role === "teacher" ? TEACHER_NAV_ITEMS : STUDENT_NAV_ITEMS;
+  }, [role]);
 
   return (
     <>
@@ -64,7 +85,9 @@ export function AppNav() {
             {!collapsed ? (
               <div className="min-w-0 md:block">
                 <h1 className="truncate text-sm font-semibold tracking-wide text-brandWhite">FSL Learning Hub</h1>
-                <p className="text-[11px] text-muted">Hand & Heart</p>
+                <p className="text-[11px] text-muted">
+                  {loading ? "Resolving role..." : `${role === "teacher" ? "Teacher" : "Student"} - ${username}`}
+                </p>
               </div>
             ) : null}
 
@@ -86,7 +109,7 @@ export function AppNav() {
           </div>
 
           <nav className="flex-1 space-y-2 p-3">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link
@@ -107,6 +130,10 @@ export function AppNav() {
               );
             })}
           </nav>
+
+          <div className="border-t border-brandWhite/10 p-3">
+            <AuthSwitcher collapsed={collapsed && !mobileOpen} />
+          </div>
         </div>
       </aside>
     </>

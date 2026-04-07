@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_student_user
 from app.db.session import get_db
 from app.models.module import Module
 from app.models.progress import UserModuleProgress
@@ -74,14 +74,16 @@ def _get_module_and_progress(
 
 @router.get("", response_model=list[ModuleOut])
 def list_modules(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_student_user)
 ) -> list[ModuleOut]:
     return _build_modules_for_user(db, current_user.id)
 
 
 @router.get("/{module_id}", response_model=ModuleOut)
 def get_module(
-    module_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_student_user),
 ) -> ModuleOut:
     module, progress = _get_module_and_progress(db, current_user.id, module_id)
     return _module_payload(module, progress)
@@ -92,7 +94,7 @@ def update_module_progress(
     module_id: int,
     payload: ProgressUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_student_user),
 ) -> ModuleOut:
     module, progress = _get_module_and_progress(db, current_user.id, module_id)
 

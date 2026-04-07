@@ -3,7 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_student_user
 from app.core.config import settings
 from app.models.user import User
 from app.schemas.lab import AlphabetModelStatusResponse
@@ -93,7 +93,7 @@ def _pick_best_numbers_prediction(predictions: list[LabPredictionResponse]) -> L
 
 @router.post("/predict", response_model=LabPredictionResponse)
 def predict_sign(
-    payload: LabPredictionRequest, current_user: User = Depends(get_current_user)
+    payload: LabPredictionRequest, current_user: User = Depends(get_current_student_user)
 ) -> LabPredictionResponse:
     labels = ALPHABET_LABELS_24
     seed_text = f"{current_user.id}:{payload.frame_count}:{payload.metadata or {}}"
@@ -114,7 +114,7 @@ def predict_sign(
 async def predict_sign_from_image(
     image: UploadFile = File(...),
     mode: Literal["alphabet", "numbers", "words"] = Form(default="alphabet"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_student_user),
 ) -> LabPredictionResponse:
     del current_user
     contents = await image.read()
@@ -157,7 +157,7 @@ async def predict_sign_from_image(
 async def predict_words_sequence(
     frames: list[UploadFile] = File(...),
     word_group: str = Form(default="greeting"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_student_user),
 ) -> LabPredictionResponse:
     del current_user
     if not frames:
@@ -208,7 +208,7 @@ async def predict_words_sequence(
 async def predict_numbers_sequence(
     frames: list[UploadFile] = File(...),
     number_group: str = Form(default="0-10"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_student_user),
 ) -> LabPredictionResponse:
     del current_user
     if not frames:

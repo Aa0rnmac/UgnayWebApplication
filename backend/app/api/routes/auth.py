@@ -30,7 +30,11 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> AuthResponse
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists.")
 
-    user = User(username=payload.username, password_hash=hash_password(payload.password))
+    user = User(
+        username=payload.username,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -52,4 +56,3 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthResponse:
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)) -> UserOut:
     return UserOut.model_validate(current_user)
-
