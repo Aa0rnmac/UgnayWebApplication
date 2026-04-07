@@ -3,12 +3,14 @@
 @tailwind utilities;
 
 :root {
-  --bg-start: #050607;
-  --bg-end: #10161d;
-  --brand-red: rgba(244, 19, 40, 0.2);
-  --brand-yellow: rgba(236, 229, 30, 0.2);
-  --brand-green: rgba(73, 182, 73, 0.2);
-  --brand-blue: rgba(70, 85, 166, 0.22);
+  --bg-start: #f5f4f1;
+  --bg-end: #efeeeb;
+  --brand-red: rgba(204, 40, 40, 0.08);
+  --brand-yellow: rgba(212, 168, 0, 0.1);
+  --brand-green: rgba(42, 140, 63, 0.08);
+  --brand-blue: rgba(46, 68, 168, 0.08);
+  --surface-tint: #ffffff;
+  --surface-border: #e2e2ea;
 }
 
 * {
@@ -20,17 +22,163 @@ body {
   margin: 0;
   padding: 0;
   font-family: var(--font-display), "Segoe UI", sans-serif;
+  color: #1c1c2e;
 }
 
 .bg-grid {
   background:
-    radial-gradient(circle at 10% 12%, var(--brand-yellow), transparent 35%),
-    radial-gradient(circle at 90% 8%, var(--brand-red), transparent 35%),
-    radial-gradient(circle at 82% 85%, var(--brand-green), transparent 30%),
-    radial-gradient(circle at 8% 88%, var(--brand-blue), transparent 30%),
-    linear-gradient(135deg, var(--bg-start), var(--bg-end));
+    radial-gradient(circle at 10% 12%, var(--brand-yellow), transparent 32%),
+    radial-gradient(circle at 90% 8%, var(--brand-red), transparent 32%),
+    radial-gradient(circle at 82% 85%, var(--brand-green), transparent 34%),
+    radial-gradient(circle at 8% 88%, var(--brand-blue), transparent 34%),
+    linear-gradient(130deg, var(--bg-start), var(--bg-end));
+  background-size: 140% 140%, 140% 140%, 140% 140%, 140% 140%, 100% 100%;
+  background-position:
+    10% 12%,
+    90% 8%,
+    82% 85%,
+    8% 88%,
+    0% 0%;
+  animation: bg-float 26s ease-in-out infinite alternate;
 }
 
 .panel {
-  @apply rounded-2xl border border-brandWhite/20 bg-panel/85 p-5 shadow-soft backdrop-blur-sm;
+  @apply rounded-2xl border p-5 shadow-soft backdrop-blur-md;
+  border-color: var(--surface-border);
+  background: var(--surface-tint);
+}
+
+.panel-lively {
+  @apply transition duration-300;
+}
+
+.panel-lively:hover {
+  transform: translateY(-2px);
+  border-color: rgba(46, 68, 168, 0.28);
+  box-shadow: 0 14px 30px rgba(28, 28, 46, 0.11);
+}
+
+.title-gradient {
+  background: linear-gradient(90deg, #2e44a8 0%, #1c1c2e 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.label-accent {
+  color: #6b6b7a;
+}
+
+/* System-wide text tint: keeps readability while adding color identity. */
+.text-muted {
+  color: #6b6b7a;
+}
+
+.text-slate-900 {
+  color: rgb(28 28 46 / var(--tw-text-opacity, 1));
+}
+
+.text-slate-800 {
+  color: rgb(49 49 70 / var(--tw-text-opacity, 1));
+}
+
+.text-slate-700 {
+  color: rgb(68 68 92 / var(--tw-text-opacity, 1));
+}
+
+.text-slate-600 {
+  color: rgb(92 92 115 / var(--tw-text-opacity, 1));
+}
+
+.text-slate-500 {
+  color: rgb(107 107 122 / var(--tw-text-opacity, 1));
+}
+
+.module-card-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 28px;
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 255, 255, 0.02)
+  );
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.module-card-live:hover::after {
+  opacity: 1;
+}
+
+.card-hand {
+  animation: hand-float 2.8s ease-in-out infinite;
+}
+
+.page-transition-enter {
+  animation: page-enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+@keyframes bg-float {
+  0% {
+    background-position:
+      10% 12%,
+      90% 8%,
+      82% 85%,
+      8% 88%,
+      0% 0%,
+      0% 0%;
+  }
+  100% {
+    background-position:
+      4% 6%,
+      96% 12%,
+      76% 92%,
+      15% 80%,
+      100% 0%,
+      0% 100%;
+  }
+}
+
+@keyframes hand-float {
+  0% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-1.5px) scale(1.01);
+  }
+  100% {
+    transform: translateY(0px) scale(1);
+  }
+}
+
+@keyframes page-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.995);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-grid,
+  .card-hand {
+    animation: none;
+  }
+
+  .panel-lively,
+  .module-card-live {
+    transition: none;
+  }
+
+  .page-transition-enter {
+    animation: none;
+  }
 }

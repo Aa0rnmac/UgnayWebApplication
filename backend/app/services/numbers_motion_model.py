@@ -9,6 +9,7 @@ import numpy as np
 
 from app.core.config import settings
 from app.services.word_motion_features import (
+    LANDMARK_DIM,
     extract_sequence_from_frame_bytes,
     sequence_to_feature_vector,
 )
@@ -26,6 +27,9 @@ class NumbersMotionModelService:
         self._loaded = False
         self._model: Any | None = None
         self._classes: list[str] = []
+        self._feature_dim: int | None = None
+        self._sequence_frames = settings.numbers_motion_sequence_frames
+        self._min_sequence_frames = settings.numbers_motion_min_sequence_frames
         self._model_path = self._resolve_model_path(settings.numbers_motion_model_path)
 
     @staticmethod
@@ -35,6 +39,31 @@ class NumbersMotionModelService:
             return path
         backend_root = Path(__file__).resolve().parents[2]
         return (backend_root / path).resolve()
+
+    @staticmethod
+    def _infer_sequence_frames(feature_dim: int | None) -> int | None:
+        if not feature_dim or feature_dim <= 0:
+            return None
+        if feature_dim % LANDMARK_DIM != 0:
+            return None
+
+        # sequence_to_feature_vector = concat(sequence, deltas)
+        # dims = (frames + (frames - 1)) * LANDMARK_DIM = (2*frames - 1) * LANDMARK_DIM
+        units = feature_dim // LANDMARK_DIM
+        if units < 1 or units % 2 == 0:
+            return None
+        return (units + 1) // 2
+
+    @staticmethod
+    def _positive_int(value: object) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if isinstance(value, float):
+            parsed = int(value)
+            return parsed if parsed > 0 else None
+        return None
 
     def _load_if_needed(self) -> None:
         if self._loaded:
@@ -52,6 +81,22 @@ class NumbersMotionModelService:
         self._model = model
         self._classes = [str(item) for item in classes]
 
+        self._feature_dim = self._positive_int(artifact.get("feature_dim"))
+        if self._feature_dim is None:
+            self._feature_dim = self._positive_int(getattr(model, "n_features_in_", None))
+
+        sequence_frames = self._positive_int(artifact.get("sequence_frames"))
+        if sequence_frames is None:
+            sequence_frames = self._infer_sequence_frames(self._feature_dim)
+        if sequence_frames is not None:
+            self._sequence_frames = sequence_frames
+
+        min_sequence_frames = self._positive_int(artifact.get("min_valid_frames"))
+        if min_sequence_frames is not None:
+            self._min_sequence_frames = min_sequence_frames
+        if self._min_sequence_frames > self._sequence_frames:
+            self._min_sequence_frames = self._sequence_frames
+
     def status(self) -> dict[str, object]:
         self._load_if_needed()
         return {
@@ -60,8 +105,8 @@ class NumbersMotionModelService:
             "classes": self._classes,
             "confidence_threshold": settings.numbers_motion_confidence_threshold,
             "min_top2_margin": settings.numbers_motion_min_top2_margin,
-            "sequence_frames": settings.numbers_motion_sequence_frames,
-            "min_sequence_frames": settings.numbers_motion_min_sequence_frames,
+            "sequence_frames": self._sequence_frames,
+            "min_sequence_frames": self._min_sequence_frames,
             "ready": self._model is not None and bool(self._classes),
         }
 
@@ -71,21 +116,52 @@ class NumbersMotionModelService:
         self._load_if_needed()
         if self._model is None:
             raise RuntimeError("Numbers motion model is not available. Train model first.")
-        if len(frame_bytes) < settings.numbers_motion_min_sequence_frames:
+        if len(frame_bytes) < self._min_sequence_frames:
             raise ValueError(
-                f"Need at least {settings.numbers_motion_min_sequence_frames} frames for numbers mode."
+                f"Need at least {self._min_sequence_frames} frames for numbers mode."
             )
 
         sequence = extract_sequence_from_frame_bytes(
             frame_bytes,
-            target_frames=settings.numbers_motion_sequence_frames,
-            min_valid_frames=settings.numbers_motion_min_sequence_frames,
+            target_frames=self._sequence_frames,
+            min_valid_frames=self._min_sequence_frames,
         )
         if sequence is None:
             raise ValueError("No clear hand sequence detected for numbers gesture.")
 
         vector = sequence_to_feature_vector(sequence)
-        probs = self._model.predict_proba(vector.reshape(1, -1))[0]
+        expected_features = self._positive_int(getattr(self._model, "n_features_in_", None))
+        if expected_features is None:
+            expected_features = self._feature_dim
+
+        if expected_features is not None and vector.shape[0] != expected_features:
+            inferred_frames = self._infer_sequence_frames(expected_features)
+            if inferred_frames is not None and inferred_frames != self._sequence_frames:
+                fallback_sequence = extract_sequence_from_frame_bytes(
+                    frame_bytes,
+                    target_frames=inferred_frames,
+                    min_valid_frames=min(self._min_sequence_frames, inferred_frames),
+                )
+                if fallback_sequence is not None:
+                    fallback_vector = sequence_to_feature_vector(fallback_sequence)
+                    if fallback_vector.shape[0] == expected_features:
+                        self._sequence_frames = inferred_frames
+                        vector = fallback_vector
+
+        if expected_features is not None and vector.shape[0] != expected_features:
+            raise ValueError(
+                "Numbers motion model feature mismatch. "
+                f"Model expects {expected_features} features, but extracted {vector.shape[0]}. "
+                "Retrain scripts/train_numbers_motion_model.py or use a compatible model artifact."
+            )
+
+        try:
+            probs = self._model.predict_proba(vector.reshape(1, -1))[0]
+        except ValueError as exc:
+            raise ValueError(
+                "Numbers motion prediction failed due to model/input feature mismatch. "
+                "Retrain scripts/train_numbers_motion_model.py with current extraction settings."
+            ) from exc
         classes = [str(item) for item in self._model.classes_]
 
         candidate_indices = list(range(len(classes)))

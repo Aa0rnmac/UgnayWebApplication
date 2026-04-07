@@ -1,10 +1,21 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class LessonReferenceOut(BaseModel):
+    id: str
+    title: str
+    image_url: str
+    source_url: str
+    credit: str | None = None
+    license: str | None = None
+    letters: list[str] = Field(default_factory=list)
 
 
 class LessonOut(BaseModel):
     id: str
     title: str
     content: str
+    references: list[LessonReferenceOut] = Field(default_factory=list)
 
 
 class AssessmentOut(BaseModel):
@@ -28,4 +39,3 @@ class ModuleOut(BaseModel):
     status: str
     progress_percent: int
     assessment_score: float | None = None
-

@@ -1,44 +1,86 @@
 "use client";
 
 import Link from "next/link";
+import { FormEvent, useState } from "react";
 
-export default function DashboardPage() {
+import { login } from "@/lib/api";
+
+export default function LoginPage() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await login(username.trim(), password);
+      window.localStorage.setItem("auth_token", response.token);
+      window.localStorage.setItem("auth_username", response.user.username);
+      window.location.href = "/dashboard";
+    } catch (loginError) {
+      const message = loginError instanceof Error ? loginError.message : "Login failed.";
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <section className="space-y-6">
-      <div className="panel">
-        <h2 className="text-2xl font-semibold">Dashboard</h2>
+    <section className="space-y-4">
+      <div className="panel panel-lively">
+        <h2 className="text-3xl font-bold title-gradient">Student Login</h2>
         <p className="mt-2 text-sm text-muted">
-          Welcome, student. Open any module anytime and use this hub as your FSL reviewer.
+          Login using the initial credentials sent by your teacher after payment reference
+          validation.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="panel">
-          <p className="text-xs uppercase tracking-wider text-muted">Module 1</p>
-          <p className="mt-2 text-2xl font-bold text-accent">FSL Alphabets</p>
-        </div>
-        <div className="panel">
-          <p className="text-xs uppercase tracking-wider text-muted">Module 2</p>
-          <p className="mt-2 text-2xl font-bold text-accentWarm">Numbers</p>
-        </div>
-        <div className="panel">
-          <p className="text-xs uppercase tracking-wider text-muted">Module 3</p>
-          <p className="mt-2 text-2xl font-bold text-emerald-300">Common Words</p>
-        </div>
-      </div>
+      <form className="panel panel-lively space-y-4" onSubmit={onSubmit}>
+        <label className="block text-sm font-semibold text-slate-800">
+          Username
+          <input
+            className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+            onChange={(event) => setUsername(event.target.value)}
+            required
+            type="text"
+            value={username}
+          />
+        </label>
 
-      <div className="panel">
-        <p className="text-xs uppercase tracking-wider text-muted">Quick Access</p>
-        <div className="mt-3 flex gap-2">
-          <Link className="rounded bg-accent px-3 py-2 text-xs font-semibold text-white" href="/modules">
-            Open Modules
-          </Link>
-          <Link className="rounded bg-accentWarm px-3 py-2 text-xs font-semibold text-black" href="/lab">
-            Open Lab
+        <label className="block text-sm font-semibold text-slate-800">
+          Password
+          <input
+            className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            type="password"
+            value={password}
+          />
+        </label>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={submitting}
+            type="submit"
+          >
+            {submitting ? "Logging in..." : "Login"}
+          </button>
+
+          <Link
+            className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+            href="/register"
+          >
+            Open Registration
           </Link>
         </div>
-      </div>
+
+        {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
+      </form>
     </section>
   );
 }
-

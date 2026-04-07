@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     session_hours: int = 24
+    teacher_validation_key: str = "teacher123"
     alphabet_model_path: str = "artifacts/alphabet_model.joblib"
     alphabet_confidence_threshold: float = 0.45
     alphabet_min_top2_margin: float = 0.08

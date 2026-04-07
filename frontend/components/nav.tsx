@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", short: "D" },
+  { href: "/dashboard", label: "Dashboard", short: "D" },
   { href: "/modules", label: "Modules", short: "M" },
   { href: "/lab", label: "Free Signing Gesture", short: "F" }
 ] as const;
@@ -18,9 +18,9 @@ export function AppNav() {
 
   return (
     <>
-      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-brandWhite/20 bg-panel/95 px-4 py-3 md:hidden">
+      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-brandBorder bg-white/95 px-4 py-3 md:hidden">
         <button
-          className="rounded border border-brandWhite/30 px-3 py-1 text-xs font-semibold text-brandWhite"
+          className="rounded-lg border border-brandBlue/25 bg-white px-3 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:-translate-y-0.5 hover:bg-brandBlueLight"
           onClick={() => setMobileOpen(true)}
           type="button"
         >
@@ -29,47 +29,47 @@ export function AppNav() {
         <div className="flex items-center gap-2">
           <Image
             alt="FSL Learning Hub logo"
-            className="h-8 w-8 rounded-full border border-brandWhite/30 object-cover"
+            className="h-8 w-8 rounded-full border border-brandBorder object-cover"
             height={32}
             src="/brand/logo.png"
             width={32}
           />
-          <span className="text-sm font-semibold text-brandWhite">FSL Learning Hub</span>
+          <span className="text-sm font-semibold text-slate-900">UGNAY FSL Learning Hub</span>
         </div>
       </div>
 
       {mobileOpen ? (
         <button
           aria-label="Close sidebar overlay"
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          className="fixed inset-0 z-30 bg-brandNavy/30 backdrop-blur-[1px] md:hidden"
           onClick={() => setMobileOpen(false)}
           type="button"
         />
       ) : null}
 
       <aside
-        className={`fixed left-0 top-0 z-40 h-screen -translate-x-full transition-all duration-300 md:sticky md:translate-x-0 ${
+        className={`fixed left-0 top-0 z-40 h-screen -translate-x-full transition-all duration-300 md:sticky md:top-0 md:translate-x-0 ${
           collapsed ? "md:w-20" : "md:w-72"
         } ${mobileOpen ? "translate-x-0 w-72" : "w-72"}`}
       >
-        <div className="flex h-full flex-col border-r border-brandWhite/20 bg-panel/95 backdrop-blur">
-          <div className="flex items-center gap-3 border-b border-brandWhite/20 p-4">
+        <div className="flex h-full flex-col border-r border-brandBorder bg-gradient-to-b from-white via-brandMutedSurface/55 to-white backdrop-blur">
+          <div className="flex items-center gap-3 border-b border-brandBorder p-4">
             <Image
               alt="FSL Learning Hub logo"
-              className="h-10 w-10 rounded-full border border-brandWhite/30 object-cover"
+              className="h-10 w-10 rounded-full border border-brandBorder object-cover shadow-sm"
               height={40}
               src="/brand/logo.png"
               width={40}
             />
             {!collapsed ? (
               <div className="min-w-0 md:block">
-                <h1 className="truncate text-sm font-semibold tracking-wide text-brandWhite">FSL Learning Hub</h1>
+                <h1 className="truncate text-sm font-semibold tracking-wide text-slate-900">UGNAY FSL Learning Hub</h1>
                 <p className="text-[11px] text-muted">Hand & Heart</p>
               </div>
             ) : null}
 
             <button
-              className="ml-auto hidden rounded border border-brandWhite/30 px-2 py-1 text-xs font-semibold text-brandWhite md:block"
+              className="ml-auto hidden rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:-translate-y-0.5 hover:bg-brandBlueLight md:block"
               onClick={() => setCollapsed((value) => !value)}
               type="button"
             >
@@ -77,7 +77,7 @@ export function AppNav() {
             </button>
 
             <button
-              className="ml-auto rounded border border-brandWhite/30 px-2 py-1 text-xs font-semibold text-brandWhite md:hidden"
+              className="ml-auto rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:bg-brandBlueLight md:hidden"
               onClick={() => setMobileOpen(false)}
               type="button"
             >
@@ -91,15 +91,16 @@ export function AppNav() {
               return (
                 <Link
                   key={item.href}
-                  className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                  className={`group relative flex items-center gap-3 overflow-hidden rounded-xl border px-3 py-2 text-sm font-semibold transition ${
                     active
-                      ? "border-brandYellow bg-brandYellow/15 text-brandYellow"
-                      : "border-brandWhite/15 text-brandWhite hover:border-brandWhite/40 hover:bg-black/20"
+                      ? "border-brandBlue bg-brandBlueLight text-brandBlue shadow-soft"
+                      : "border-brandBorder text-slate-700 hover:-translate-y-0.5 hover:border-brandBlue/30 hover:bg-brandBlueLight/50"
                   }`}
                   href={item.href}
                   onClick={() => setMobileOpen(false)}
                 >
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-current text-xs">
+                  {active ? <span className="absolute inset-y-0 left-0 w-1 rounded-r-full bg-brandBlue" /> : null}
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-current text-xs transition group-hover:scale-105">
                     {item.short}
                   </span>
                   {!collapsed ? <span className="truncate">{item.label}</span> : null}
@@ -107,6 +108,13 @@ export function AppNav() {
               );
             })}
           </nav>
+
+          {!collapsed ? (
+            <div className="mx-3 mb-3 rounded-xl border border-brandYellow/35 bg-brandYellowLight p-3">
+              <p className="text-[11px] uppercase tracking-wide text-[#9a7800]">Daily Goal</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800">Practice at least one module and one gesture set.</p>
+            </div>
+          ) : null}
         </div>
       </aside>
     </>

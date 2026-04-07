@@ -50,11 +50,29 @@ def video_extensions() -> set[str]:
     return {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 
-def count_existing_samples(label_dir: Path) -> int:
+def list_existing_samples(label_dir: Path) -> list[Path]:
     if not label_dir.exists() or not label_dir.is_dir():
-        return 0
+        return []
     exts = video_extensions()
-    return len([item for item in label_dir.iterdir() if item.is_file() and item.suffix.lower() in exts])
+    return sorted(
+        [
+            item
+            for item in label_dir.iterdir()
+            if item.is_file() and item.suffix.lower() in exts
+        ]
+    )
+
+
+def count_existing_samples(label_dir: Path) -> int:
+    return len(list_existing_samples(label_dir))
+
+
+def clear_existing_samples(label_dir: Path) -> int:
+    removed = 0
+    for clip_path in list_existing_samples(label_dir):
+        clip_path.unlink(missing_ok=True)
+        removed += 1
+    return removed
 
 
 def save_video(sample_frames: list, path: Path, fps: int) -> None:
@@ -142,6 +160,7 @@ def draw_overlay(
         f"Auto advance: {'ON' if auto_advance else 'OFF'}",
         "SPACE=capture  N=next  P=prev",
         "S=jump to next incomplete  A=toggle auto",
+        "R=replace clips for current label",
         "Q=quit",
     ]
     if capturing:
@@ -176,6 +195,11 @@ def main() -> None:
     parser.add_argument("--height", type=int, default=540)
     parser.add_argument("--output-root", type=str, default=None)
     parser.add_argument("--no-auto-advance", action="store_true")
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Delete existing clips for all labels in this batch before collecting.",
+    )
     args = parser.parse_args()
 
     start, end = parse_batch(args.batch)
@@ -195,6 +219,10 @@ def main() -> None:
     for number in numbers:
         label_dir = batch_dir / str(number)
         label_dir.mkdir(parents=True, exist_ok=True)
+        if args.replace_existing:
+            removed = clear_existing_samples(label_dir)
+            if removed > 0:
+                print(f"Removed {removed} existing clips for label {number}.")
         plans.append(LabelPlan(value=number, output_dir=label_dir))
         counts[number] = count_existing_samples(label_dir)
 
@@ -265,6 +293,10 @@ def main() -> None:
                 plan_index = find_next_incomplete(plans, counts, target_per_label, plan_index + 1)
             elif key == ord("a") and not capturing:
                 auto_advance = not auto_advance
+            elif key == ord("r") and not capturing:
+                removed = clear_existing_samples(current_dir)
+                counts[current_number] = 0
+                print(f"Replaced label {current_number}: removed {removed} old clips.")
             elif (
                 key == ord(" ")
                 and not capturing
