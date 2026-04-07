@@ -118,6 +118,10 @@ export type LabPrediction = {
   top_candidates: string[];
 };
 
+export type OpenPalmDetection = {
+  open_palm: boolean;
+};
+
 export type RecognitionMode = "alphabet" | "numbers" | "words";
 export type NumbersCategory =
   | "0-10"
@@ -383,6 +387,20 @@ export function predictSignFromImage(
 
   return request<LabPrediction>(
     "/lab/predict-image",
+    {
+      method: "POST",
+      body: data
+    },
+    token
+  );
+}
+
+export function detectOpenPalmFromImage(file: File, token?: string): Promise<OpenPalmDetection> {
+  const data = new FormData();
+  data.append("image", file);
+
+  return request<OpenPalmDetection>(
+    "/lab/detect-open-palm",
     {
       method: "POST",
       body: data

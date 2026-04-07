@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getModules, ModuleItem } from "@/lib/api";
+import { detectOpenPalmFromImage, getModules, ModuleItem, predictSignFromImage } from "@/lib/api";
 
 const MODULE1_AI_SIGN_IMAGES = [
   { letter: "A", src: "/module-assets/m1/ai/a.png" },
@@ -441,6 +441,42 @@ const MODULE8_GESTURE_TARGETS = [
   { id: "m8-g10", label: "FAST" }
 ] as const;
 
+function isValidPredictionToken(value: string) {
+  const token = value.trim();
+  return token.length > 0 && token !== "No prediction yet." && token !== "UNSURE";
+}
+
+async function captureVideoFrameAsFile(video: HTMLVideoElement | null): Promise<File | null> {
+  if (!video) {
+    return null;
+  }
+
+  const sourceWidth = video.videoWidth || 640;
+  const sourceHeight = video.videoHeight || 480;
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sourceWidth;
+  canvas.height = sourceHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(video, 0, 0, sourceWidth, sourceHeight);
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((value) => resolve(value), "image/jpeg", 0.92);
+  });
+  if (!blob) {
+    return null;
+  }
+
+  return new File([blob], "assessment-frame.jpg", { type: "image/jpeg" });
+}
+
 function SignCardImage({ letter, src }: { letter: string; src: string }) {
   const [available, setAvailable] = useState(true);
 
@@ -684,19 +720,48 @@ function Module1AssessmentTwo() {
 }
 
 function Module1AssessmentThree() {
+  const ALPHABET_PALM_COOLDOWN_MS = 900;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
+  const openPalmInFlightRef = useRef(false);
+  const palmRaisedRef = useRef(false);
+  const lastPalmCommitAtRef = useRef(0);
+  const hiddenPredictionRef = useRef("No prediction yet.");
+  const blockedTokenRef = useRef<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [recognizedTrail, setRecognizedTrail] = useState("");
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
 
   const activeStep = MODULE1_SIGNING_CHALLENGE_STEPS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE1_SIGNING_CHALLENGE_STEPS.length;
 
+  function currentDetectedGesture() {
+    const recognized = (recognizedByStep[activeStep.id] ?? "").trim();
+    if (recognized) {
+      return recognized;
+    }
+    return "";
+  }
+
+  useEffect(() => {
+    hiddenPredictionRef.current = hiddenPrediction;
+  }, [hiddenPrediction]);
+
+  useEffect(() => {
+    blockedTokenRef.current = blockedTokenAfterClear;
+  }, [blockedTokenAfterClear]);
+
   useEffect(() => {
     return () => {
+      palmRaisedRef.current = false;
+      lastPalmCommitAtRef.current = 0;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -737,10 +802,111 @@ function Module1AssessmentThree() {
     await startCamera();
   }
 
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
+      return;
+    }
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "alphabet");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Keep UI clean; hidden prediction should not block the assessment flow.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+  }, [hiddenPrediction, blockedTokenAfterClear]);
+
+  useEffect(() => {
+    if (!running) {
+      palmRaisedRef.current = false;
+      return;
+    }
+
+    let cancelled = false;
+
+    async function checkOpenPalmSignal() {
+      if (cancelled || openPalmInFlightRef.current) {
+        return;
+      }
+      openPalmInFlightRef.current = true;
+      try {
+        const frame = await captureVideoFrameAsFile(videoRef.current);
+        if (!frame) {
+          return;
+        }
+        const result = await detectOpenPalmFromImage(frame);
+        const openPalm = result.open_palm;
+        const now = Date.now();
+
+        if (
+          openPalm &&
+          !palmRaisedRef.current &&
+          now - lastPalmCommitAtRef.current >= ALPHABET_PALM_COOLDOWN_MS
+        ) {
+          const token = hiddenPredictionRef.current.trim();
+          const blockedToken = blockedTokenRef.current;
+          if (
+            isValidPredictionToken(token) &&
+            (!blockedToken || blockedToken !== token)
+          ) {
+            const isRapidDuplicate =
+              token === lastRecognizedToken &&
+              now - lastPalmCommitAtRef.current < ALPHABET_PALM_COOLDOWN_MS;
+            if (!isRapidDuplicate) {
+              setRecognizedByStep((previous) => ({
+                ...previous,
+                [activeStep.id]: token
+              }));
+              setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+              setLastRecognizedToken(token);
+              lastPalmCommitAtRef.current = now;
+            }
+          }
+        }
+
+        palmRaisedRef.current = openPalm;
+      } catch {
+        // Keep silent to avoid noisy UI.
+      } finally {
+        openPalmInFlightRef.current = false;
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void checkOpenPalmSignal();
+    }, 420);
+    void checkOpenPalmSignal();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      palmRaisedRef.current = false;
+    };
+  }, [running, activeStep.id, lastRecognizedToken]);
+
   function submitCurrentStep() {
-    const value = (recognizedInputs[activeStep.id] ?? "").trim();
+    const value = currentDetectedGesture();
     if (!value) {
-      setError("Please enter the recognized gesture before continuing.");
+      setError("Please wait for a recognized gesture before continuing.");
       return;
     }
 
@@ -757,17 +923,28 @@ function Module1AssessmentThree() {
   }
 
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeStep.id]: ""
     }));
+    palmRaisedRef.current = false;
+    lastPalmCommitAtRef.current = 0;
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="text-xl font-semibold text-slate-900">Assessment 3</h3>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -803,6 +980,16 @@ function Module1AssessmentThree() {
                 </span>
               </span>
             </button>
+            <button
+              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!running}
+              onClick={() => {
+                void runHiddenPrediction();
+              }}
+              type="button"
+            >
+              Analyze Sign Now
+            </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
               {running ? "Camera active" : "Camera off"}
             </span>
@@ -828,20 +1015,22 @@ function Module1AssessmentThree() {
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeStep.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeStep.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
+          <button
+            className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+            onClick={clearCurrentInput}
+            type="button"
+          >
+            Clear Input
+          </button>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
@@ -985,14 +1174,20 @@ function NumbersCameraAssessment({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [recognizedTrail, setRecognizedTrail] = useState("");
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
 
   const activeStep = targets[activeStepIndex];
   const allDone = completedStepIds.length >= targets.length;
+  const currentDetectedGesture = (recognizedByStep[activeStep.id] ?? "").trim();
 
   useEffect(() => {
     return () => {
@@ -1036,10 +1231,55 @@ function NumbersCameraAssessment({
     await startCamera();
   }
 
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
+      return;
+    }
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "numbers");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Hidden prediction failures should not break the flow.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+    if (token === lastRecognizedToken) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+
+    setRecognizedByStep((previous) => ({
+      ...previous,
+      [activeStep.id]: token
+    }));
+    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+    setLastRecognizedToken(token);
+    setHiddenPrediction("No prediction yet.");
+  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeStep.id]);
+
   function submitCurrentStep() {
-    const value = (recognizedInputs[activeStep.id] ?? "").trim();
+    const value = currentDetectedGesture.trim();
     if (!value) {
-      setError("Please enter the recognized gesture before continuing.");
+      setError("Please wait for a recognized gesture before continuing.");
       return;
     }
 
@@ -1054,10 +1294,19 @@ function NumbersCameraAssessment({
   }
 
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeStep.id]: ""
     }));
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
@@ -1065,7 +1314,7 @@ function NumbersCameraAssessment({
       <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
       <p className="sr-only">{intro}</p>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -1101,6 +1350,16 @@ function NumbersCameraAssessment({
                 </span>
               </span>
             </button>
+            <button
+              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!running}
+              onClick={() => {
+                void runHiddenPrediction();
+              }}
+              type="button"
+            >
+              Analyze Sign Now
+            </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
               {running ? "Camera active" : "Camera off"}
             </span>
@@ -1114,7 +1373,7 @@ function NumbersCameraAssessment({
             <span className="text-5xl font-bold text-brandBlue">{activeStep.number}</span>
           </div>
           <p className="mt-3 text-sm text-slate-700">
-            Sign the number shown above, enter your recognized gesture, then click Next or Submit.
+            Sign the number shown above. The recognized output appears automatically below.
           </p>
 
           <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
@@ -1122,18 +1381,13 @@ function NumbersCameraAssessment({
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeStep.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeStep.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
           <button
@@ -1197,15 +1451,21 @@ function GestureCameraAssessment({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [recognizedTrail, setRecognizedTrail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
   const activeStep = targets[activeStepIndex];
   const reachedMinimum = completedStepIds.length >= minimumRequired;
   const allDone = completedStepIds.length >= targets.length;
+  const currentDetectedGesture = (recognizedByStep[activeStep.id] ?? "").trim();
 
   useEffect(() => {
     return () => {
@@ -1249,7 +1509,56 @@ function GestureCameraAssessment({
     await startCamera();
   }
 
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
+      return;
+    }
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "words");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Hidden prediction failures should not break the assessment flow.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+    if (token === lastRecognizedToken) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+
+    setRecognizedByStep((previous) => ({
+      ...previous,
+      [activeStep.id]: token
+    }));
+    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+    setLastRecognizedToken(token);
+    setHiddenPrediction("No prediction yet.");
+  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeStep.id]);
+
   function markCurrentStepDone() {
+    if (!currentDetectedGesture) {
+      setError("No recognized gesture detected yet. Keep your hand visible and try again.");
+      return;
+    }
     setError(null);
     setCompletedStepIds((previous) =>
       previous.includes(activeStep.id) ? previous : [...previous, activeStep.id]
@@ -1271,10 +1580,19 @@ function GestureCameraAssessment({
   }
 
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeStep.id]: ""
     }));
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
@@ -1282,7 +1600,7 @@ function GestureCameraAssessment({
       <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
       <p className="sr-only">{intro}</p>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -1336,18 +1654,13 @@ function GestureCameraAssessment({
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeStep.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeStep.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
           <button
@@ -1391,13 +1704,6 @@ function GestureCameraAssessment({
                 Finish / Submit
               </button>
             ) : null}
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-              onClick={clearCurrentInput}
-              type="button"
-            >
-              Clear Input
-            </button>
           </div>
 
           <p className="mt-3 text-xs text-slate-600">
@@ -1449,14 +1755,20 @@ function Module3AssessmentTwo() {
 function Module7ColorAssessmentTwo() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [recognizedTrail, setRecognizedTrail] = useState("");
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
 
   const activeColor = MODULE7_COLOR_SIGN_TARGETS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE7_COLOR_SIGN_TARGETS.length;
+  const currentDetectedGesture = (recognizedByStep[activeColor.id] ?? "").trim();
 
   useEffect(() => {
     return () => {
@@ -1500,10 +1812,55 @@ function Module7ColorAssessmentTwo() {
     await startCamera();
   }
 
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
+      return;
+    }
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "words");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Hidden prediction failures should not block user actions.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+    if (token === lastRecognizedToken) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+
+    setRecognizedByStep((previous) => ({
+      ...previous,
+      [activeColor.id]: token
+    }));
+    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+    setLastRecognizedToken(token);
+    setHiddenPrediction("No prediction yet.");
+  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeColor.id]);
+
   function submitCurrentStep() {
-    const value = (recognizedInputs[activeColor.id] ?? "").trim();
+    const value = currentDetectedGesture;
     if (!value) {
-      setError("Please enter the recognized gesture before continuing.");
+      setError("Please wait for a recognized gesture before continuing.");
       return;
     }
 
@@ -1520,17 +1877,26 @@ function Module7ColorAssessmentTwo() {
   }
 
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeColor.id]: ""
     }));
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="text-xl font-semibold text-slate-900">Assessment 2</h3>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -1566,6 +1932,16 @@ function Module7ColorAssessmentTwo() {
                 </span>
               </span>
             </button>
+            <button
+              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!running}
+              onClick={() => {
+                void runHiddenPrediction();
+              }}
+              type="button"
+            >
+              Analyze Sign Now
+            </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
               {running ? "Camera active" : "Camera off"}
             </span>
@@ -1583,7 +1959,7 @@ function Module7ColorAssessmentTwo() {
           </div>
 
           <p className="mt-3 text-sm text-slate-700">
-            Sign the color shown above, enter your recognized gesture, then click Next or Submit.
+            Sign the color shown above. The recognized output appears automatically below.
           </p>
 
           <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
@@ -1591,18 +1967,13 @@ function Module7ColorAssessmentTwo() {
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeColor.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeColor.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
           <button
@@ -1663,6 +2034,7 @@ export default function ModuleDetailPage() {
   const [activeTab, setActiveTab] = useState<"module" | "assessment">("module");
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null);
+  const [isSelectionCollapsed, setIsSelectionCollapsed] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -1832,7 +2204,17 @@ export default function ModuleDetailPage() {
 
       {selected ? (
         <article className="panel">
-          <div className="grid gap-4 lg:grid-cols-[20rem_1fr]">
+          <div className="mb-3 flex justify-start">
+            <button
+              className="rounded border border-brandBlue bg-brandBlue px-3 py-1 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
+              onClick={() => setIsSelectionCollapsed((value) => !value)}
+              type="button"
+            >
+              {isSelectionCollapsed ? "Show Module/Assessment List" : "Hide Module/Assessment List"}
+            </button>
+          </div>
+          <div className={`grid gap-4 ${isSelectionCollapsed ? "lg:grid-cols-1" : "lg:grid-cols-[20rem_1fr]"}`}>
+            {!isSelectionCollapsed ? (
             <aside className="rounded-xl border border-brandBorder bg-brandMutedSurface p-3">
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -2036,16 +2418,17 @@ export default function ModuleDetailPage() {
                 )}
               </div>
             </aside>
+            ) : null}
 
             <div className="rounded-xl border border-brandBorder bg-white p-4">
               {activeTab === "module" ? (
                 <>
-                  <p className="text-xs uppercase tracking-wider label-accent">{selected.title}</p>
-                  <p className="mt-1 text-sm text-slate-600">{selected.description}</p>
+                  <p className="text-sm font-extrabold uppercase tracking-wide text-slate-900">{selected.title}</p>
+                  <p className="mt-2 text-lg leading-8 text-slate-900">{selected.description}</p>
                   {selectedLesson ? (
                     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
                     <h3 className="text-xl font-semibold text-slate-900">{selectedLesson.title}</h3>
-                    <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700">
+                    <p className="mt-3 whitespace-pre-line text-base leading-8 text-slate-900">
                       {selectedLesson.content}
                     </p>
 

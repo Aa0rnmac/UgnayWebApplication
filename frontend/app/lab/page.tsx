@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  detectOpenPalmFromImage,
   LabPrediction,
   NumbersCategory,
   RecognitionMode,
@@ -13,22 +14,34 @@ import {
 } from "@/lib/api";
 
 export default function SigningLabPage() {
+  const REPEAT_TOKEN_COOLDOWN_MS = 1400;
+  const ALPHABET_PALM_COOLDOWN_MS = 900;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const predictionInFlightRef = useRef(false);
+  const openPalmInFlightRef = useRef(false);
   const wordsHistoryRef = useRef<LabPrediction[]>([]);
+  const palmRaisedRef = useRef(false);
+  const lastPalmCommitAtRef = useRef(0);
+  const predictionRef = useRef("No prediction yet.");
+  const blockedTokenRef = useRef<string | null>(null);
+  const lastAcceptedRef = useRef<{ token: string | null; at: number }>({
+    token: null,
+    at: 0
+  });
   const [prediction, setPrediction] = useState<string>("No prediction yet.");
   const [confidence, setConfidence] = useState<number | null>(null);
   const [topCandidates, setTopCandidates] = useState<string[]>([]);
   const [mode, setMode] = useState<RecognitionMode>("alphabet");
   const [numbersCategory, setNumbersCategory] = useState<NumbersCategory>("0-10");
   const [wordsCategory, setWordsCategory] = useState<WordsCategory>("greeting");
-  const [sequenceAuto, setSequenceAuto] = useState(false);
   const [captureStatus, setCaptureStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [predicting, setPredicting] = useState(false);
   const [recognizedInput, setRecognizedInput] = useState("");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
   const isSequenceMode = mode === "numbers" || mode === "words";
 
   type CaptureOptions = {
@@ -36,6 +49,14 @@ export default function SigningLabPage() {
     maxHeight?: number;
     jpegQuality?: number;
   };
+
+  useEffect(() => {
+    predictionRef.current = prediction;
+  }, [prediction]);
+
+  useEffect(() => {
+    blockedTokenRef.current = blockedTokenAfterClear;
+  }, [blockedTokenAfterClear]);
 
   useEffect(() => {
     return () => {
@@ -52,10 +73,12 @@ export default function SigningLabPage() {
     setPrediction("No prediction yet.");
     setCaptureStatus(null);
     setRecognizedInput("");
+    setLastRecognizedToken(null);
+    setBlockedTokenAfterClear(null);
+    palmRaisedRef.current = false;
+    lastPalmCommitAtRef.current = 0;
+    lastAcceptedRef.current = { token: null, at: 0 };
     wordsHistoryRef.current = [];
-    if (!isSequenceMode) {
-      setSequenceAuto(false);
-    }
   }, [mode, isSequenceMode]);
 
   useEffect(() => {
@@ -69,6 +92,11 @@ export default function SigningLabPage() {
     setPrediction("No prediction yet.");
     setCaptureStatus(null);
     setRecognizedInput("");
+    setLastRecognizedToken(null);
+    setBlockedTokenAfterClear(null);
+    palmRaisedRef.current = false;
+    lastPalmCommitAtRef.current = 0;
+    lastAcceptedRef.current = { token: null, at: 0 };
   }, [wordsCategory, mode]);
 
   useEffect(() => {
@@ -81,14 +109,103 @@ export default function SigningLabPage() {
     setPrediction("No prediction yet.");
     setCaptureStatus(null);
     setRecognizedInput("");
+    setLastRecognizedToken(null);
+    setBlockedTokenAfterClear(null);
+    palmRaisedRef.current = false;
+    lastPalmCommitAtRef.current = 0;
+    lastAcceptedRef.current = { token: null, at: 0 };
   }, [numbersCategory, mode]);
 
   useEffect(() => {
-    if (!prediction || prediction === "No prediction yet.") {
+    if (mode === "alphabet") {
       return;
     }
-    setRecognizedInput(prediction);
-  }, [prediction]);
+    const token = prediction.trim();
+    if (!token || token === "No prediction yet." || token === "UNSURE") {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+    const now = Date.now();
+    const lastToken = lastAcceptedRef.current.token;
+    const elapsed = now - lastAcceptedRef.current.at;
+    if (token === lastToken && elapsed < REPEAT_TOKEN_COOLDOWN_MS) {
+      return;
+    }
+    setRecognizedInput((previous) => (previous ? `${previous} ${token}` : token));
+    setLastRecognizedToken(token);
+    lastAcceptedRef.current = { token, at: now };
+  }, [prediction, lastRecognizedToken, blockedTokenAfterClear, mode]);
+
+  useEffect(() => {
+    if (!running || mode !== "alphabet") {
+      palmRaisedRef.current = false;
+      return;
+    }
+
+    let cancelled = false;
+
+    async function checkOpenPalmSignal() {
+      if (cancelled || !running || mode !== "alphabet" || openPalmInFlightRef.current) {
+        return;
+      }
+      openPalmInFlightRef.current = true;
+      try {
+        const frame = await captureCurrentFrameAsFile({
+          maxWidth: 640,
+          maxHeight: 480,
+          jpegQuality: 0.9
+        });
+        if (!frame) {
+          return;
+        }
+        const result = await detectOpenPalmFromImage(frame);
+        const openPalm = result.open_palm;
+        const now = Date.now();
+
+        if (
+          openPalm &&
+          !palmRaisedRef.current &&
+          now - lastPalmCommitAtRef.current >= ALPHABET_PALM_COOLDOWN_MS
+        ) {
+          const token = predictionRef.current.trim();
+          const blocked = blockedTokenRef.current;
+          if (
+            token &&
+            token !== "No prediction yet." &&
+            token !== "UNSURE" &&
+            (!blocked || blocked !== token)
+          ) {
+            setRecognizedInput((previous) => (previous ? `${previous} ${token}` : token));
+            setLastRecognizedToken(token);
+            lastAcceptedRef.current = { token, at: now };
+            lastPalmCommitAtRef.current = now;
+          }
+        }
+
+        palmRaisedRef.current = openPalm;
+      } catch {
+        // Keep silent to avoid noisy UI while polling.
+      } finally {
+        openPalmInFlightRef.current = false;
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void checkOpenPalmSignal();
+    }, 420);
+    void checkOpenPalmSignal();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      palmRaisedRef.current = false;
+    };
+  }, [running, mode, blockedTokenAfterClear]);
 
   async function startCamera() {
     setError(null);
@@ -316,7 +433,7 @@ export default function SigningLabPage() {
     setPredicting(true);
 
     try {
-      await runCaptureCountdown(3, sequenceAuto);
+      await runCaptureCountdown(3, false);
 
       const samples: LabPrediction[] = [];
       const isPhraseHeavyCategory =
@@ -387,38 +504,16 @@ export default function SigningLabPage() {
 
       setCaptureStatus("Analyzing captured gesture...");
       const immediateResult = chooseStableWordsPrediction(samples);
-      if (!sequenceAuto) {
-        wordsHistoryRef.current = [immediateResult];
-        setPrediction(immediateResult.prediction);
-        setConfidence(immediateResult.confidence);
-        setTopCandidates(immediateResult.top_candidates);
-      } else {
-        const history = [...wordsHistoryRef.current, immediateResult].slice(-2);
-        const latest = history[history.length - 1];
-        const previous = history.length > 1 ? history[history.length - 2] : null;
-
-        // If a new sign is strongly detected, switch quickly to avoid stale smoothing.
-        if (previous && latest.prediction !== previous.prediction && latest.confidence >= 0.64) {
-          wordsHistoryRef.current = [latest];
-        } else {
-          wordsHistoryRef.current = history;
-        }
-
-        const stabilized = chooseStableWordsPrediction(wordsHistoryRef.current);
-        setPrediction(stabilized.prediction);
-        setConfidence(stabilized.confidence);
-        setTopCandidates(stabilized.top_candidates);
-      }
+      wordsHistoryRef.current = [immediateResult];
+      setPrediction(immediateResult.prediction);
+      setConfidence(immediateResult.confidence);
+      setTopCandidates(immediateResult.top_candidates);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Words prediction failed";
       setError(message);
     } finally {
       setPredicting(false);
-      if (sequenceAuto) {
-        setCaptureStatus(null);
-      } else {
-        window.setTimeout(() => setCaptureStatus(null), 1200);
-      }
+      window.setTimeout(() => setCaptureStatus(null), 1200);
       predictionInFlightRef.current = false;
     }
   }
@@ -448,7 +543,7 @@ export default function SigningLabPage() {
             jpegQuality: 0.9
           };
 
-      await runCaptureCountdown(3, sequenceAuto);
+      await runCaptureCountdown(3, false);
       setCaptureStatus(isDynamicRange ? "Capturing gesture for 11-100..." : "Capturing gesture...");
       const sequence = await captureFrameSequence(frameCount, frameDelay, captureProfile);
       if (sequence.length < minimumFrames) {
@@ -467,11 +562,7 @@ export default function SigningLabPage() {
       setError(message);
     } finally {
       setPredicting(false);
-      if (sequenceAuto) {
-        setCaptureStatus(null);
-      } else {
-        window.setTimeout(() => setCaptureStatus(null), 1200);
-      }
+      window.setTimeout(() => setCaptureStatus(null), 1200);
       predictionInFlightRef.current = false;
     }
   }
@@ -492,19 +583,12 @@ export default function SigningLabPage() {
     if (!running) {
       return;
     }
-    if (isSequenceMode && !sequenceAuto) {
+    if (isSequenceMode) {
       return;
     }
 
     void runPrediction();
-    const intervalMs =
-      mode === "words"
-        ? 2300
-        : mode === "numbers"
-          ? numbersCategory === "0-10"
-            ? 1700
-            : 2300
-          : 1200;
+    const intervalMs = 1200;
     const interval = window.setInterval(() => {
       void runPrediction();
     }, intervalMs);
@@ -512,14 +596,14 @@ export default function SigningLabPage() {
     return () => {
       window.clearInterval(interval);
     };
-  }, [running, mode, sequenceAuto, isSequenceMode, wordsCategory, numbersCategory]);
+  }, [running, mode, isSequenceMode, wordsCategory, numbersCategory]);
 
   return (
     <section className="space-y-4">
       <div className="panel panel-lively">
         <h2 className="text-2xl font-semibold title-gradient">Free Signing Lab</h2>
         <p className="mt-2 text-sm text-muted">
-          Alphabet runs live automatically. Numbers and Words support manual capture or auto analyze.
+          For Alphabet mode, show an open palm to enter the current predicted letter. Numbers and Words support manual capture or auto analyze.
         </p>
       </div>
 
@@ -564,13 +648,11 @@ export default function SigningLabPage() {
                 (predicting
                 ? mode === "words" || mode === "numbers"
                   ? "Analyzing gesture sequence..."
-                  : "Predicting live..."
+                  : "Live mode active"
                 : running
                   ? mode === "words" || mode === "numbers"
-                    ? sequenceAuto
-                      ? `${mode === "words" ? "Words" : "Numbers"} auto mode active`
-                      : `${mode === "words" ? "Words" : "Numbers"} manual mode ready`
-                    : "Live mode active"
+                    ? `${mode === "words" ? "Words" : "Numbers"} manual mode ready`
+                    : "Alphabet mode active (show open palm to enter)"
                   : "Camera is off")}
             </span>
           </div>
@@ -578,7 +660,7 @@ export default function SigningLabPage() {
 
         <aside className="panel panel-lively">
           <label className="text-xs uppercase tracking-wider label-accent" htmlFor="recognition-mode">
-            Recognition Mode
+            What do you want to sign?
           </label>
           <select
             className="mt-2 w-full rounded border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 focus:border-brandBlue focus:outline-none"
@@ -586,9 +668,9 @@ export default function SigningLabPage() {
             onChange={(event) => setMode(event.target.value as RecognitionMode)}
             value={mode}
           >
-            <option value="alphabet">Alphabet Mode</option>
-            <option value="numbers">Numbers Mode</option>
-            <option value="words">Words Mode</option>
+            <option value="alphabet">Alphabet</option>
+            <option value="numbers">Numbers</option>
+            <option value="words">Words</option>
           </select>
 
           {mode === "numbers" ? (
@@ -648,13 +730,6 @@ export default function SigningLabPage() {
               >
                 Analyze Sign Now
               </button>
-              <button
-                className="rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandBlue/90"
-                onClick={() => setSequenceAuto((value) => !value)}
-                type="button"
-              >
-                Auto Analyze: {sequenceAuto ? "On" : "Off"}
-              </button>
             </div>
           ) : null}
 
@@ -672,10 +747,10 @@ export default function SigningLabPage() {
             <input
               autoComplete="off"
               className="mt-2 w-full rounded border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) => setRecognizedInput(event.target.value)}
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type recognized gesture/letters here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
               value={recognizedInput}
@@ -683,7 +758,20 @@ export default function SigningLabPage() {
           </label>
           <button
             className="mt-2 rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            onClick={() => setRecognizedInput("")}
+            onClick={() => {
+              const currentToken = prediction.trim();
+              if (currentToken && currentToken !== "No prediction yet." && currentToken !== "UNSURE") {
+                setBlockedTokenAfterClear(currentToken);
+              } else {
+                setBlockedTokenAfterClear(null);
+              }
+              setRecognizedInput("");
+              setPrediction("No prediction yet.");
+              setConfidence(null);
+              setTopCandidates([]);
+              lastAcceptedRef.current = { token: null, at: 0 };
+              setLastRecognizedToken(null);
+            }}
             type="button"
           >
             Clear Input
