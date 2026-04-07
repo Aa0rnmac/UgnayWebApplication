@@ -34,7 +34,11 @@ export function AppNav() {
             src="/brand/logo.png"
             width={32}
           />
-          <span className="text-sm font-semibold text-slate-900">UGNAY FSL Learning Hub</span>
+          <div className="leading-tight">
+            <p className="text-sm font-semibold text-slate-900">UGNAY Learning hub</p>
+            <p className="text-[10px] text-slate-900">basic FSL course</p>
+            <p className="text-[10px] text-slate-900">hand and heart</p>
+          </div>
         </div>
       </div>
 
@@ -63,8 +67,11 @@ export function AppNav() {
             />
             {!collapsed ? (
               <div className="min-w-0 md:block">
-                <h1 className="truncate text-sm font-semibold tracking-wide text-slate-900">UGNAY FSL Learning Hub</h1>
-                <p className="text-[11px] text-muted">Hand & Heart</p>
+                <h1 className="truncate text-sm font-semibold tracking-wide text-slate-900">
+                  UGNAY Learning hub
+                </h1>
+                <p className="text-[11px] text-slate-900">basic FSL course</p>
+                <p className="text-[11px] text-slate-900">hand and heart</p>
               </div>
             ) : null}
 

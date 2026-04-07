@@ -208,26 +208,32 @@ const MODULE1_LABELING_ITEMS = MODULE1_ASSESSMENT2_IMAGE_ORDER.map((letter) => (
   src: `/module-assets/m1/assessment2/${letter.toLowerCase()}.png`
 }));
 
-const MODULE1_SIGNING_CHALLENGE_STEPS = [
-  {
-    id: "m1-step-name",
-    title: "Task 1: Given Name",
-    prompt: "Sign this given name: ANA",
-    imageSrc: null
-  },
-  {
-    id: "m1-step-animal",
-    title: "Task 2: Animal Image",
-    prompt: "Sign what animal is shown in the image.",
-    imageSrc: "/module-assets/m1/assessment/animal-cat.svg"
-  },
-  {
-    id: "m1-step-thing",
-    title: "Task 3: Thing Image",
-    prompt: "Sign what thing is shown in the image.",
-    imageSrc: "/module-assets/m1/assessment/object-book.svg"
-  }
+const MODULE1_SIGNING_CHALLENGE_ITEMS = [
+  "CHURCH",
+  "MALL",
+  "ZOO",
+  "PARK",
+  "ALLYSSA",
+  "AARON",
+  "PRINCESS",
+  "JOHN",
+  "BOX",
+  "SCHOOL",
+  "TREE",
+  "CHAIR",
+  "FLOWER",
+  "CAT",
+  "DOG",
+  "RABBIT",
+  "SHARK"
 ] as const;
+
+const MODULE1_SIGNING_CHALLENGE_STEPS = MODULE1_SIGNING_CHALLENGE_ITEMS.map((item, index) => ({
+  id: `m1-step-${index + 1}`,
+  title: `Task ${index + 1}`,
+  prompt: `Sign this word/name: ${item}`,
+  imageSrc: null
+}));
 
 const MODULE2_ASSESSMENT_OPTIONS = [
   {
@@ -243,7 +249,17 @@ const MODULE2_ASSESSMENT_OPTIONS = [
   {
     id: "m2-assessment-3",
     title: "Assessment 3",
-    subtitle: "Camera: Sign 11, 15, 50, 100, 90, 85"
+    subtitle: "Camera: Sign 11-20 (at least 5)"
+  },
+  {
+    id: "m2-assessment-4",
+    title: "Assessment 4",
+    subtitle: "Camera: Sign 31-40 (at least 5)"
+  },
+  {
+    id: "m2-assessment-5",
+    title: "Assessment 5",
+    subtitle: "Camera: Sign 91-100 (at least 5)"
   }
 ] as const;
 
@@ -260,13 +276,43 @@ const MODULE2_SIGN_1_TO_10_STEPS = [
   { id: "m2-a2-10", number: 10 }
 ] as const;
 
-const MODULE2_SIGN_SET_STEPS = [
+const MODULE2_SIGN_11_TO_20_STEPS = [
   { id: "m2-a3-11", number: 11 },
+  { id: "m2-a3-12", number: 12 },
+  { id: "m2-a3-13", number: 13 },
+  { id: "m2-a3-14", number: 14 },
   { id: "m2-a3-15", number: 15 },
-  { id: "m2-a3-50", number: 50 },
-  { id: "m2-a3-100", number: 100 },
-  { id: "m2-a3-90", number: 90 },
-  { id: "m2-a3-85", number: 85 }
+  { id: "m2-a3-16", number: 16 },
+  { id: "m2-a3-17", number: 17 },
+  { id: "m2-a3-18", number: 18 },
+  { id: "m2-a3-19", number: 19 },
+  { id: "m2-a3-20", number: 20 }
+] as const;
+
+const MODULE2_SIGN_31_TO_40_STEPS = [
+  { id: "m2-a4-31", number: 31 },
+  { id: "m2-a4-32", number: 32 },
+  { id: "m2-a4-33", number: 33 },
+  { id: "m2-a4-34", number: 34 },
+  { id: "m2-a4-35", number: 35 },
+  { id: "m2-a4-36", number: 36 },
+  { id: "m2-a4-37", number: 37 },
+  { id: "m2-a4-38", number: 38 },
+  { id: "m2-a4-39", number: 39 },
+  { id: "m2-a4-40", number: 40 }
+] as const;
+
+const MODULE2_SIGN_91_TO_100_STEPS = [
+  { id: "m2-a5-91", number: 91 },
+  { id: "m2-a5-92", number: 92 },
+  { id: "m2-a5-93", number: 93 },
+  { id: "m2-a5-94", number: 94 },
+  { id: "m2-a5-95", number: 95 },
+  { id: "m2-a5-96", number: 96 },
+  { id: "m2-a5-97", number: 97 },
+  { id: "m2-a5-98", number: 98 },
+  { id: "m2-a5-99", number: 99 },
+  { id: "m2-a5-100", number: 100 }
 ] as const;
 
 const MODULE3_ASSESSMENT_OPTIONS = [
@@ -1166,11 +1212,13 @@ function Module2AssessmentOne({
 function NumbersCameraAssessment({
   title,
   intro,
-  targets
+  targets,
+  minimumRequired = targets.length
 }: {
   title: string;
   intro: string;
   targets: readonly { id: string; number: number }[];
+  minimumRequired?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1180,12 +1228,14 @@ function NumbersCameraAssessment({
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   const [recognizedTrail, setRecognizedTrail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
   const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
   const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
 
   const activeStep = targets[activeStepIndex];
+  const reachedMinimum = completedStepIds.length >= minimumRequired;
   const allDone = completedStepIds.length >= targets.length;
   const currentDetectedGesture = (recognizedByStep[activeStep.id] ?? "").trim();
 
@@ -1291,6 +1341,15 @@ function NumbersCameraAssessment({
     if (activeStepIndex < targets.length - 1) {
       setActiveStepIndex((index) => Math.min(targets.length - 1, index + 1));
     }
+  }
+
+  function finishAssessment() {
+    if (!reachedMinimum) {
+      setError(`Please complete at least ${minimumRequired} number signs before submitting.`);
+      return;
+    }
+    setError(null);
+    setSubmitted(true);
   }
 
   function clearCurrentInput() {
@@ -1412,15 +1471,27 @@ function NumbersCameraAssessment({
               onClick={submitCurrentStep}
               type="button"
             >
-              {activeStepIndex === targets.length - 1 ? "Submit" : "Next"}
+              {activeStepIndex === targets.length - 1 ? "Mark Done" : "Next"}
             </button>
+            {reachedMinimum ? (
+              <button
+                className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                onClick={finishAssessment}
+                type="button"
+              >
+                Finish
+              </button>
+            ) : null}
           </div>
 
           <p className="mt-3 text-xs text-slate-600">
             Completed: {completedStepIds.length}/{targets.length}
           </p>
+          {minimumRequired < targets.length ? (
+            <p className="mt-1 text-xs text-slate-600">Minimum required: {minimumRequired}</p>
+          ) : null}
 
-          {allDone ? (
+          {submitted || allDone ? (
             <p className="mt-2 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
               Assessment complete. All number tasks submitted.
             </p>
@@ -2532,9 +2603,24 @@ export default function ModuleDetailPage() {
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-3" ? (
                 <NumbersCameraAssessment
-                  intro="Use the camera interface and sign the following numbers: 11, 15, 50, 100, 90, and 85."
-                  targets={MODULE2_SIGN_SET_STEPS}
+                  intro="Use the camera interface and sign numbers from 11 to 20. Complete at least 5."
+                  minimumRequired={5}
+                  targets={MODULE2_SIGN_11_TO_20_STEPS}
                   title="Assessment 3"
+                />
+              ) : isModule2 && selectedAssessmentId === "m2-assessment-4" ? (
+                <NumbersCameraAssessment
+                  intro="Use the camera interface and sign numbers from 31 to 40. Complete at least 5."
+                  minimumRequired={5}
+                  targets={MODULE2_SIGN_31_TO_40_STEPS}
+                  title="Assessment 4"
+                />
+              ) : isModule2 && selectedAssessmentId === "m2-assessment-5" ? (
+                <NumbersCameraAssessment
+                  intro="Use the camera interface and sign numbers from 91 to 100. Complete at least 5."
+                  minimumRequired={5}
+                  targets={MODULE2_SIGN_91_TO_100_STEPS}
+                  title="Assessment 5"
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-1" ? (
                 <Module2AssessmentOne

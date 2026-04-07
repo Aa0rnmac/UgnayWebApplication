@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppNav } from "@/components/nav";
 import { SiteFooter } from "@/components/site-footer";
@@ -19,6 +19,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [username, setUsername] = useState("Student");
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const publicRoute = useMemo(() => isPublicRoute(pathname), [pathname]);
 
@@ -78,6 +80,39 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [pathname, publicRoute, router]);
 
+  useEffect(() => {
+    setUserMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!userMenuOpen) {
+      return;
+    }
+
+    function handleOutsideClick(event: MouseEvent) {
+      if (!userMenuRef.current) {
+        return;
+      }
+      if (!userMenuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setUserMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [userMenuOpen]);
+
   if (!ready) {
     return <div className="min-h-screen bg-grid" />;
   }
@@ -85,8 +120,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (publicRoute) {
     return (
       <div className="min-h-screen bg-grid">
-        <header className="border-b border-brandBorder bg-white/95 px-4 py-3 backdrop-blur-md md:px-8">
-          <div className="mx-auto flex w-full max-w-6xl items-center gap-3">
+        <header className="relative z-[120] overflow-visible border-b border-brandBorder bg-white/95 px-4 py-3 backdrop-blur-md md:px-8">
+          <div className="mx-auto flex w-full max-w-6xl items-center gap-3 overflow-visible">
             <Image
               alt="Hand & Heart"
               className="h-10 w-10 rounded-full"
@@ -116,8 +151,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AppNav />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-brandBorder bg-white/95 px-4 py-3 backdrop-blur-md md:px-8">
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
+        <header className="relative z-[120] overflow-visible border-b border-brandBorder bg-white/95 px-4 py-3 backdrop-blur-md md:px-8">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 overflow-visible">
             <div className="flex items-center gap-3">
               <button
                 className="inline-flex h-9 items-center rounded-lg border border-brandBorder bg-brandMutedSurface px-3 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -138,41 +173,54 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Link
-                className="inline-flex h-9 items-center gap-2 rounded-lg border border-brandBorder bg-brandBlueLight px-3 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight/70"
-                href="/profile"
+            <div className="relative overflow-visible" ref={userMenuRef}>
+              <button
+                aria-expanded={userMenuOpen}
+                aria-haspopup="menu"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-brandBorder bg-white transition hover:bg-brandBlueLight"
+                onClick={() => setUserMenuOpen((open) => !open)}
+                type="button"
               >
                 {profileImageUrl ? (
                   <img
                     alt="Profile"
-                    className="h-6 w-6 rounded-full border border-brandBorder object-cover"
+                    className="h-9 w-9 rounded-full object-cover"
                     src={profileImageUrl}
                   />
                 ) : (
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-brandBlue text-xs font-bold text-white">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-brandBlue text-sm font-bold text-white">
                     {username.charAt(0).toUpperCase()}
                   </span>
                 )}
-                Profile
-              </Link>
-
-              <button
-                className="h-9 rounded-lg bg-brandRed px-3 text-sm font-semibold text-white transition hover:bg-brandRed/90"
-                onClick={() => {
-                  window.localStorage.removeItem("auth_token");
-                  window.localStorage.removeItem("auth_username");
-                  window.location.href = "/";
-                }}
-                type="button"
-              >
-                Log Out
               </button>
+
+              {userMenuOpen ? (
+                <div className="absolute right-0 z-[200] mt-2 w-44 rounded-xl border border-brandBorder bg-white p-1 shadow-lg">
+                  <Link
+                    className="block rounded-lg px-3 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                    href="/profile"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    Profile
+                  </Link>
+                  <button
+                    className="mt-1 w-full rounded-lg bg-brandRed px-3 py-2 text-left text-sm font-semibold text-white transition hover:bg-brandRed/90"
+                    onClick={() => {
+                      window.localStorage.removeItem("auth_token");
+                      window.localStorage.removeItem("auth_username");
+                      window.location.href = "/";
+                    }}
+                    type="button"
+                  >
+                    Log Out
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </header>
 
-        <main className="w-full flex-1 px-4 py-6 md:px-8 md:py-8">
+        <main className="relative z-0 w-full flex-1 px-4 py-6 md:px-8 md:py-8">
           <div className="mx-auto w-full max-w-6xl space-y-4">
             <div className="page-transition-enter" key={pathname}>
               {children}

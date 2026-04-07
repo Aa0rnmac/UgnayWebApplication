@@ -27,6 +27,10 @@ export type AuthResponse = {
   user: ApiUser;
 };
 
+export type ForgotPasswordRequestResponse = {
+  message: string;
+};
+
 export type RegistrationPayload = {
   first_name: string;
   middle_name?: string;
@@ -276,6 +280,30 @@ export function login(username: string, password: string): Promise<AuthResponse>
   return request<AuthResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password })
+  });
+}
+
+export function requestForgotPasswordOtp(
+  usernameOrEmail: string
+): Promise<ForgotPasswordRequestResponse> {
+  return request<ForgotPasswordRequestResponse>("/auth/forgot-password/request", {
+    method: "POST",
+    body: JSON.stringify({ username_or_email: usernameOrEmail })
+  });
+}
+
+export function verifyForgotPasswordOtp(
+  usernameOrEmail: string,
+  otpCode: string,
+  newPassword: string
+): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/forgot-password/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      username_or_email: usernameOrEmail,
+      otp_code: otpCode,
+      new_password: newPassword
+    })
   });
 }
 

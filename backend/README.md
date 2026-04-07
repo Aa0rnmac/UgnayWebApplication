@@ -12,6 +12,9 @@
 3. Set dataset root (optional):
    - `DATASETS_ROOT=datasets` (default, resolved from project root)
    - You can also use an absolute path, for example `DATASETS_ROOT=C:\Users\Marissa\Datasets\FSL`.
+4. Configure SMTP for forgot-password OTP email:
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
+   - TLS/SSL flags: `SMTP_USE_TLS`, `SMTP_USE_SSL`
 
 ## Run
 ```bash
@@ -25,6 +28,8 @@ On startup, tables are created and 3 modules are seeded if empty.
 - `GET /api/health`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
+- `POST /api/auth/forgot-password/request`
+- `POST /api/auth/forgot-password/verify`
 - `GET /api/auth/me`
 - `GET /api/modules`
 - `GET /api/modules/{module_id}`

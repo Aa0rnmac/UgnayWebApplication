@@ -26,6 +26,9 @@ class User(Base):
     )
 
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    password_reset_otps = relationship(
+        "PasswordResetOtp", back_populates="user", cascade="all, delete-orphan"
+    )
     progress_entries = relationship(
         "UserModuleProgress", back_populates="user", cascade="all, delete-orphan"
     )

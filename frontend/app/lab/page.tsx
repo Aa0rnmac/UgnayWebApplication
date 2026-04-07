@@ -603,7 +603,7 @@ export default function SigningLabPage() {
       <div className="panel panel-lively">
         <h2 className="text-2xl font-semibold title-gradient">Free Signing Lab</h2>
         <p className="mt-2 text-sm text-muted">
-          For Alphabet mode, show an open palm to enter the current predicted letter. Numbers and Words support manual capture or auto analyze.
+          For Alphabet mode, show an open palm to enter the current predicted letter. Numbers and Words support manual capture.
         </p>
       </div>
 

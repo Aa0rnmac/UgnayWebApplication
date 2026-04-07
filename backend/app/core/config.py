@@ -14,7 +14,16 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     session_hours: int = 24
+    password_reset_otp_minutes: int = 10
+    password_reset_max_attempts: int = 5
     teacher_validation_key: str = "teacher123"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
     alphabet_model_path: str = "artifacts/alphabet_model.joblib"
     alphabet_confidence_threshold: float = 0.45
     alphabet_min_top2_margin: float = 0.08
