@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Space_Grotesk } from "next/font/google";
 
-import { AuthProvider } from "@/components/auth-context";
-import { AppNav } from "@/components/nav";
+import { AppShell } from "@/components/app-shell";
 
 import "./globals.css";
 
@@ -19,15 +18,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${spaceGrotesk.variable} bg-base text-slate-100`}>
-        <AuthProvider>
-          <div className="min-h-screen bg-grid md:flex">
-            <AppNav />
-            <main className="w-full flex-1 px-4 py-6 md:px-8 md:py-8">
-              <div className="mx-auto w-full max-w-6xl">{children}</div>
-            </main>
-          </div>
-        </AuthProvider>
+      <body className={`${spaceGrotesk.variable} bg-base text-slate-900`}>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

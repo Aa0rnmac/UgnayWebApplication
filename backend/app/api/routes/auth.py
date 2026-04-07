@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -9,7 +11,14 @@ from app.core.security import create_session_token, hash_password, verify_passwo
 from app.db.session import get_db
 from app.models.session import UserSession
 from app.models.user import User
-from app.schemas.auth import AuthResponse, UserCreate, UserLogin, UserOut
+from app.schemas.auth import (
+    AuthResponse,
+    PasswordChangeRequest,
+    UserCreate,
+    UserLogin,
+    UserOut,
+    UserProfileUpdate,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -26,21 +35,13 @@ def create_user_session(db: Session, user_id: int) -> str:
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: UserCreate, db: Session = Depends(get_db)) -> AuthResponse:
-    existing = db.query(User).filter(User.username == payload.username).first()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists.")
-
-    user = User(
-        username=payload.username,
-        password_hash=hash_password(payload.password),
-        role=payload.role,
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "Direct self-registration is disabled. Submit registration first, then wait for "
+            "teacher validation and initial credentials via email."
+        ),
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    token = create_user_session(db, user.id)
-    return AuthResponse(token=token, user=UserOut.model_validate(user))
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -55,4 +56,99 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthResponse:
 
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)) -> UserOut:
+    return UserOut.model_validate(current_user)
+
+
+@router.patch("/me/profile", response_model=UserOut)
+def update_my_profile(
+    payload: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserOut:
+    if payload.first_name is not None:
+        current_user.first_name = payload.first_name.strip() or None
+    if payload.middle_name is not None:
+        current_user.middle_name = payload.middle_name.strip() or None
+    if payload.last_name is not None:
+        current_user.last_name = payload.last_name.strip() or None
+    if payload.email is not None:
+        normalized_email = payload.email.strip().lower()
+        if normalized_email:
+            existing = (
+                db.query(User)
+                .filter(User.email == normalized_email, User.id != current_user.id)
+                .first()
+            )
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="Email is already in use."
+                )
+            current_user.email = normalized_email
+        else:
+            current_user.email = None
+    if payload.phone_number is not None:
+        current_user.phone_number = payload.phone_number.strip() or None
+    if payload.address is not None:
+        current_user.address = payload.address.strip() or None
+    if payload.birth_date is not None:
+        current_user.birth_date = payload.birth_date
+
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return UserOut.model_validate(current_user)
+
+
+@router.post("/me/change-password")
+def change_password(
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect.")
+
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="New password must be different from current password.",
+        )
+
+    current_user.password_hash = hash_password(payload.new_password)
+    current_user.must_change_password = False
+    db.add(current_user)
+    db.commit()
+    return {"message": "Password updated successfully."}
+
+
+@router.post("/me/profile-photo", response_model=UserOut)
+async def upload_profile_photo(
+    profile_photo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserOut:
+    suffix = Path(profile_photo.filename or "").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Profile photo must be JPG, PNG, or WEBP.",
+        )
+
+    content = await profile_photo.read()
+    if len(content) > 6 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Profile photo is too large. Max size is 6MB.",
+        )
+
+    uploads_dir = (Path(__file__).resolve().parents[3] / "uploads" / "profiles").resolve()
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"user-{current_user.id}-{uuid4().hex}{suffix}"
+    destination = uploads_dir / filename
+    destination.write_bytes(content)
+
+    current_user.profile_image_path = f"uploads/profiles/{filename}"
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
     return UserOut.model_validate(current_user)

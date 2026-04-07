@@ -1,13 +1,71 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 
+function getStoredToken(): string | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  const token = window.localStorage.getItem("auth_token");
+  return token && token.trim() ? token : undefined;
+}
+
 export type ApiUser = {
   id: number;
   username: string;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  address?: string | null;
+  birth_date?: string | null;
+  profile_image_path?: string | null;
+  must_change_password?: boolean;
 };
 
 export type AuthResponse = {
   token: string;
   user: ApiUser;
+};
+
+export type RegistrationPayload = {
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
+  birth_date: string;
+  address: string;
+  email: string;
+  phone_number: string;
+  reference_number: string;
+  reference_image: File;
+};
+
+export type RegistrationRecord = {
+  id: number;
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+  birth_date: string | null;
+  address: string | null;
+  email: string;
+  phone_number: string;
+  reference_number: string;
+  reference_image_path: string | null;
+  created_at: string;
+};
+
+export type RegistrationSubmitResponse = {
+  message: string;
+  registration: RegistrationRecord;
+};
+
+export type ProfileUpdatePayload = {
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  address?: string | null;
+  birth_date?: string | null;
 };
 
 export type ProgressSummary = {
@@ -16,10 +74,21 @@ export type ProgressSummary = {
   overall_progress_percent: number;
 };
 
+export type LessonReference = {
+  id: string;
+  title: string;
+  image_url: string;
+  source_url: string;
+  credit?: string;
+  license?: string;
+  letters?: string[];
+};
+
 export type Lesson = {
   id: string;
   title: string;
   content: string;
+  references?: LessonReference[];
 };
 
 export type Assessment = {
@@ -41,54 +110,6 @@ export type ModuleItem = {
   status: "in_progress" | "completed";
   progress_percent: number;
   assessment_score: number | null;
-};
-
-export type TeacherModuleRosterSummary = {
-  module_id: number;
-  module_slug: string;
-  module_title: string;
-  total_students: number;
-  in_progress_students: number;
-  completed_students: number;
-  completion_rate_percent: number;
-  average_progress_percent: number;
-  average_assessment_score: number | null;
-};
-
-export type TeacherStudentModuleProgress = {
-  user_id: number;
-  username: string;
-  status: string;
-  progress_percent: number;
-  completed_lessons_count: number;
-  assessment_score: number | null;
-  updated_at: string;
-};
-
-export type TeacherStudentProgressList = {
-  module_id: number;
-  module_slug: string;
-  module_title: string;
-  students: TeacherStudentModuleProgress[];
-};
-
-export type TeacherAssessmentDistributionBucket = {
-  label: string;
-  count: number;
-};
-
-export type TeacherAssessmentMetrics = {
-  module_id: number;
-  module_slug: string;
-  module_title: string;
-  total_students_with_scores: number;
-  average_score: number | null;
-  min_score: number | null;
-  max_score: number | null;
-  passing_score_threshold: number;
-  passing_count: number;
-  passing_rate_percent: number;
-  distribution: TeacherAssessmentDistributionBucket[];
 };
 
 export type LabPrediction = {
@@ -209,8 +230,9 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
   if (!(options?.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  const authToken = token ?? getStoredToken();
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
   }
 
   let response: Response;
@@ -220,8 +242,11 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
       headers,
       cache: "no-store"
     });
-  } catch {
-    throw new Error(`Unable to reach backend API at ${API_BASE}.`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Unknown network error";
+    throw new Error(
+      `Unable to reach API at ${API_BASE}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
+    );
   }
 
   if (!response.ok) {
@@ -250,36 +275,68 @@ export function login(username: string, password: string): Promise<AuthResponse>
   });
 }
 
+export function getCurrentUser(token: string): Promise<ApiUser> {
+  return request<ApiUser>("/auth/me", undefined, token);
+}
+
+export function updateMyProfile(payload: ProfileUpdatePayload): Promise<ApiUser> {
+  return request<ApiUser>("/auth/me/profile", {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function changeMyPassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<{ message: string }> {
+  return request<{ message: string }>("/auth/me/change-password", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword
+    })
+  });
+}
+
+export function uploadMyProfilePhoto(file: File): Promise<ApiUser> {
+  const data = new FormData();
+  data.append("profile_photo", file);
+  return request<ApiUser>("/auth/me/profile-photo", {
+    method: "POST",
+    body: data
+  });
+}
+
+export async function submitRegistration(
+  payload: RegistrationPayload
+): Promise<RegistrationSubmitResponse> {
+  const data = new FormData();
+  data.append("first_name", payload.first_name);
+  data.append("last_name", payload.last_name);
+  data.append("email", payload.email);
+  data.append("phone_number", payload.phone_number);
+  data.append("reference_number", payload.reference_number);
+
+  if (payload.middle_name?.trim()) {
+    data.append("middle_name", payload.middle_name.trim());
+  }
+  data.append("birth_date", payload.birth_date.trim());
+  data.append("address", payload.address.trim());
+  data.append("reference_image", payload.reference_image);
+
+  return request<RegistrationSubmitResponse>("/registrations", {
+    method: "POST",
+    body: data
+  });
+}
+
 export function getProgressSummary(token?: string): Promise<ProgressSummary> {
   return request<ProgressSummary>("/progress/summary", undefined, token);
 }
 
 export function getModules(token?: string): Promise<ModuleItem[]> {
   return request<ModuleItem[]>("/modules", undefined, token);
-}
-
-export function getTeacherModuleRosterSummary(
-  token?: string
-): Promise<TeacherModuleRosterSummary[]> {
-  return request<TeacherModuleRosterSummary[]>("/teacher/modules/roster-summary", undefined, token);
-}
-
-export function getTeacherModuleStudentProgress(
-  moduleId: number,
-  token?: string
-): Promise<TeacherStudentProgressList> {
-  return request<TeacherStudentProgressList>(`/teacher/modules/${moduleId}/students`, undefined, token);
-}
-
-export function getTeacherModuleAssessmentMetrics(
-  moduleId: number,
-  token?: string
-): Promise<TeacherAssessmentMetrics> {
-  return request<TeacherAssessmentMetrics>(
-    `/teacher/modules/${moduleId}/assessment-metrics`,
-    undefined,
-    token
-  );
 }
 
 export function updateModuleProgress(

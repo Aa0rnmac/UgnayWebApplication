@@ -120,6 +120,11 @@ Collect custom moving numbers `11-100` by batch (recommended):
 python scripts/collect_custom_number_batches.py --batch 11-20 --samples-per-label 70 --frames-per-sample 20 --camera-index 0 --backend dshow
 ```
 
+Replace existing clips for a whole batch before recollecting:
+```bash
+python scripts/collect_custom_number_batches.py --batch 11-20 --samples-per-label 70 --frames-per-sample 20 --camera-index 0 --backend dshow --replace-existing
+```
+
 Then continue with:
 - `--batch 21-30`
 - `--batch 31-40`
@@ -129,6 +134,9 @@ Then continue with:
 - `--batch 71-80`
 - `--batch 81-90`
 - `--batch 91-100`
+
+Collector controls:
+- Press `R` to replace (delete) old clips for the current label folder and recollect from `1`.
 
 Dataset output location:
 - `<DATASETS_ROOT>/custom_numbers_motion/<BATCH>/<NUMBER>/*.mp4`

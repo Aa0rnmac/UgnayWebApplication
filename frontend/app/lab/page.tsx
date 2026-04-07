@@ -28,6 +28,7 @@ export default function SigningLabPage() {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [predicting, setPredicting] = useState(false);
+  const [recognizedInput, setRecognizedInput] = useState("");
   const isSequenceMode = mode === "numbers" || mode === "words";
 
   type CaptureOptions = {
@@ -50,6 +51,7 @@ export default function SigningLabPage() {
     setTopCandidates([]);
     setPrediction("No prediction yet.");
     setCaptureStatus(null);
+    setRecognizedInput("");
     wordsHistoryRef.current = [];
     if (!isSequenceMode) {
       setSequenceAuto(false);
@@ -66,6 +68,7 @@ export default function SigningLabPage() {
     setTopCandidates([]);
     setPrediction("No prediction yet.");
     setCaptureStatus(null);
+    setRecognizedInput("");
   }, [wordsCategory, mode]);
 
   useEffect(() => {
@@ -77,7 +80,15 @@ export default function SigningLabPage() {
     setTopCandidates([]);
     setPrediction("No prediction yet.");
     setCaptureStatus(null);
+    setRecognizedInput("");
   }, [numbersCategory, mode]);
+
+  useEffect(() => {
+    if (!prediction || prediction === "No prediction yet.") {
+      return;
+    }
+    setRecognizedInput(prediction);
+  }, [prediction]);
 
   async function startCamera() {
     setError(null);
@@ -104,6 +115,14 @@ export default function SigningLabPage() {
     wordsHistoryRef.current = [];
     setCaptureStatus(null);
     setRunning(false);
+  }
+
+  async function toggleCamera() {
+    if (running) {
+      stopCamera();
+      return;
+    }
+    await startCamera();
   }
 
   async function captureCurrentFrameAsFile(options?: CaptureOptions): Promise<File | null> {
@@ -414,17 +433,30 @@ export default function SigningLabPage() {
 
     try {
       const isDynamicRange = numbersCategory !== "0-10";
-      const frameCount = isDynamicRange ? 11 : 12;
-      const frameDelay = isDynamicRange ? 70 : 90;
-      await runCaptureCountdown(isDynamicRange ? 2 : 3, sequenceAuto);
-      setCaptureStatus("Capturing gesture...");
-      const sequence = await captureFrameSequence(frameCount, frameDelay);
-      if (sequence.length < 8) {
+      const frameCount = isDynamicRange ? 16 : 12;
+      const frameDelay = isDynamicRange ? 85 : 90;
+      const minimumFrames = isDynamicRange ? 10 : 8;
+      const captureProfile = isDynamicRange
+        ? {
+            maxWidth: 720,
+            maxHeight: 540,
+            jpegQuality: 0.88
+          }
+        : {
+            maxWidth: 760,
+            maxHeight: 560,
+            jpegQuality: 0.9
+          };
+
+      await runCaptureCountdown(3, sequenceAuto);
+      setCaptureStatus(isDynamicRange ? "Capturing gesture for 11-100..." : "Capturing gesture...");
+      const sequence = await captureFrameSequence(frameCount, frameDelay, captureProfile);
+      if (sequence.length < minimumFrames) {
         setError("Not enough clear frames. Keep one hand centered and try again.");
         return;
       }
       setCaptureStatus("Capture complete. You can remove your hand.");
-      await sleep(180);
+      await sleep(160);
       setCaptureStatus("Analyzing captured gesture...");
       const result = await predictNumbersFromFrames(sequence, undefined, numbersCategory);
       setPrediction(result.prediction);
@@ -471,7 +503,7 @@ export default function SigningLabPage() {
         : mode === "numbers"
           ? numbersCategory === "0-10"
             ? 1700
-            : 1400
+            : 2300
           : 1200;
     const interval = window.setInterval(() => {
       void runPrediction();
@@ -484,38 +516,50 @@ export default function SigningLabPage() {
 
   return (
     <section className="space-y-4">
-      <div className="panel">
-        <h2 className="text-2xl font-semibold">Free Signing Lab</h2>
+      <div className="panel panel-lively">
+        <h2 className="text-2xl font-semibold title-gradient">Free Signing Lab</h2>
         <p className="mt-2 text-sm text-muted">
           Alphabet runs live automatically. Numbers and Words support manual capture or auto analyze.
         </p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
-        <div className="panel">
+        <div className="panel panel-lively">
           <video
             autoPlay
-            className="aspect-video w-full rounded-xl border border-white/20 bg-black"
+            className="aspect-video w-full rounded-xl border border-slate-300 bg-slate-900"
             muted
             playsInline
             ref={videoRef}
           />
           <div className="mt-3 flex flex-wrap gap-2">
             <button
-              className="rounded bg-accent px-3 py-2 text-xs font-semibold"
-              onClick={startCamera}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 ${
+                running ? "bg-brandRed hover:bg-brandRed/90" : "bg-brandBlue hover:bg-brandBlue/90"
+              }`}
+              onClick={() => {
+                void toggleCamera();
+              }}
               type="button"
             >
-              Start Camera
+              <span className="inline-grid min-w-[92px] place-items-center">
+                <span
+                  className={`col-start-1 row-start-1 transition-all duration-300 ${
+                    running ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"
+                  }`}
+                >
+                  Start Camera
+                </span>
+                <span
+                  className={`col-start-1 row-start-1 transition-all duration-300 ${
+                    running ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
+                  }`}
+                >
+                  Stop Camera
+                </span>
+              </span>
             </button>
-            <button
-              className="rounded bg-slate-600 px-3 py-2 text-xs font-semibold"
-              onClick={stopCamera}
-              type="button"
-            >
-              Stop Camera
-            </button>
-            <span className="rounded bg-accentWarm px-3 py-2 text-xs font-semibold text-black">
+            <span className="rounded-lg border border-brandBorder bg-brandYellowLight px-3 py-2 text-xs font-semibold text-brandNavy">
               {captureStatus ??
                 (predicting
                 ? mode === "words" || mode === "numbers"
@@ -532,12 +576,12 @@ export default function SigningLabPage() {
           </div>
         </div>
 
-        <aside className="panel">
-          <label className="text-xs uppercase tracking-wider text-muted" htmlFor="recognition-mode">
+        <aside className="panel panel-lively">
+          <label className="text-xs uppercase tracking-wider label-accent" htmlFor="recognition-mode">
             Recognition Mode
           </label>
           <select
-            className="mt-2 w-full rounded border border-white/20 bg-black/30 px-3 py-2 text-sm text-slate-100"
+            className="mt-2 w-full rounded border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 focus:border-brandBlue focus:outline-none"
             id="recognition-mode"
             onChange={(event) => setMode(event.target.value as RecognitionMode)}
             value={mode}
@@ -549,11 +593,11 @@ export default function SigningLabPage() {
 
           {mode === "numbers" ? (
             <div className="mt-3">
-              <label className="text-xs uppercase tracking-wider text-muted" htmlFor="numbers-category">
+              <label className="text-xs uppercase tracking-wider label-accent" htmlFor="numbers-category">
                 Numbers Range
               </label>
               <select
-                className="mt-2 w-full rounded border border-white/20 bg-black/30 px-3 py-2 text-sm text-slate-100"
+                className="mt-2 w-full rounded border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 focus:border-brandBlue focus:outline-none"
                 id="numbers-category"
                 onChange={(event) => setNumbersCategory(event.target.value as NumbersCategory)}
                 value={numbersCategory}
@@ -574,11 +618,11 @@ export default function SigningLabPage() {
 
           {mode === "words" ? (
             <div className="mt-3">
-              <label className="text-xs uppercase tracking-wider text-muted" htmlFor="words-category">
+              <label className="text-xs uppercase tracking-wider label-accent" htmlFor="words-category">
                 Words Category
               </label>
               <select
-                className="mt-2 w-full rounded border border-white/20 bg-black/30 px-3 py-2 text-sm text-slate-100"
+                className="mt-2 w-full rounded border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 focus:border-brandBlue focus:outline-none"
                 id="words-category"
                 onChange={(event) => setWordsCategory(event.target.value as WordsCategory)}
                 value={wordsCategory}
@@ -596,7 +640,7 @@ export default function SigningLabPage() {
           {isSequenceMode ? (
             <div className="mt-3 flex flex-wrap gap-2">
               <button
-                className="rounded bg-accent px-3 py-2 text-xs font-semibold"
+                className="rounded-lg bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandRed/90"
                 onClick={() => {
                   void runPrediction();
                 }}
@@ -605,7 +649,7 @@ export default function SigningLabPage() {
                 Analyze Sign Now
               </button>
               <button
-                className="rounded bg-slate-600 px-3 py-2 text-xs font-semibold"
+                className="rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandBlue/90"
                 onClick={() => setSequenceAuto((value) => !value)}
                 type="button"
               >
@@ -614,18 +658,41 @@ export default function SigningLabPage() {
             </div>
           ) : null}
 
-          <p className="mt-4 text-xs uppercase tracking-wider text-muted">Prediction Output</p>
-          <p className="mt-3 text-2xl font-bold text-accentWarm">{prediction}</p>
-          <p className="mt-2 text-sm text-slate-200">
+          <p className="mt-4 text-xs uppercase tracking-wider label-accent">Prediction Output</p>
+          <p className="mt-3 text-2xl font-bold text-brandBlue">{prediction}</p>
+          <p className="mt-2 text-sm text-slate-700">
             Confidence: {confidence !== null ? `${Math.round(confidence * 100)}%` : "N/A"}
           </p>
-          <p className="mt-1 text-xs text-slate-300">
+          <p className="mt-1 text-xs text-slate-600">
             Top candidates: {topCandidates.length > 0 ? topCandidates.join(" | ") : "N/A"}
           </p>
+
+          <label className="mt-4 block text-xs font-semibold uppercase tracking-wider label-accent">
+            Recognized Gesture
+            <input
+              autoComplete="off"
+              className="mt-2 w-full rounded border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+              onChange={(event) => setRecognizedInput(event.target.value)}
+              onDrop={(event) => event.preventDefault()}
+              onPaste={(event) => event.preventDefault()}
+              placeholder="Type recognized gesture/letters here..."
+              spellCheck={false}
+              type="text"
+              value={recognizedInput}
+            />
+          </label>
+          <button
+            className="mt-2 rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+            onClick={() => setRecognizedInput("")}
+            type="button"
+          >
+            Clear Input
+          </button>
         </aside>
       </div>
 
-      {error ? <p className="text-sm text-red-300">Error: {error}</p> : null}
+      {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
     </section>
   );
 }
+
