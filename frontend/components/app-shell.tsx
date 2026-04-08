@@ -7,7 +7,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppNav } from "@/components/nav";
 import { SiteFooter } from "@/components/site-footer";
-import { getCurrentUser } from "@/lib/api";
+import { getCurrentUser, resolveUploadsBase } from "@/lib/api";
 
 function isPublicRoute(pathname: string): boolean {
   return pathname === "/" || pathname.startsWith("/register");
@@ -57,8 +57,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         const resolvedName = fullName || (user.username?.trim() ? user.username : "Student");
         setUsername(resolvedName);
         if (user.profile_image_path) {
-          const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
-          const uploadBase = apiBase.replace(/\/api\/?$/, "");
+          const uploadBase = resolveUploadsBase();
           setProfileImageUrl(`${uploadBase}/${user.profile_image_path}`);
         } else {
           setProfileImageUrl(null);

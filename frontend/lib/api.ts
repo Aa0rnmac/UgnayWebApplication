@@ -1,4 +1,38 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
+function isLocalHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+export function resolveApiBase(): string {
+  const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (configuredBase) {
+    if (typeof window !== "undefined") {
+      try {
+        const configuredUrl = new URL(configuredBase);
+        // If frontend is accessed over LAN, but env still points to localhost,
+        // auto-rewrite host to the current browser host to avoid network fetch failures.
+        if (isLocalHostname(configuredUrl.hostname) && !isLocalHostname(window.location.hostname)) {
+          configuredUrl.hostname = window.location.hostname;
+          configuredUrl.protocol = window.location.protocol;
+          return configuredUrl.toString().replace(/\/$/, "");
+        }
+      } catch {
+        // Ignore malformed env values; fallback logic below will apply.
+      }
+    }
+    return configuredBase;
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8000/api`;
+  }
+
+  return "http://localhost:8000/api";
+}
+
+export function resolveUploadsBase(): string {
+  return resolveApiBase().replace(/\/api\/?$/, "");
+}
 
 function getStoredToken(): string | undefined {
   if (typeof window === "undefined") {
@@ -295,6 +329,7 @@ export type WordsModelStatus = {
 };
 
 async function request<T>(path: string, options?: RequestInit, token?: string): Promise<T> {
+  const apiBase = resolveApiBase();
   const headers = new Headers(options?.headers);
   if (!(options?.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
@@ -306,7 +341,7 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(`${apiBase}${path}`, {
       ...options,
       headers,
       cache: "no-store"
@@ -314,7 +349,7 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown network error";
     throw new Error(
-      `Unable to reach API at ${API_BASE}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
+      `Unable to reach API at ${apiBase}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
     );
   }
 

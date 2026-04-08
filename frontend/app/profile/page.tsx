@@ -6,6 +6,7 @@ import {
   ApiUser,
   changeMyPassword,
   getCurrentUser,
+  resolveUploadsBase,
   updateMyProfile,
   uploadMyProfilePhoto
 } from "@/lib/api";
@@ -55,8 +56,7 @@ export default function ProfilePage() {
     if (!user?.profile_image_path) {
       return null;
     }
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
-    const uploadBase = apiBase.replace(/\/api\/?$/, "");
+    const uploadBase = resolveUploadsBase();
     return `${uploadBase}/${user.profile_image_path}`;
   }, [user?.profile_image_path]);
 

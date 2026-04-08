@@ -7,7 +7,7 @@ for (const dir of [".next", ".turbo"]) {
 }
 
 const nextBin = resolve(process.cwd(), "node_modules", "next", "dist", "bin", "next");
-const child = spawn(process.execPath, [nextBin, "dev"], {
+const child = spawn(process.execPath, [nextBin, "dev", "-H", "0.0.0.0", "-p", "3000"], {
   stdio: "inherit",
   env: process.env
 });
