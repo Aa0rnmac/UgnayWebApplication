@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     api_port: int = 8000
     session_hours: int = 24
     teacher_validation_key: str = "teacher123"
+    teacher_registration_passkey: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    smtp_timeout_seconds: int = 20
+    email_from_address: str = "no-reply@fsl-learning-hub.local"
+    email_from_name: str = "FSL Learning Hub"
+    dev_email_output_dir: str = "backend/dev_emails"
     alphabet_model_path: str = "artifacts/alphabet_model.joblib"
     alphabet_confidence_threshold: float = 0.45
     alphabet_min_top2_margin: float = 0.08
@@ -73,6 +84,13 @@ class Settings(BaseSettings):
             path = Path(*parts[1:]) if len(parts) > 1 else Path()
 
         return (self.artifacts_root_path / path).resolve()
+
+    @property
+    def dev_email_output_dir_path(self) -> Path:
+        configured = Path(self.dev_email_output_dir).expanduser()
+        if configured.is_absolute():
+            return configured
+        return (PROJECT_ROOT / configured).resolve()
 
 
 settings = Settings()

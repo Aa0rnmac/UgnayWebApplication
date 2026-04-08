@@ -19,4 +19,7 @@ class Module(Base):
     progress_entries = relationship(
         "UserModuleProgress", back_populates="module", cascade="all, delete-orphan"
     )
+    assessment_attempts = relationship(
+        "UserAssessmentAttempt", back_populates="module", cascade="all, delete-orphan"
+    )
 

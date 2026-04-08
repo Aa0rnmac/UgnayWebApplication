@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.progress import AssessmentAttemptOut
+
 
 class LessonReferenceOut(BaseModel):
     id: str
@@ -38,4 +40,6 @@ class ModuleOut(BaseModel):
     is_locked: bool
     status: str
     progress_percent: int
+    completed_lessons: list[str] = Field(default_factory=list)
     assessment_score: float | None = None
+    latest_assessment_attempt: AssessmentAttemptOut | None = None

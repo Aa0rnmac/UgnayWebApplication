@@ -13,12 +13,14 @@ from app.models.user import User
 from app.schemas.teacher import (
     TeacherAssessmentDistributionBucket,
     TeacherAssessmentMetrics,
+    TeacherModuleCatalogItem,
     TeacherModuleRosterSummary,
     TeacherStudentModuleProgress,
     TeacherStudentProgressList,
 )
 
 router = APIRouter(prefix="/teacher/modules", tags=["teacher-modules"])
+PLACEHOLDER_MODULE_RANGE = range(9, 13)
 
 
 def _get_published_module_or_404(db: Session, module_id: int) -> Module:
@@ -26,6 +28,33 @@ def _get_published_module_or_404(db: Session, module_id: int) -> Module:
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
     return module
+
+
+def _to_teacher_module_payload(module: Module) -> TeacherModuleCatalogItem:
+    return TeacherModuleCatalogItem(
+        id=module.id,
+        slug=module.slug,
+        title=module.title,
+        description=module.description,
+        order_index=module.order_index,
+        lessons=module.lessons,
+        is_placeholder=False,
+    )
+
+
+def _build_placeholder_module(order_index: int) -> TeacherModuleCatalogItem:
+    return TeacherModuleCatalogItem(
+        id=order_index,
+        slug=f"module-{order_index}-coming-soon",
+        title=f"Module {order_index}",
+        description=(
+            "Coming Soon. This teacher lesson view will unlock after the module content is "
+            "published."
+        ),
+        order_index=order_index,
+        lessons=[],
+        is_placeholder=True,
+    )
 
 
 def _student_progress_rows(db: Session, module_id: int) -> list[tuple[UserModuleProgress, User]]:
@@ -39,6 +68,40 @@ def _student_progress_rows(db: Session, module_id: int) -> list[tuple[UserModule
         .order_by(User.username.asc())
         .all()
     )
+
+
+@router.get("/catalog", response_model=list[TeacherModuleCatalogItem])
+def get_teacher_module_catalog(
+    db: Session = Depends(get_db), _: User = Depends(get_current_teacher)
+) -> list[TeacherModuleCatalogItem]:
+    modules = (
+        db.query(Module).filter(Module.is_published.is_(True)).order_by(Module.order_index.asc()).all()
+    )
+    payload = [_to_teacher_module_payload(module) for module in modules if module.order_index <= 12]
+
+    existing_order_indices = {item.order_index for item in payload}
+    for order_index in PLACEHOLDER_MODULE_RANGE:
+        if order_index in existing_order_indices:
+            continue
+        payload.append(_build_placeholder_module(order_index))
+
+    return sorted(payload, key=lambda item: item.order_index)
+
+
+@router.get("/{module_id}", response_model=TeacherModuleCatalogItem)
+def get_teacher_module_detail(
+    module_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> TeacherModuleCatalogItem:
+    module = db.query(Module).filter(Module.id == module_id, Module.is_published.is_(True)).first()
+    if module:
+        return _to_teacher_module_payload(module)
+
+    if module_id in PLACEHOLDER_MODULE_RANGE:
+        return _build_placeholder_module(module_id)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
 
 
 @router.get("/roster-summary", response_model=list[TeacherModuleRosterSummary])

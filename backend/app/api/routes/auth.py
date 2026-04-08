@@ -1,3 +1,4 @@
+import hmac
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -14,6 +15,7 @@ from app.models.user import User
 from app.schemas.auth import (
     AuthResponse,
     PasswordChangeRequest,
+    TeacherRegisterRequest,
     UserCreate,
     UserLogin,
     UserOut,
@@ -31,6 +33,58 @@ def create_user_session(db: Session, user_id: int) -> str:
     db.add(session)
     db.commit()
     return token
+
+
+def _get_teacher_registration_passkey() -> str:
+    value = (settings.teacher_registration_passkey or settings.teacher_validation_key).strip()
+    if not value:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Teacher registration is not configured.",
+        )
+    return value
+
+
+@router.post("/register/teacher", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+def register_teacher(
+    payload: TeacherRegisterRequest,
+    db: Session = Depends(get_db),
+) -> AuthResponse:
+    configured_passkey = _get_teacher_registration_passkey()
+    if not hmac.compare_digest(payload.passkey, configured_passkey):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid teacher passkey.")
+
+    username = payload.username.strip()
+    existing_user = db.query(User).filter(User.username == username).first()
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists.")
+
+    existing_email = db.query(User).filter(User.email == payload.email).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already linked to another account.",
+        )
+
+    user = User(
+        username=username,
+        password_hash=hash_password(payload.password),
+        role="teacher",
+        first_name=payload.first_name,
+        middle_name=payload.middle_name,
+        last_name=payload.last_name,
+        email=payload.email,
+        phone_number=payload.phone_number,
+        address=payload.address,
+        birth_date=payload.birth_date,
+        must_change_password=False,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_user_session(db, user.id)
+    return AuthResponse(token=token, user=UserOut.model_validate(user))
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

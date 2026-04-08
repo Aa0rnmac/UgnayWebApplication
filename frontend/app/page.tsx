@@ -37,8 +37,9 @@ export default function LoginPage() {
       <div className="panel panel-lively">
         <h2 className="text-3xl font-bold title-gradient">Sign In</h2>
         <p className="mt-2 text-sm text-muted">
-          Sign in with your assigned account, or use the demo access card below to jump straight
-          into the student or teacher workspace.
+          Sign in with your assigned account, open student registration, or create a teacher
+          account with the school-issued passkey. Demo access is still available below for quick
+          previews.
         </p>
       </div>
 
@@ -78,9 +79,19 @@ export default function LoginPage() {
             className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
             href="/register"
           >
-            Open Registration
+            Student Registration
+          </Link>
+          <Link
+            className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+            href="/register/teacher"
+          >
+            Teacher Registration
           </Link>
         </div>
+
+        <p className="text-xs text-muted">
+          Teachers need the current registration passkey from the coordinator or administrator.
+        </p>
 
         {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
       </form>

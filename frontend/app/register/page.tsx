@@ -14,6 +14,7 @@ type FormState = {
   address: string;
   email: string;
   phoneNumber: string;
+  requestedBatchName: string;
   referenceNumber: string;
   referenceImage: File | null;
 };
@@ -26,6 +27,7 @@ const INITIAL_FORM: FormState = {
   address: "",
   email: "",
   phoneNumber: "",
+  requestedBatchName: "",
   referenceNumber: "",
   referenceImage: null
 };
@@ -96,6 +98,7 @@ export default function RegisterPage() {
         email,
         phone_number: phone,
         reference_number: form.referenceNumber.trim(),
+        requested_batch_name: form.requestedBatchName.trim() || undefined,
         reference_image: referenceImage
       });
 
@@ -119,12 +122,20 @@ export default function RegisterPage() {
           Fill in your personal information, contact details, and reference number. All fields are
           required except middle name, and payment reference image upload is required.
         </p>
-        <Link
-          className="mt-3 inline-flex rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-          href="/"
-        >
-          Back to Login
-        </Link>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            className="inline-flex rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+            href="/"
+          >
+            Back to Login
+          </Link>
+          <Link
+            className="inline-flex rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+            href="/register/teacher"
+          >
+            Teacher Registration
+          </Link>
+        </div>
       </div>
 
       <form className="panel panel-lively space-y-4" onSubmit={onSubmit}>
@@ -221,6 +232,20 @@ export default function RegisterPage() {
             />
           </label>
         </div>
+
+        <label className="space-y-1 text-sm font-semibold text-slate-800">
+          Requested Batch / Section
+          <input
+            className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+            onChange={(event) => updateField("requestedBatchName", event.target.value)}
+            placeholder="Example: Section A"
+            type="text"
+            value={form.requestedBatchName}
+          />
+          <p className="text-xs text-muted">
+            Optional. Teachers can still adjust your batch during approval.
+          </p>
+        </label>
 
         <div className="rounded-xl border border-brandBorder bg-brandBlueLight/40 p-3">
           <p className="text-sm font-semibold text-slate-800">Upload Proof of Payment</p>

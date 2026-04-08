@@ -13,6 +13,7 @@ type RawUser = {
 type RawAuthResponse = {
   token?: string;
   user?: RawUser;
+  detail?: string;
 };
 
 const SESSION_COOKIE = "fsl_token";
@@ -31,6 +32,19 @@ export type SessionUser = {
   id: number;
   username: string;
   role: SessionRole;
+};
+
+export type TeacherRegistrationRequest = {
+  username: string;
+  password: string;
+  passkey: string;
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
+  email: string;
+  phone_number?: string;
+  address?: string;
+  birth_date?: string;
 };
 
 export function guestSessionUser(): SessionUser {
@@ -76,23 +90,47 @@ export async function loginAgainstBackend(
   | { ok: true; token: string; user: SessionUser }
   | { ok: false; status: number; detail: string }
 > {
+  return requestAuthFromBackend("/auth/login", { username, password }, "Unable to sign in.");
+}
+
+export async function registerTeacherAgainstBackend(
+  payload: TeacherRegistrationRequest
+): Promise<
+  | { ok: true; token: string; user: SessionUser }
+  | { ok: false; status: number; detail: string }
+> {
+  return requestAuthFromBackend(
+    "/auth/register/teacher",
+    payload,
+    "Unable to create teacher account."
+  );
+}
+
+async function requestAuthFromBackend(
+  path: string,
+  payload: object,
+  fallbackDetail: string
+): Promise<
+  | { ok: true; token: string; user: SessionUser }
+  | { ok: false; status: number; detail: string }
+> {
   try {
-    const { response } = await fetchWithApiFallback("/auth/login", {
+    const { response } = await fetchWithApiFallback(path, {
       method: "POST",
       cache: "no-store",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(payload),
     });
 
-    const data = (await response.json().catch(() => ({}))) as RawAuthResponse & { detail?: string };
+    const data = (await response.json().catch(() => ({}))) as RawAuthResponse;
 
     if (!response.ok) {
       return {
         ok: false,
         status: response.status,
-        detail: data.detail ?? "Unable to sign in.",
+        detail: data.detail ?? fallbackDetail,
       };
     }
 

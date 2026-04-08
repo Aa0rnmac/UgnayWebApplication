@@ -45,6 +45,7 @@ async def submit_registration(
     email: str = Form(...),
     phone_number: str = Form(...),
     reference_number: str = Form(...),
+    requested_batch_name: str | None = Form(default=None),
     reference_image: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> RegistrationSubmitResponse:
@@ -65,6 +66,7 @@ async def submit_registration(
         email=email.strip(),
         phone_number=phone_number.strip(),
         reference_number=reference_number.strip(),
+        requested_batch_name=_clean_optional(requested_batch_name),
     )
 
     if not reference_image.filename:
@@ -102,6 +104,7 @@ async def submit_registration(
         email=payload.email,
         phone_number=payload.phone_number,
         reference_number=payload.reference_number,
+        requested_batch_name=payload.requested_batch_name,
         reference_image_path=image_path,
         status="pending",
     )
@@ -166,11 +169,13 @@ def validate_registration(
     db.add(user)
     db.flush()
 
-    registration.status = "validated"
+    registration.status = "approved"
     registration.validated_at = datetime.now(timezone.utc)
     registration.validated_by = payload.teacher_name.strip()
     registration.linked_user_id = user.id
     registration.issued_username = payload.issued_username.strip()
+    registration.credential_email_status = "manual"
+    registration.credential_email_error = None
     registration.notes = payload.notes.strip() if payload.notes else None
 
     db.add(registration)

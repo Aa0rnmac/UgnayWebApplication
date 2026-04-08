@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -21,6 +21,7 @@ class User(Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     profile_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"), nullable=True, index=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -30,3 +31,7 @@ class User(Base):
     progress_entries = relationship(
         "UserModuleProgress", back_populates="user", cascade="all, delete-orphan"
     )
+    assessment_attempts = relationship(
+        "UserAssessmentAttempt", back_populates="user", cascade="all, delete-orphan"
+    )
+    batch = relationship("Batch", back_populates="students")

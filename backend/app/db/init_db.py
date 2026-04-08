@@ -4,12 +4,19 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.batch import Batch
 from app.models.module import Module
 from app.models.user import User
 
 DEMO_USERS = (
     {"username": "student_demo", "password": "student123", "role": "student"},
     {"username": "teacher_demo", "password": "teacher123", "role": "teacher"},
+)
+
+DEMO_BATCHES = (
+    {"name": "Section A", "current_week_number": 3},
+    {"name": "Section B", "current_week_number": 5},
+    {"name": "Section C", "current_week_number": 2},
 )
 
 SEED_MODULES = [
@@ -646,6 +653,18 @@ def seed_demo_users(db: Session) -> None:
     db.commit()
 
 
+def seed_demo_batches(db: Session) -> None:
+    for item in DEMO_BATCHES:
+        existing_batch = db.query(Batch).filter(Batch.name == item["name"]).first()
+        if not existing_batch:
+            db.add(Batch(**item))
+            continue
+
+        existing_batch.current_week_number = item["current_week_number"]
+        db.add(existing_batch)
+    db.commit()
+
+
 def _add_column_if_missing(table_name: str, column_name: str, ddl_sql: str) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -681,10 +700,16 @@ def ensure_schema_updates() -> None:
         "must_change_password",
         "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
     )
+    _add_column_if_missing("users", "batch_id", "ALTER TABLE users ADD COLUMN batch_id INTEGER")
 
     # Registration workflow columns for teacher validation.
     _add_column_if_missing(
         "registrations", "status", "ALTER TABLE registrations ADD COLUMN status VARCHAR(20) DEFAULT 'pending'"
+    )
+    _add_column_if_missing(
+        "registrations",
+        "requested_batch_name",
+        "ALTER TABLE registrations ADD COLUMN requested_batch_name VARCHAR(120)",
     )
     _add_column_if_missing(
         "registrations", "validated_at", "ALTER TABLE registrations ADD COLUMN validated_at TIMESTAMP"
@@ -693,10 +718,32 @@ def ensure_schema_updates() -> None:
         "registrations", "validated_by", "ALTER TABLE registrations ADD COLUMN validated_by VARCHAR(120)"
     )
     _add_column_if_missing(
-        "registrations", "linked_user_id", "ALTER TABLE registrations ADD COLUMN linked_user_id INTEGER"
+        "registrations", "rejected_at", "ALTER TABLE registrations ADD COLUMN rejected_at TIMESTAMP"
     )
     _add_column_if_missing(
+        "registrations", "rejected_by", "ALTER TABLE registrations ADD COLUMN rejected_by VARCHAR(120)"
+    )
+    _add_column_if_missing(
+        "registrations", "linked_user_id", "ALTER TABLE registrations ADD COLUMN linked_user_id INTEGER"
+    )
+    _add_column_if_missing("registrations", "batch_id", "ALTER TABLE registrations ADD COLUMN batch_id INTEGER")
+    _add_column_if_missing(
         "registrations", "issued_username", "ALTER TABLE registrations ADD COLUMN issued_username VARCHAR(120)"
+    )
+    _add_column_if_missing(
+        "registrations",
+        "credential_email_status",
+        "ALTER TABLE registrations ADD COLUMN credential_email_status VARCHAR(30)",
+    )
+    _add_column_if_missing(
+        "registrations",
+        "credential_sent_at",
+        "ALTER TABLE registrations ADD COLUMN credential_sent_at TIMESTAMP",
+    )
+    _add_column_if_missing(
+        "registrations",
+        "credential_email_error",
+        "ALTER TABLE registrations ADD COLUMN credential_email_error TEXT",
     )
     _add_column_if_missing("registrations", "notes", "ALTER TABLE registrations ADD COLUMN notes TEXT")
 
@@ -714,4 +761,5 @@ def init_db() -> None:
     ensure_schema_updates()
     with SessionLocal() as db:
         seed_modules(db)
+        seed_demo_batches(db)
         seed_demo_users(db)

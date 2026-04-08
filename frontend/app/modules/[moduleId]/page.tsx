@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getModules, ModuleItem } from "@/lib/api";
+import {
+  AssessmentAttemptPayload,
+  AssessmentAttemptRecord,
+  getModules,
+  ModuleItem,
+  submitAssessmentAttempt,
+  updateModuleProgress,
+} from "@/lib/api";
 
 const MODULE1_AI_SIGN_IMAGES = [
   { letter: "A", src: "/module-assets/m1/ai/a.png" },
@@ -213,19 +220,22 @@ const MODULE1_SIGNING_CHALLENGE_STEPS = [
     id: "m1-step-name",
     title: "Task 1: Given Name",
     prompt: "Sign this given name: ANA",
-    imageSrc: null
+    imageSrc: null,
+    expected: "ANA",
   },
   {
     id: "m1-step-animal",
     title: "Task 2: Animal Image",
     prompt: "Sign what animal is shown in the image.",
-    imageSrc: "/module-assets/m1/assessment/animal-cat.svg"
+    imageSrc: "/module-assets/m1/assessment/animal-cat.svg",
+    expected: "CAT",
   },
   {
     id: "m1-step-thing",
     title: "Task 3: Thing Image",
     prompt: "Sign what thing is shown in the image.",
-    imageSrc: "/module-assets/m1/assessment/object-book.svg"
+    imageSrc: "/module-assets/m1/assessment/object-book.svg",
+    expected: "BOOK",
   }
 ] as const;
 
@@ -519,13 +529,86 @@ function LessonVideoCard({ src, title }: { src: string; title: string }) {
   );
 }
 
-function Module1AssessmentOne({
-  questions
+type ChoiceQuestion = { id: string; question: string; choices: string[]; answer: string };
+type AssessmentSubmitHandler = (payload: AssessmentAttemptPayload) => Promise<AssessmentAttemptRecord>;
+
+function normalizeAssessmentValue(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+function captureVideoSnapshot(videoElement: HTMLVideoElement | null): string | null {
+  if (!videoElement || videoElement.videoWidth <= 0 || videoElement.videoHeight <= 0) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = videoElement.videoWidth;
+  canvas.height = videoElement.videoHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
+function AssessmentSaveNotice({
+  latestAttempt,
+  saveError,
+  saveMessage,
+  saving,
 }: {
-  questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  saveError: string | null;
+  saveMessage: string | null;
+  saving: boolean;
+}) {
+  if (!saving && !saveError && !saveMessage && !latestAttempt) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      {saving ? (
+        <p className="rounded-lg border border-brandBlue/25 bg-brandBlueLight px-3 py-2 text-sm font-semibold text-slate-800">
+          Saving assessment attempt...
+        </p>
+      ) : null}
+      {saveMessage ? (
+        <p className="rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
+          {saveMessage}
+        </p>
+      ) : null}
+      {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
+      {latestAttempt ? (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
+          Last saved: {latestAttempt.score_correct}/{latestAttempt.score_total} (
+          {latestAttempt.score_percent.toFixed(1)}%) with {latestAttempt.snapshots.length} snapshot
+          {latestAttempt.snapshots.length === 1 ? "" : "s"} on{" "}
+          {new Date(latestAttempt.submitted_at).toLocaleString()}.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function Module1AssessmentOne({
+  assessmentId,
+  latestAttempt,
+  onSave,
+  questions,
+}: {
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  onSave: AssessmentSubmitHandler;
+  questions: ChoiceQuestion[];
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setSelectedChoices({});
@@ -540,6 +623,38 @@ function Module1AssessmentOne({
     }
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
+
+  async function saveAssessment() {
+    setShowResult(true);
+    setSaveError(null);
+    setSaveMessage(null);
+    setSaving(true);
+
+    try {
+      await onSave({
+        assessment_id: assessmentId,
+        assessment_title: "Assessment 1",
+        assessment_type: "multiple_choice",
+        score_percent: questions.length > 0 ? (score / questions.length) * 100 : 0,
+        score_correct: score,
+        score_total: questions.length || 1,
+        answers: questions.map((question) => ({
+          assessment_item_id: question.id,
+          prompt: question.question,
+          response_text: selectedChoices[question.id] ?? null,
+          expected_response: question.answer,
+          is_correct: selectedChoices[question.id] === question.answer,
+        })),
+      });
+      setSaveMessage("Assessment 1 answers and score saved.");
+    } catch (saveAttemptError) {
+      setSaveError(
+        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -598,6 +713,16 @@ function Module1AssessmentOne({
         <span className="text-xs text-slate-500">
           Answered {answeredCount}/{questions.length}
         </span>
+        <button
+          className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={saving || answeredCount === 0}
+          onClick={() => {
+            void saveAssessment();
+          }}
+          type="button"
+        >
+          {saving ? "Saving..." : "Save Attempt"}
+        </button>
       </div>
 
       {showResult ? (
@@ -605,13 +730,31 @@ function Module1AssessmentOne({
           Score: {score}/{questions.length}
         </p>
       ) : null}
+
+      <AssessmentSaveNotice
+        latestAttempt={latestAttempt}
+        saveError={saveError}
+        saveMessage={saveMessage}
+        saving={saving}
+      />
     </div>
   );
 }
 
-function Module1AssessmentTwo() {
+function Module1AssessmentTwo({
+  assessmentId,
+  latestAttempt,
+  onSave,
+}: {
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  onSave: AssessmentSubmitHandler;
+}) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setAnswers({});
@@ -622,6 +765,44 @@ function Module1AssessmentTwo() {
     const value = answers[item.id]?.trim().toUpperCase() ?? "";
     return total + (value === item.answer ? 1 : 0);
   }, 0);
+
+  async function saveAssessment() {
+    setShowResult(true);
+    setSaveError(null);
+    setSaveMessage(null);
+    setSaving(true);
+
+    try {
+      await onSave({
+        assessment_id: assessmentId,
+        assessment_title: "Assessment 2",
+        assessment_type: "typed_labeling",
+        score_percent:
+          MODULE1_LABELING_ITEMS.length > 0
+            ? (correctCount / MODULE1_LABELING_ITEMS.length) * 100
+            : 0,
+        score_correct: correctCount,
+        score_total: MODULE1_LABELING_ITEMS.length || 1,
+        answers: MODULE1_LABELING_ITEMS.map((item) => {
+          const responseValue = answers[item.id] ?? "";
+          return {
+            assessment_item_id: item.id,
+            prompt: `Identify the letter shown in image ${item.id}.`,
+            response_text: responseValue || null,
+            expected_response: item.answer,
+            is_correct: normalizeAssessmentValue(responseValue) === item.answer,
+          };
+        }),
+      });
+      setSaveMessage("Assessment 2 answers saved with the latest score.");
+    } catch (saveAttemptError) {
+      setSaveError(
+        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -678,12 +859,37 @@ function Module1AssessmentTwo() {
             Score: {correctCount}/{MODULE1_LABELING_ITEMS.length}
           </span>
         ) : null}
+        <button
+          className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={saving}
+          onClick={() => {
+            void saveAssessment();
+          }}
+          type="button"
+        >
+          {saving ? "Saving..." : "Save Attempt"}
+        </button>
       </div>
+
+      <AssessmentSaveNotice
+        latestAttempt={latestAttempt}
+        saveError={saveError}
+        saveMessage={saveMessage}
+        saving={saving}
+      />
     </div>
   );
 }
 
-function Module1AssessmentThree() {
+function Module1AssessmentThree({
+  assessmentId,
+  latestAttempt,
+  onSave,
+}: {
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  onSave: AssessmentSubmitHandler;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [running, setRunning] = useState(false);
@@ -691,6 +897,10 @@ function Module1AssessmentThree() {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const activeStep = MODULE1_SIGNING_CHALLENGE_STEPS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE1_SIGNING_CHALLENGE_STEPS.length;
@@ -743,6 +953,10 @@ function Module1AssessmentThree() {
       setError("Please enter the recognized gesture before continuing.");
       return;
     }
+    if (!capturedSnapshots[activeStep.id]) {
+      setError("Capture a snapshot for this task before continuing.");
+      return;
+    }
 
     setError(null);
     setCompletedStepIds((previous) =>
@@ -761,6 +975,78 @@ function Module1AssessmentThree() {
       ...previous,
       [activeStep.id]: ""
     }));
+  }
+
+  function captureCurrentSnapshot() {
+    const snapshot = captureVideoSnapshot(videoRef.current);
+    if (!snapshot) {
+      setError("Unable to capture a snapshot. Start the camera first.");
+      return;
+    }
+
+    setError(null);
+    setCapturedSnapshots((previous) => ({
+      ...previous,
+      [activeStep.id]: snapshot,
+    }));
+  }
+
+  async function saveAssessment() {
+    if (!allDone) {
+      setSaveError("Complete all signing tasks before saving this assessment.");
+      return;
+    }
+
+    setSaveError(null);
+    setSaveMessage(null);
+    setSaving(true);
+
+    const correctCount = MODULE1_SIGNING_CHALLENGE_STEPS.reduce((total, step) => {
+      const responseValue = recognizedInputs[step.id] ?? "";
+      return total + (normalizeAssessmentValue(responseValue) === step.expected ? 1 : 0);
+    }, 0);
+
+    try {
+      await onSave({
+        assessment_id: assessmentId,
+        assessment_title: "Assessment 3",
+        assessment_type: "camera_signing",
+        score_percent:
+          MODULE1_SIGNING_CHALLENGE_STEPS.length > 0
+            ? (correctCount / MODULE1_SIGNING_CHALLENGE_STEPS.length) * 100
+            : 0,
+        score_correct: correctCount,
+        score_total: MODULE1_SIGNING_CHALLENGE_STEPS.length || 1,
+        answers: MODULE1_SIGNING_CHALLENGE_STEPS.map((step) => {
+          const responseValue = recognizedInputs[step.id] ?? "";
+          return {
+            assessment_item_id: step.id,
+            prompt: step.prompt,
+            response_text: responseValue || null,
+            expected_response: step.expected,
+            is_correct: normalizeAssessmentValue(responseValue) === step.expected,
+          };
+        }),
+        snapshots: MODULE1_SIGNING_CHALLENGE_STEPS.flatMap((step) =>
+          capturedSnapshots[step.id]
+            ? [
+                {
+                  assessment_item_id: step.id,
+                  label: step.title,
+                  image_data_url: capturedSnapshots[step.id],
+                },
+              ]
+            : []
+        ),
+      });
+      setSaveMessage("Assessment 3 answers and snapshots saved.");
+    } catch (saveAttemptError) {
+      setSaveError(
+        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -844,6 +1130,22 @@ function Module1AssessmentThree() {
           </label>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
+              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+              onClick={captureCurrentSnapshot}
+              type="button"
+            >
+              {capturedSnapshots[activeStep.id] ? "Retake Snapshot" : "Capture Snapshot"}
+            </button>
+          </div>
+          {capturedSnapshots[activeStep.id] ? (
+            <img
+              alt={`${activeStep.title} snapshot`}
+              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
+              src={capturedSnapshots[activeStep.id]}
+            />
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
               className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
               disabled={activeStepIndex === 0}
               onClick={() => setActiveStepIndex((index) => Math.max(0, index - 1))}
@@ -869,6 +1171,16 @@ function Module1AssessmentThree() {
               Assessment complete. All tasks submitted.
             </p>
           ) : null}
+          <button
+            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={saving || !allDone}
+            onClick={() => {
+              void saveAssessment();
+            }}
+            type="button"
+          >
+            {saving ? "Saving..." : "Save Attempt"}
+          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -876,6 +1188,13 @@ function Module1AssessmentThree() {
           >
             Open Free Signing Lab
           </Link>
+
+          <AssessmentSaveNotice
+            latestAttempt={latestAttempt}
+            saveError={saveError}
+            saveMessage={saveMessage}
+            saving={saving}
+          />
         </aside>
       </div>
     </div>
@@ -883,14 +1202,23 @@ function Module1AssessmentThree() {
 }
 
 function Module2AssessmentOne({
+  assessmentId,
+  latestAttempt,
   questions,
-  moduleLabel
+  moduleLabel,
+  onSave,
 }: {
-  questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  questions: ChoiceQuestion[];
   moduleLabel: string;
+  onSave: AssessmentSubmitHandler;
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setSelectedChoices({});
@@ -905,6 +1233,38 @@ function Module2AssessmentOne({
     }
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
+
+  async function saveAssessment() {
+    setShowResult(true);
+    setSaveError(null);
+    setSaveMessage(null);
+    setSaving(true);
+
+    try {
+      await onSave({
+        assessment_id: assessmentId,
+        assessment_title: "Assessment 1",
+        assessment_type: "multiple_choice",
+        score_percent: questions.length > 0 ? (score / questions.length) * 100 : 0,
+        score_correct: score,
+        score_total: questions.length || 1,
+        answers: questions.map((question) => ({
+          assessment_item_id: question.id,
+          prompt: question.question,
+          response_text: selectedChoices[question.id] ?? null,
+          expected_response: question.answer,
+          is_correct: selectedChoices[question.id] === question.answer,
+        })),
+      });
+      setSaveMessage(`${moduleLabel} assessment answers saved.`);
+    } catch (saveAttemptError) {
+      setSaveError(
+        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -963,6 +1323,16 @@ function Module2AssessmentOne({
         <span className="text-xs text-slate-500">
           Answered {answeredCount}/{questions.length}
         </span>
+        <button
+          className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={saving || answeredCount === 0}
+          onClick={() => {
+            void saveAssessment();
+          }}
+          type="button"
+        >
+          {saving ? "Saving..." : "Save Attempt"}
+        </button>
       </div>
 
       {showResult ? (
@@ -970,15 +1340,28 @@ function Module2AssessmentOne({
           Score: {score}/{questions.length}
         </p>
       ) : null}
+
+      <AssessmentSaveNotice
+        latestAttempt={latestAttempt}
+        saveError={saveError}
+        saveMessage={saveMessage}
+        saving={saving}
+      />
     </div>
   );
 }
 
 function NumbersCameraAssessment({
+  assessmentId,
+  latestAttempt,
+  onSave,
   title,
   intro,
   targets
 }: {
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  onSave: AssessmentSubmitHandler;
   title: string;
   intro: string;
   targets: readonly { id: string; number: number }[];
@@ -990,6 +1373,10 @@ function NumbersCameraAssessment({
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const activeStep = targets[activeStepIndex];
   const allDone = completedStepIds.length >= targets.length;
@@ -1042,6 +1429,10 @@ function NumbersCameraAssessment({
       setError("Please enter the recognized gesture before continuing.");
       return;
     }
+    if (!capturedSnapshots[activeStep.id]) {
+      setError("Capture a snapshot for this number before continuing.");
+      return;
+    }
 
     setError(null);
     setCompletedStepIds((previous) =>
@@ -1058,6 +1449,75 @@ function NumbersCameraAssessment({
       ...previous,
       [activeStep.id]: ""
     }));
+  }
+
+  function captureCurrentSnapshot() {
+    const snapshot = captureVideoSnapshot(videoRef.current);
+    if (!snapshot) {
+      setError("Unable to capture a snapshot. Start the camera first.");
+      return;
+    }
+
+    setError(null);
+    setCapturedSnapshots((previous) => ({
+      ...previous,
+      [activeStep.id]: snapshot,
+    }));
+  }
+
+  async function saveAssessment() {
+    if (!allDone) {
+      setSaveError("Complete every number task before saving this assessment.");
+      return;
+    }
+
+    setSaveError(null);
+    setSaveMessage(null);
+    setSaving(true);
+
+    const correctCount = targets.reduce((total, step) => {
+      const responseValue = recognizedInputs[step.id] ?? "";
+      return total + (normalizeAssessmentValue(responseValue) === String(step.number) ? 1 : 0);
+    }, 0);
+
+    try {
+      await onSave({
+        assessment_id: assessmentId,
+        assessment_title: title,
+        assessment_type: "camera_numbers",
+        score_percent: targets.length > 0 ? (correctCount / targets.length) * 100 : 0,
+        score_correct: correctCount,
+        score_total: targets.length || 1,
+        answers: targets.map((step) => {
+          const responseValue = recognizedInputs[step.id] ?? "";
+          return {
+            assessment_item_id: step.id,
+            prompt: `Sign the number ${step.number}.`,
+            response_text: responseValue || null,
+            expected_response: String(step.number),
+            is_correct: normalizeAssessmentValue(responseValue) === String(step.number),
+          };
+        }),
+        snapshots: targets.flatMap((step) =>
+          capturedSnapshots[step.id]
+            ? [
+                {
+                  assessment_item_id: step.id,
+                  label: `Number ${step.number}`,
+                  image_data_url: capturedSnapshots[step.id],
+                },
+              ]
+            : []
+        ),
+      });
+      setSaveMessage(`${title} saved with answers and snapshots.`);
+    } catch (saveAttemptError) {
+      setSaveError(
+        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1136,6 +1596,22 @@ function NumbersCameraAssessment({
               value={recognizedInputs[activeStep.id] ?? ""}
             />
           </label>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+              onClick={captureCurrentSnapshot}
+              type="button"
+            >
+              {capturedSnapshots[activeStep.id] ? "Retake Snapshot" : "Capture Snapshot"}
+            </button>
+          </div>
+          {capturedSnapshots[activeStep.id] ? (
+            <img
+              alt={`Snapshot for number ${activeStep.number}`}
+              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
+              src={capturedSnapshots[activeStep.id]}
+            />
+          ) : null}
           <button
             className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             onClick={clearCurrentInput}
@@ -1171,6 +1647,16 @@ function NumbersCameraAssessment({
               Assessment complete. All number tasks submitted.
             </p>
           ) : null}
+          <button
+            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={saving || !allDone}
+            onClick={() => {
+              void saveAssessment();
+            }}
+            type="button"
+          >
+            {saving ? "Saving..." : "Save Attempt"}
+          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -1178,6 +1664,13 @@ function NumbersCameraAssessment({
           >
             Open Free Signing Lab
           </Link>
+
+          <AssessmentSaveNotice
+            latestAttempt={latestAttempt}
+            saveError={saveError}
+            saveMessage={saveMessage}
+            saving={saving}
+          />
         </aside>
       </div>
     </div>
@@ -1185,11 +1678,17 @@ function NumbersCameraAssessment({
 }
 
 function GestureCameraAssessment({
+  assessmentId,
+  latestAttempt,
+  onSave,
   title,
   intro,
   targets,
   minimumRequired
 }: {
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  onSave: AssessmentSubmitHandler;
   title: string;
   intro: string;
   targets: readonly { id: string; label: string }[];
@@ -1202,7 +1701,11 @@ function GestureCameraAssessment({
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const activeStep = targets[activeStepIndex];
   const reachedMinimum = completedStepIds.length >= minimumRequired;
   const allDone = completedStepIds.length >= targets.length;
@@ -1250,6 +1753,15 @@ function GestureCameraAssessment({
   }
 
   function markCurrentStepDone() {
+    const value = (recognizedInputs[activeStep.id] ?? "").trim();
+    if (!value) {
+      setError("Enter the recognized gesture before marking this step done.");
+      return;
+    }
+    if (!capturedSnapshots[activeStep.id]) {
+      setError("Capture a snapshot for this gesture before marking it done.");
+      return;
+    }
     setError(null);
     setCompletedStepIds((previous) =>
       previous.includes(activeStep.id) ? previous : [...previous, activeStep.id]
@@ -1275,6 +1787,77 @@ function GestureCameraAssessment({
       ...previous,
       [activeStep.id]: ""
     }));
+  }
+
+  function captureCurrentSnapshot() {
+    const snapshot = captureVideoSnapshot(videoRef.current);
+    if (!snapshot) {
+      setError("Unable to capture a snapshot. Start the camera first.");
+      return;
+    }
+
+    setError(null);
+    setCapturedSnapshots((previous) => ({
+      ...previous,
+      [activeStep.id]: snapshot,
+    }));
+  }
+
+  async function saveAssessment() {
+    if (!submitted) {
+      setSaveError("Finish the gesture requirement before saving this assessment.");
+      return;
+    }
+
+    setSaveError(null);
+    setSaveMessage(null);
+    setSaving(true);
+
+    const completedTargets = targets.filter((step) => completedStepIds.includes(step.id));
+    const correctCount = completedTargets.reduce((total, step) => {
+      const responseValue = recognizedInputs[step.id] ?? "";
+      return total + (normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label) ? 1 : 0);
+    }, 0);
+
+    try {
+      await onSave({
+        assessment_id: assessmentId,
+        assessment_title: title,
+        assessment_type: "camera_gesture",
+        score_percent: minimumRequired > 0 ? Math.min((correctCount / minimumRequired) * 100, 100) : 0,
+        score_correct: Math.min(correctCount, minimumRequired),
+        score_total: minimumRequired || 1,
+        answers: completedTargets.map((step) => {
+          const responseValue = recognizedInputs[step.id] ?? "";
+          return {
+            assessment_item_id: step.id,
+            prompt: `Sign the gesture ${step.label}.`,
+            response_text: responseValue || null,
+            expected_response: step.label,
+            is_correct:
+              normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label),
+          };
+        }),
+        snapshots: completedTargets.flatMap((step) =>
+          capturedSnapshots[step.id]
+            ? [
+                {
+                  assessment_item_id: step.id,
+                  label: step.label,
+                  image_data_url: capturedSnapshots[step.id],
+                },
+              ]
+            : []
+        ),
+      });
+      setSaveMessage(`${title} saved with ${completedTargets.length} completed gestures.`);
+    } catch (saveAttemptError) {
+      setSaveError(
+        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1350,6 +1933,22 @@ function GestureCameraAssessment({
               value={recognizedInputs[activeStep.id] ?? ""}
             />
           </label>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+              onClick={captureCurrentSnapshot}
+              type="button"
+            >
+              {capturedSnapshots[activeStep.id] ? "Retake Snapshot" : "Capture Snapshot"}
+            </button>
+          </div>
+          {capturedSnapshots[activeStep.id] ? (
+            <img
+              alt={`${activeStep.label} snapshot`}
+              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
+              src={capturedSnapshots[activeStep.id]}
+            />
+          ) : null}
           <button
             className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             onClick={clearCurrentInput}
@@ -1422,6 +2021,16 @@ function GestureCameraAssessment({
               Submitted. Great work completing the gesture requirement.
             </p>
           ) : null}
+          <button
+            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={saving || !submitted}
+            onClick={() => {
+              void saveAssessment();
+            }}
+            type="button"
+          >
+            {saving ? "Saving..." : "Save Attempt"}
+          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -1429,24 +2038,50 @@ function GestureCameraAssessment({
           >
             Open Free Signing Lab
           </Link>
+
+          <AssessmentSaveNotice
+            latestAttempt={latestAttempt}
+            saveError={saveError}
+            saveMessage={saveMessage}
+            saving={saving}
+          />
         </aside>
       </div>
     </div>
   );
 }
 
-function Module3AssessmentTwo() {
+function Module3AssessmentTwo({
+  assessmentId,
+  latestAttempt,
+  onSave,
+}: {
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  onSave: AssessmentSubmitHandler;
+}) {
   return (
     <GestureCameraAssessment
+      assessmentId={assessmentId}
       intro="Use the camera interface and sign at least 7 gestures from this module."
+      latestAttempt={latestAttempt}
       minimumRequired={7}
+      onSave={onSave}
       targets={MODULE3_GESTURE_TARGETS}
       title="Assessment 2"
     />
   );
 }
 
-function Module7ColorAssessmentTwo() {
+function Module7ColorAssessmentTwo({
+  assessmentId,
+  latestAttempt,
+  onSave,
+}: {
+  assessmentId: string;
+  latestAttempt?: AssessmentAttemptRecord | null;
+  onSave: AssessmentSubmitHandler;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [running, setRunning] = useState(false);
@@ -1454,6 +2089,10 @@ function Module7ColorAssessmentTwo() {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
+  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const activeColor = MODULE7_COLOR_SIGN_TARGETS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE7_COLOR_SIGN_TARGETS.length;
@@ -1506,6 +2145,10 @@ function Module7ColorAssessmentTwo() {
       setError("Please enter the recognized gesture before continuing.");
       return;
     }
+    if (!capturedSnapshots[activeColor.id]) {
+      setError("Capture a snapshot for this color before continuing.");
+      return;
+    }
 
     setError(null);
     setCompletedStepIds((previous) =>
@@ -1524,6 +2167,79 @@ function Module7ColorAssessmentTwo() {
       ...previous,
       [activeColor.id]: ""
     }));
+  }
+
+  function captureCurrentSnapshot() {
+    const snapshot = captureVideoSnapshot(videoRef.current);
+    if (!snapshot) {
+      setError("Unable to capture a snapshot. Start the camera first.");
+      return;
+    }
+
+    setError(null);
+    setCapturedSnapshots((previous) => ({
+      ...previous,
+      [activeColor.id]: snapshot,
+    }));
+  }
+
+  async function saveAssessment() {
+    if (!allDone) {
+      setSaveError("Complete every displayed color before saving this assessment.");
+      return;
+    }
+
+    setSaveError(null);
+    setSaveMessage(null);
+    setSaving(true);
+
+    const correctCount = MODULE7_COLOR_SIGN_TARGETS.reduce((total, step) => {
+      const responseValue = recognizedInputs[step.id] ?? "";
+      return total + (normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label) ? 1 : 0);
+    }, 0);
+
+    try {
+      await onSave({
+        assessment_id: assessmentId,
+        assessment_title: "Assessment 2",
+        assessment_type: "camera_color",
+        score_percent:
+          MODULE7_COLOR_SIGN_TARGETS.length > 0
+            ? (correctCount / MODULE7_COLOR_SIGN_TARGETS.length) * 100
+            : 0,
+        score_correct: correctCount,
+        score_total: MODULE7_COLOR_SIGN_TARGETS.length || 1,
+        answers: MODULE7_COLOR_SIGN_TARGETS.map((step) => {
+          const responseValue = recognizedInputs[step.id] ?? "";
+          return {
+            assessment_item_id: step.id,
+            prompt: `Sign the displayed color ${step.label}.`,
+            response_text: responseValue || null,
+            expected_response: step.label,
+            is_correct:
+              normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label),
+          };
+        }),
+        snapshots: MODULE7_COLOR_SIGN_TARGETS.flatMap((step) =>
+          capturedSnapshots[step.id]
+            ? [
+                {
+                  assessment_item_id: step.id,
+                  label: step.label,
+                  image_data_url: capturedSnapshots[step.id],
+                },
+              ]
+            : []
+        ),
+      });
+      setSaveMessage("Displayed color answers and snapshots saved.");
+    } catch (saveAttemptError) {
+      setSaveError(
+        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1605,6 +2321,22 @@ function Module7ColorAssessmentTwo() {
               value={recognizedInputs[activeColor.id] ?? ""}
             />
           </label>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+              onClick={captureCurrentSnapshot}
+              type="button"
+            >
+              {capturedSnapshots[activeColor.id] ? "Retake Snapshot" : "Capture Snapshot"}
+            </button>
+          </div>
+          {capturedSnapshots[activeColor.id] ? (
+            <img
+              alt={`${activeColor.label} snapshot`}
+              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
+              src={capturedSnapshots[activeColor.id]}
+            />
+          ) : null}
           <button
             className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             onClick={clearCurrentInput}
@@ -1640,6 +2372,16 @@ function Module7ColorAssessmentTwo() {
               Great work. You completed all displayed colors.
             </p>
           ) : null}
+          <button
+            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={saving || !allDone}
+            onClick={() => {
+              void saveAssessment();
+            }}
+            type="button"
+          >
+            {saving ? "Saving..." : "Save Attempt"}
+          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -1647,6 +2389,13 @@ function Module7ColorAssessmentTwo() {
           >
             Open Free Signing Lab
           </Link>
+
+          <AssessmentSaveNotice
+            latestAttempt={latestAttempt}
+            saveError={saveError}
+            saveMessage={saveMessage}
+            saving={saving}
+          />
         </aside>
       </div>
     </div>
@@ -1659,6 +2408,9 @@ export default function ModuleDetailPage() {
 
   const [modules, setModules] = useState<ModuleItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [lessonActionError, setLessonActionError] = useState<string | null>(null);
+  const [lessonActionMessage, setLessonActionMessage] = useState<string | null>(null);
+  const [lessonSavingId, setLessonSavingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"module" | "assessment">("module");
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
@@ -1761,6 +2513,58 @@ export default function ModuleDetailPage() {
     }
     return selected.assessments.slice(0, 5);
   }, [isModule8, selected]);
+  const latestSelectedAssessmentAttempt = useMemo(() => {
+    if (!selected?.latest_assessment_attempt || !selectedAssessmentId) {
+      return null;
+    }
+    return selected.latest_assessment_attempt.assessment_id === selectedAssessmentId
+      ? selected.latest_assessment_attempt
+      : null;
+  }, [selected, selectedAssessmentId]);
+
+  function applyModuleUpdate(updatedModule: ModuleItem, latestAttempt?: AssessmentAttemptRecord) {
+    setModules((previous) => {
+      const nextModule = latestAttempt
+        ? { ...updatedModule, latest_assessment_attempt: latestAttempt }
+        : updatedModule;
+
+      if (previous.some((item) => item.id === updatedModule.id)) {
+        return previous.map((item) => (item.id === updatedModule.id ? nextModule : item));
+      }
+      return [...previous, nextModule];
+    });
+  }
+
+  async function handleLessonComplete(lessonId: string) {
+    setLessonActionError(null);
+    setLessonActionMessage(null);
+    setLessonSavingId(lessonId);
+
+    try {
+      const updatedModule = await updateModuleProgress(moduleId, {
+        completed_lesson_id: lessonId,
+      });
+      applyModuleUpdate(updatedModule);
+      setLessonActionMessage("Lesson progress saved.");
+    } catch (progressError) {
+      setLessonActionError(
+        progressError instanceof Error ? progressError.message : "Unable to save lesson progress."
+      );
+    } finally {
+      setLessonSavingId(null);
+    }
+  }
+
+  async function handleAssessmentSave(
+    payload: AssessmentAttemptPayload
+  ): Promise<AssessmentAttemptRecord> {
+    const attempt = await submitAssessmentAttempt(moduleId, payload);
+    const updatedModule = await updateModuleProgress(moduleId, {
+      assessment_score: payload.score_percent,
+    });
+    applyModuleUpdate(updatedModule, attempt);
+    return attempt;
+  }
 
   function openModuleTab() {
     setActiveTab("module");
@@ -1866,20 +2670,27 @@ export default function ModuleDetailPage() {
               <div className="mt-2 space-y-2">
                 {activeTab === "module" ? (
                   selected.lessons.length > 0 ? (
-                    selected.lessons.map((lesson) => (
-                      <button
-                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                          selectedLessonId === lesson.id
-                            ? "border-brandGreen bg-brandGreenLight text-slate-900"
-                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                        }`}
-                        key={lesson.id}
-                        onClick={() => setSelectedLessonId(lesson.id)}
-                        type="button"
-                      >
+                  selected.lessons.map((lesson) => (
+                    <button
+                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
+                        selectedLessonId === lesson.id
+                          ? "border-brandGreen bg-brandGreenLight text-slate-900"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                      }`}
+                      key={lesson.id}
+                      onClick={() => setSelectedLessonId(lesson.id)}
+                      type="button"
+                    >
+                      <div className="flex items-center justify-between gap-2">
                         <p className="font-semibold">{lesson.title}</p>
-                      </button>
-                    ))
+                        {selected.completed_lessons.includes(lesson.id) ? (
+                          <span className="rounded-full bg-brandGreen px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+                            Done
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  ))
                   ) : (
                     <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
                       No lessons found for this module.
@@ -2048,6 +2859,31 @@ export default function ModuleDetailPage() {
                     <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700">
                       {selectedLesson.content}
                     </p>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <button
+                        className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={
+                          lessonSavingId === selectedLesson.id ||
+                          selected.completed_lessons.includes(selectedLesson.id)
+                        }
+                        onClick={() => {
+                          void handleLessonComplete(selectedLesson.id);
+                        }}
+                        type="button"
+                      >
+                        {selected.completed_lessons.includes(selectedLesson.id)
+                          ? "Lesson Completed"
+                          : lessonSavingId === selectedLesson.id
+                            ? "Saving..."
+                            : "Mark Lesson Complete"}
+                      </button>
+                      {lessonActionMessage ? (
+                        <p className="text-sm font-semibold text-brandGreen">{lessonActionMessage}</p>
+                      ) : null}
+                      {lessonActionError ? (
+                        <p className="text-sm text-red-600">{lessonActionError}</p>
+                      ) : null}
+                    </div>
 
                     {selected.slug === "fsl-alphabets" && selectedLesson.id === "m1-l1" ? (
                       <div className="mt-5">
@@ -2134,76 +2970,157 @@ export default function ModuleDetailPage() {
                   </ul>
                 </div>
               ) : isModule1 && selectedAssessmentId === "m1-assessment-1" ? (
-                <Module1AssessmentOne questions={module1AssessmentQuestions} />
+                <Module1AssessmentOne
+                  assessmentId="m1-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  onSave={handleAssessmentSave}
+                  questions={module1AssessmentQuestions}
+                />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-2" ? (
-                <Module1AssessmentTwo />
+                <Module1AssessmentTwo
+                  assessmentId="m1-assessment-2"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  onSave={handleAssessmentSave}
+                />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-3" ? (
-                <Module1AssessmentThree />
+                <Module1AssessmentThree
+                  assessmentId="m1-assessment-3"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  onSave={handleAssessmentSave}
+                />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Numbers" questions={module2AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m2-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  moduleLabel="Numbers"
+                  onSave={handleAssessmentSave}
+                  questions={module2AssessmentQuestions}
+                />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-2" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-2"
                   intro="Use the camera interface and sign each number from 1 to 10."
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  onSave={handleAssessmentSave}
                   targets={MODULE2_SIGN_1_TO_10_STEPS}
                   title="Assessment 2"
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-3" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-3"
                   intro="Use the camera interface and sign the following numbers: 11, 15, 50, 100, 90, and 85."
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  onSave={handleAssessmentSave}
                   targets={MODULE2_SIGN_SET_STEPS}
                   title="Assessment 3"
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-1" ? (
                 <Module2AssessmentOne
+                  assessmentId="m3-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
                   moduleLabel="Greetings & Basic Expressions"
+                  onSave={handleAssessmentSave}
                   questions={module3AssessmentQuestions}
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-2" ? (
-                <Module3AssessmentTwo />
+                <Module3AssessmentTwo
+                  assessmentId="m3-assessment-2"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  onSave={handleAssessmentSave}
+                />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Family Members" questions={module4AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m4-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  moduleLabel="Family Members"
+                  onSave={handleAssessmentSave}
+                  questions={module4AssessmentQuestions}
+                />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m4-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
+                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
+                  onSave={handleAssessmentSave}
                   targets={MODULE4_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="People Description" questions={module5AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m5-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  moduleLabel="People Description"
+                  onSave={handleAssessmentSave}
+                  questions={module5AssessmentQuestions}
+                />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m5-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
+                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
+                  onSave={handleAssessmentSave}
                   targets={MODULE5_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Days" questions={module6AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m6-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  moduleLabel="Days"
+                  onSave={handleAssessmentSave}
+                  questions={module6AssessmentQuestions}
+                />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m6-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
+                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
+                  onSave={handleAssessmentSave}
                   targets={MODULE6_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Colors & Descriptions" questions={module7AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m7-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  moduleLabel="Colors & Descriptions"
+                  onSave={handleAssessmentSave}
+                  questions={module7AssessmentQuestions}
+                />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-2" ? (
-                <Module7ColorAssessmentTwo />
+                <Module7ColorAssessmentTwo
+                  assessmentId="m7-assessment-2"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  onSave={handleAssessmentSave}
+                />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-3" ? (
                 <GestureCameraAssessment
+                  assessmentId="m7-assessment-3"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
+                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
+                  onSave={handleAssessmentSave}
                   targets={MODULE7_GESTURE_TARGETS}
                   title="Assessment 3"
                 />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Basic Conversations" questions={module8AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m8-assessment-1"
+                  latestAttempt={latestSelectedAssessmentAttempt}
+                  moduleLabel="Basic Conversations"
+                  onSave={handleAssessmentSave}
+                  questions={module8AssessmentQuestions}
+                />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m8-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
+                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
+                  onSave={handleAssessmentSave}
                   targets={MODULE8_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
