@@ -36,37 +36,23 @@ export default function LoginPage() {
   const [teacherMessage, setTeacherMessage] = useState<string | null>(null);
   const [teacherError, setTeacherError] = useState<string | null>(null);
   const [teacherSubmitting, setTeacherSubmitting] = useState(false);
-  const [barcodeSupported, setBarcodeSupported] = useState(false);
-  const [manualQrPayload, setManualQrPayload] = useState("");
+  const [qrCameraOpen, setQrCameraOpen] = useState(false);
+  const [qrCaptureScanning, setQrCaptureScanning] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [passkey, setPasskey] = useState("");
   const [onboardingToken, setOnboardingToken] = useState("");
   const [teacherEmail, setTeacherEmail] = useState("");
   const [issuedUsername, setIssuedUsername] = useState("");
-
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const scanIntervalRef = useRef<number | null>(null);
-  const scanInFlightRef = useRef(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    setBarcodeSupported(Boolean((window as { BarcodeDetector?: unknown }).BarcodeDetector));
-  }, []);
 
   useEffect(() => {
     return () => {
-      stopScan();
+      stopQrCamera();
     };
   }, []);
 
-  function stopScan() {
-    if (scanIntervalRef.current !== null) {
-      window.clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
-    }
+  function stopQrCamera() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -74,15 +60,16 @@ export default function LoginPage() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    setQrCameraOpen(false);
   }
 
   function resetTeacherFlow() {
-    stopScan();
+    stopQrCamera();
     setTeacherStep("scan");
     setTeacherMessage(null);
     setTeacherError(null);
     setTeacherSubmitting(false);
-    setManualQrPayload("");
+    setQrCaptureScanning(false);
     setInviteCode("");
     setPasskey("");
     setOnboardingToken("");
@@ -93,7 +80,6 @@ export default function LoginPage() {
   function openTeacherFlow() {
     resetTeacherFlow();
     setTeacherOpen(true);
-    void startScan();
   }
 
   function closeTeacherFlow() {
@@ -110,7 +96,7 @@ export default function LoginPage() {
       setInviteCode(response.invite_code);
       setTeacherMessage(response.message);
       setTeacherStep("passkey");
-      stopScan();
+      stopQrCamera();
     } catch (scanError) {
       const message = scanError instanceof Error ? scanError.message : "Unable to verify QR.";
       setTeacherError(message);
@@ -119,56 +105,81 @@ export default function LoginPage() {
     }
   }
 
-  async function startScan() {
-    if (!barcodeSupported) {
-      return;
-    }
+  async function openQrCamera() {
+    setTeacherMessage(null);
     setTeacherError(null);
-    setTeacherMessage("Scanning QR...");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
-        audio: false,
+        audio: false
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
+      setQrCameraOpen(true);
+      setTeacherMessage("Camera ready. Capture the QR now.");
     } catch {
-      setTeacherMessage(null);
-      setTeacherError("Unable to access camera for QR scanning.");
+      setTeacherError("Unable to open camera. Allow permission in browser settings.");
+    }
+  }
+
+  async function captureQrFromCamera() {
+    if (!videoRef.current) {
+      setTeacherError("Camera preview is not ready.");
       return;
     }
 
-    const detectorCtor = (window as { BarcodeDetector?: new (options: { formats: string[] }) => { detect: (target: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } })
-      .BarcodeDetector;
-    if (!detectorCtor) {
-      setTeacherError("QR scanner is not available in this browser.");
+    const video = videoRef.current;
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setTeacherError("Failed to capture image from camera.");
       return;
     }
-    const detector = new detectorCtor({ formats: ["qr_code"] });
+    context.drawImage(video, 0, 0, width, height);
 
-    scanIntervalRef.current = window.setInterval(() => {
-      if (!videoRef.current || scanInFlightRef.current) {
+    setQrCaptureScanning(true);
+    setTeacherError(null);
+    setTeacherMessage("Scanning captured QR image...");
+
+    let objectUrl: string | null = null;
+    try {
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((value) => resolve(value), "image/jpeg", 0.92);
+      });
+      if (!blob) {
+        setTeacherMessage(null);
+        setTeacherError("Unable to capture QR image.");
         return;
       }
-      scanInFlightRef.current = true;
-      void detector
-        .detect(videoRef.current)
-        .then((codes) => {
-          const first = codes[0]?.rawValue?.trim();
-          if (first) {
-            stopScan();
-            void verifyQrPayloadFlow(first);
-          }
-        })
-        .catch(() => {
-          // Keep scanning silently.
-        })
-        .finally(() => {
-          scanInFlightRef.current = false;
-        });
-    }, 500);
+
+      const { BrowserQRCodeReader } = await import("@zxing/browser");
+      const reader = new BrowserQRCodeReader();
+      objectUrl = URL.createObjectURL(blob);
+      const result = await reader.decodeFromImageUrl(objectUrl);
+      const payload = result.getText()?.trim();
+      if (!payload) {
+        setTeacherMessage(null);
+        setTeacherError("No QR code detected in captured image.");
+        return;
+      }
+      await verifyQrPayloadFlow(payload);
+    } catch {
+      setTeacherMessage(null);
+      setTeacherError("Unable to read QR. Reposition card and capture again.");
+    } finally {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+      setQrCaptureScanning(false);
+    }
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -292,11 +303,7 @@ export default function LoginPage() {
   return (
     <section className="space-y-4">
       <div className="panel panel-lively">
-        <h2 className="text-3xl font-bold title-gradient">Student Login</h2>
-        <p className="mt-2 text-sm text-muted">
-          Login using the initial credentials sent by your teacher after payment reference
-          validation.
-        </p>
+        <h2 className="text-3xl font-bold title-gradient">Log In Portal</h2>
       </div>
 
       <form className="panel panel-lively space-y-4" onSubmit={onSubmit}>
@@ -489,43 +496,56 @@ export default function LoginPage() {
 
             {teacherStep === "scan" ? (
               <div className="mt-4 space-y-3">
-                {barcodeSupported ? (
-                  <>
+                <p className="text-xs text-slate-600">
+                  Tap Open Camera, then Capture QR. The captured frame will be scanned automatically.
+                </p>
+
+                <div className="overflow-hidden rounded-xl border border-slate-300 bg-slate-900">
+                  {qrCameraOpen ? (
                     <video
                       autoPlay
-                      className="h-64 w-full rounded-xl border border-slate-300 bg-slate-900 object-cover"
+                      className="h-64 w-full object-cover"
+                      muted
                       playsInline
                       ref={videoRef}
                     />
-                    <p className="text-xs text-slate-600">
-                      Point the camera at the teacher QR code.
-                    </p>
-                  </>
-                ) : (
-                  <p className="rounded-lg border border-brandYellow/35 bg-brandYellowLight px-3 py-2 text-sm text-slate-700">
-                    QR scanner is not available in this browser. Use manual QR payload input below.
-                  </p>
-                )}
+                  ) : (
+                    <div className="grid h-64 place-items-center px-4 text-center text-sm text-slate-300">
+                      Camera is off. Tap Open Camera to start QR capture.
+                    </div>
+                  )}
+                </div>
 
-                <label className="block text-sm font-semibold text-slate-800">
-                  Manual QR Payload (fallback)
-                  <textarea
-                    className="mt-1 min-h-[88px] w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                    onChange={(event) => setManualQrPayload(event.target.value)}
-                    placeholder="Paste QR payload here if camera scan is unavailable."
-                    value={manualQrPayload}
-                  />
-                </label>
-                <button
-                  className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={!manualQrPayload.trim() || teacherSubmitting}
-                  onClick={() => {
-                    void verifyQrPayloadFlow(manualQrPayload.trim());
-                  }}
-                  type="button"
-                >
-                  Verify QR
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={teacherSubmitting || qrCaptureScanning}
+                    onClick={() => {
+                      void openQrCamera();
+                    }}
+                    type="button"
+                  >
+                    Open Camera
+                  </button>
+                  <button
+                    className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!qrCameraOpen || teacherSubmitting || qrCaptureScanning}
+                    onClick={() => {
+                      void captureQrFromCamera();
+                    }}
+                    type="button"
+                  >
+                    {qrCaptureScanning ? "Scanning..." : "Capture QR"}
+                  </button>
+                  <button
+                    className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!qrCameraOpen || teacherSubmitting || qrCaptureScanning}
+                    onClick={stopQrCamera}
+                    type="button"
+                  >
+                    Close Camera
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -557,7 +577,6 @@ export default function LoginPage() {
                       setPasskey("");
                       setTeacherError(null);
                       setTeacherMessage(null);
-                      void startScan();
                     }}
                     type="button"
                   >

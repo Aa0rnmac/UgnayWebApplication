@@ -97,16 +97,24 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthResponse:
 def verify_teacher_qr(
     payload: TeacherInviteVerifyQrRequest, db: Session = Depends(get_db)
 ) -> TeacherInviteVerifyQrResponse:
+    qr_input = payload.qr_payload.strip()
+    invite_code: str | None = None
+
     try:
-        invite_code = parse_qr_payload(payload.qr_payload)
+        invite_code = parse_qr_payload(qr_input)
     except ValueError as exc:
-        message = str(exc)
-        status_code = (
-            status.HTTP_503_SERVICE_UNAVAILABLE
-            if "TEACHER_INVITE_SIGNING_SECRET" in message
-            else status.HTTP_401_UNAUTHORIZED
-        )
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        # Fallback: allow direct invite code entry when browser QR scanner is unavailable.
+        # Passkey verification is still required in the next step.
+        if qr_input and ":" not in qr_input:
+            invite_code = qr_input
+        else:
+            message = str(exc)
+            status_code = (
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if "TEACHER_INVITE_SIGNING_SECRET" in message
+                else status.HTTP_401_UNAUTHORIZED
+            )
+            raise HTTPException(status_code=status_code, detail=message) from exc
 
     invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == invite_code).first()
     if not invite or invite.status != "active":
