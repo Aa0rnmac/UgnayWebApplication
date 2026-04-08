@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getModules, ModuleItem } from "@/lib/api";
 
@@ -43,15 +43,70 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tipIndex, setTipIndex] = useState(0);
+  const autoRetryTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
+  function clearAutoRetryTimer() {
+    if (autoRetryTimerRef.current !== null) {
+      window.clearTimeout(autoRetryTimerRef.current);
+      autoRetryTimerRef.current = null;
+    }
+  }
+
+  async function loadModules() {
+    clearAutoRetryTimer();
     setLoading(true);
     setError(null);
-    getModules()
-      .then(setModules)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+    try {
+      const payload = await getModules();
+      setModules(payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load modules.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadModules();
+    return () => {
+      clearAutoRetryTimer();
+    };
   }, []);
+
+  useEffect(() => {
+    if (!error || loading) {
+      return;
+    }
+
+    if (!error.includes("Unable to reach API")) {
+      return;
+    }
+
+    autoRetryTimerRef.current = window.setTimeout(() => {
+      void loadModules();
+    }, 2200);
+
+    return () => {
+      clearAutoRetryTimer();
+    };
+  }, [error, loading]);
+
+  useEffect(() => {
+    function handleFocus() {
+      if (!error || loading) {
+        return;
+      }
+      if (!error.includes("Unable to reach API")) {
+        return;
+      }
+      void loadModules();
+    }
+
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [error, loading]);
 
   const summary = useMemo(() => {
     const total = modules.length;
@@ -173,7 +228,25 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
+      {error ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-600">Error: {error}</p>
+          {error.includes("Unable to reach API") ? (
+            <p className="text-xs text-red-500">
+              The app will retry automatically while the local backend finishes starting.
+            </p>
+          ) : null}
+          <button
+            className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100"
+            onClick={() => {
+              void loadModules();
+            }}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

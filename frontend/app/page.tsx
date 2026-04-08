@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-import { login } from "@/lib/api";
+import { useAuth } from "@/components/auth-context";
+import { AuthSwitcher } from "@/components/auth-switcher";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const { loading, login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -17,10 +21,9 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const response = await login(username.trim(), password);
-      window.localStorage.setItem("auth_token", response.token);
-      window.localStorage.setItem("auth_username", response.user.username);
-      window.location.href = "/dashboard";
+      const user = await login(username.trim(), password);
+      router.push(user.role === "teacher" ? "/teacher" : "/dashboard");
+      router.refresh();
     } catch (loginError) {
       const message = loginError instanceof Error ? loginError.message : "Login failed.";
       setError(message);
@@ -32,10 +35,10 @@ export default function LoginPage() {
   return (
     <section className="space-y-4">
       <div className="panel panel-lively">
-        <h2 className="text-3xl font-bold title-gradient">Student Login</h2>
+        <h2 className="text-3xl font-bold title-gradient">Sign In</h2>
         <p className="mt-2 text-sm text-muted">
-          Login using the initial credentials sent by your teacher after payment reference
-          validation.
+          Sign in with your assigned account, or use the demo access card below to jump straight
+          into the student or teacher workspace.
         </p>
       </div>
 
@@ -65,7 +68,7 @@ export default function LoginPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={submitting}
+            disabled={loading || submitting}
             type="submit"
           >
             {submitting ? "Logging in..." : "Login"}
@@ -81,6 +84,16 @@ export default function LoginPage() {
 
         {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
       </form>
+
+      <div className="panel panel-lively">
+        <p className="text-xs uppercase tracking-wider label-accent">Demo Access</p>
+        <p className="mt-2 text-sm text-muted">
+          Use the built-in demo profiles if you want to preview both role experiences quickly.
+        </p>
+        <div className="mt-4">
+          <AuthSwitcher />
+        </div>
+      </div>
     </section>
   );
 }

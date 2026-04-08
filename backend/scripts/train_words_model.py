@@ -220,8 +220,8 @@ def main() -> None:
     accuracy = float(accuracy_score(y_test, y_pred))
     report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
 
-    model_out = (ROOT / args.model_out).resolve()
-    report_out = (ROOT / args.report_out).resolve()
+    model_out = settings.resolve_artifact_path(args.model_out)
+    report_out = settings.resolve_artifact_path(args.report_out)
     model_out.parent.mkdir(parents=True, exist_ok=True)
     report_out.parent.mkdir(parents=True, exist_ok=True)
 

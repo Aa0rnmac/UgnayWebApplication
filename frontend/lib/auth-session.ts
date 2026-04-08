@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
+import { fetchWithApiFallback, getApiBase, getApiBaseCandidates } from "@/lib/api-base";
 
 export type SessionRole = "student" | "teacher";
 
@@ -51,7 +51,7 @@ export function normalizeSessionUser(user: RawUser | undefined): SessionUser {
 
 export async function fetchBackendUser(token: string): Promise<SessionUser | null> {
   try {
-    const response = await fetch(`${API_BASE}/auth/me`, {
+    const { response } = await fetchWithApiFallback("/auth/me", {
       cache: "no-store",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -77,7 +77,7 @@ export async function loginAgainstBackend(
   | { ok: false; status: number; detail: string }
 > {
   try {
-    const response = await fetch(`${API_BASE}/auth/login`, {
+    const { response } = await fetchWithApiFallback("/auth/login", {
       method: "POST",
       cache: "no-store",
       headers: {
@@ -110,10 +110,11 @@ export async function loginAgainstBackend(
       user: normalizeSessionUser(data.user),
     };
   } catch {
+    const apiBases = getApiBaseCandidates(getApiBase()).join(" or ");
     return {
       ok: false,
       status: 502,
-      detail: `Unable to reach backend API at ${API_BASE}.`,
+      detail: `Unable to reach backend API at ${apiBases}.`,
     };
   }
 }

@@ -4,7 +4,7 @@ export default function TeacherWorkspaceLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <RequireRole fallbackHref="/" role="teacher">
+    <RequireRole fallbackHref="/dashboard" role="teacher">
       {children}
     </RequireRole>
   );

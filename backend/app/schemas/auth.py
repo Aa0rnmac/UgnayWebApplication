@@ -32,6 +32,7 @@ class UserOut(BaseModel):
 
     id: int
     username: str
+    role: str = "student"
     first_name: str | None = None
     middle_name: str | None = None
     last_name: str | None = None

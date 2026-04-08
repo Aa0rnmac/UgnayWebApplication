@@ -32,7 +32,7 @@ export function AuthSwitcher({ collapsed = false }: { collapsed?: boolean }) {
     try {
       const account = DEMO_ACCOUNTS[nextRole];
       await login(account.username, account.password);
-      router.push(nextRole === "teacher" ? "/teacher" : "/student");
+      router.push(nextRole === "teacher" ? "/teacher" : "/dashboard");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to switch account.");
@@ -47,7 +47,7 @@ export function AuthSwitcher({ collapsed = false }: { collapsed?: boolean }) {
 
     try {
       await logout();
-      router.push("/student");
+      router.push("/dashboard");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign out.");

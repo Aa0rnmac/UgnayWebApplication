@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ detail: result.detail }, { status: result.status });
   }
 
-  const response = NextResponse.json({ user: result.user });
+  const response = NextResponse.json({ token: result.token, user: result.user });
   setSessionCookies(response, result.token);
   return response;
 }

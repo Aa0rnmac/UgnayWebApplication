@@ -7,11 +7,12 @@
 
 ## Environment
 1. Copy `.env.example` to `.env`.
-2. Confirm DB values:
-   - `postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub`
-3. Set dataset root (optional):
-   - `DATASETS_ROOT=datasets` (default, resolved from project root)
-   - You can also use an absolute path, for example `DATASETS_ROOT=C:\Users\Marissa\Datasets\FSL`.
+2. Confirm `DATABASE_URL` in `.env`.
+   - Current local default: `sqlite:///./fsl_learning_hub.db`
+   - PostgreSQL is still supported if you want to swap the URL later.
+3. Set dataset and artifact roots (optional):
+   - `DATASETS_ROOT=datasets` and `ARTIFACTS_ROOT=artifacts` keep everything inside the repo.
+   - For this local setup, use `DATASETS_ROOT=D:\MEGA\datasets` and `ARTIFACTS_ROOT=D:\MEGA\artifacts`.
 
 ## Run
 ```bash
@@ -44,10 +45,14 @@ On startup, tables are created and 3 modules are seeded if empty.
 ## Student Demo Mode
 - Student-facing endpoints (`/api/modules`, `/api/progress/summary`, `/api/lab/predict`) work without login.
 - When no bearer token is provided, backend uses/creates `student_demo` automatically.
+- Demo login accounts are seeded on startup:
+  - `student_demo` / `student123`
+  - `teacher_demo` / `teacher123`
 
 ## Alphabet Dataset Check
 - Dataset folder is resolved from `DATASETS_ROOT`.
 - Default value: `datasets` (project root + `/datasets`).
+- If `DATASETS_ROOT=D:\MEGA\datasets`, the backend reads training datasets from `D:\MEGA\datasets`.
 - Kaggle zip files are optional when extracted data is already available.
 - Quick check:
 ```bash
@@ -75,8 +80,8 @@ py scripts/train_alphabet_model.py
 ```
 
 Artifacts created:
-- `artifacts/alphabet_model.joblib`
-- `artifacts/alphabet_training_report.json`
+- `<ARTIFACTS_ROOT>/alphabet_model.joblib`
+- `<ARTIFACTS_ROOT>/alphabet_training_report.json`
 
 Optional tuning in `.env`:
 - `ALPHABET_CONFIDENCE_THRESHOLD` (default `0.45`)
@@ -102,8 +107,8 @@ python scripts/train_numbers_model.py
 ```
 
 Artifacts created:
-- `artifacts/numbers_model.joblib`
-- `artifacts/numbers_training_report.json`
+- `<ARTIFACTS_ROOT>/numbers_model.joblib`
+- `<ARTIFACTS_ROOT>/numbers_training_report.json`
 
 Train moving `10` detector (FSL-105 numbers clips):
 ```bash
@@ -112,8 +117,8 @@ python scripts/train_numbers_ten_motion_model.py
 ```
 
 Artifacts created:
-- `artifacts/numbers_ten_motion_model.joblib`
-- `artifacts/numbers_ten_motion_training_report.json`
+- `<ARTIFACTS_ROOT>/numbers_ten_motion_model.joblib`
+- `<ARTIFACTS_ROOT>/numbers_ten_motion_training_report.json`
 
 Collect custom moving numbers `11-100` by batch (recommended):
 ```bash
@@ -153,8 +158,8 @@ python scripts/train_numbers_motion_model.py
 ```
 
 Artifacts created:
-- `artifacts/numbers_motion_model.joblib`
-- `artifacts/numbers_motion_training_report.json`
+- `<ARTIFACTS_ROOT>/numbers_motion_model.joblib`
+- `<ARTIFACTS_ROOT>/numbers_motion_training_report.json`
 
 ## Words (FSL-105, excluding numbers)
 Expected files:
@@ -177,8 +182,8 @@ By default, words training excludes categories from:
 - `WORDS_EXCLUDED_CATEGORIES` (default: `FOOD,DRINK`)
 
 Artifacts created:
-- `artifacts/words_model.joblib`
-- `artifacts/words_training_report.json`
+- `<ARTIFACTS_ROOT>/words_model.joblib`
+- `<ARTIFACTS_ROOT>/words_training_report.json`
 
 ## Add Custom Phrase (Example: I LOVE YOU)
 Collect webcam clips for a custom phrase label:

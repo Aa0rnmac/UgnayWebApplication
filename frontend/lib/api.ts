@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
+import { fetchWithApiFallback, getApiBaseCandidates } from "@/lib/api-base";
 
 function getStoredToken(): string | undefined {
   if (typeof window === "undefined") {
@@ -11,6 +11,7 @@ function getStoredToken(): string | undefined {
 export type ApiUser = {
   id: number;
   username: string;
+  role?: "student" | "teacher" | "admin" | null;
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
@@ -227,9 +228,11 @@ export type WordsModelStatus = {
 
 async function request<T>(path: string, options?: RequestInit, token?: string): Promise<T> {
   const headers = new Headers(options?.headers);
-  if (!(options?.body instanceof FormData)) {
+  const hasJsonBody = options?.body !== undefined && !(options.body instanceof FormData);
+  if (hasJsonBody) {
     headers.set("Content-Type", "application/json");
   }
+  headers.set("Accept", "application/json");
   const authToken = token ?? getStoredToken();
   if (authToken) {
     headers.set("Authorization", `Bearer ${authToken}`);
@@ -237,15 +240,18 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    const result = await fetchWithApiFallback(path, {
       ...options,
       headers,
       cache: "no-store"
     });
+    response = result.response;
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown network error";
+    const candidates = getApiBaseCandidates();
+    const apiBases = candidates.join(" or ");
     throw new Error(
-      `Unable to reach API at ${API_BASE}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
+      `Unable to reach API at ${apiBases}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
     );
   }
 

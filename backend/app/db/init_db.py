@@ -7,6 +7,11 @@ from app.db.session import SessionLocal, engine
 from app.models.module import Module
 from app.models.user import User
 
+DEMO_USERS = (
+    {"username": "student_demo", "password": "student123", "role": "student"},
+    {"username": "teacher_demo", "password": "teacher123", "role": "teacher"},
+)
+
 SEED_MODULES = [
     {
         "slug": "fsl-alphabets",
@@ -621,11 +626,23 @@ def seed_modules(db: Session) -> None:
     db.commit()
 
 
-def seed_demo_user(db: Session) -> None:
-    existing_user = db.query(User).filter(User.username == "student_demo").first()
-    if existing_user:
-        return
-    db.add(User(username="student_demo", password_hash=hash_password("student123")))
+def seed_demo_users(db: Session) -> None:
+    for item in DEMO_USERS:
+        existing_user = db.query(User).filter(User.username == item["username"]).first()
+        if not existing_user:
+            db.add(
+                User(
+                    username=item["username"],
+                    password_hash=hash_password(item["password"]),
+                    role=item["role"],
+                )
+            )
+            continue
+
+        existing_user.password_hash = hash_password(item["password"])
+        existing_user.role = item["role"]
+        existing_user.must_change_password = False
+        db.add(existing_user)
     db.commit()
 
 
@@ -642,6 +659,10 @@ def _add_column_if_missing(table_name: str, column_name: str, ddl_sql: str) -> N
 
 
 def ensure_schema_updates() -> None:
+    _add_column_if_missing(
+        "users", "role", "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'student'"
+    )
+
     # Users table profile/account lifecycle columns.
     _add_column_if_missing("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR(120)")
     _add_column_if_missing("users", "middle_name", "ALTER TABLE users ADD COLUMN middle_name VARCHAR(120)")
@@ -679,6 +700,11 @@ def ensure_schema_updates() -> None:
     )
     _add_column_if_missing("registrations", "notes", "ALTER TABLE registrations ADD COLUMN notes TEXT")
 
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE users SET role = 'student' WHERE role IS NULL OR TRIM(role) = ''")
+        )
+
 
 def init_db() -> None:
     # Import models before create_all so SQLAlchemy registers metadata.
@@ -688,4 +714,4 @@ def init_db() -> None:
     ensure_schema_updates()
     with SessionLocal() as db:
         seed_modules(db)
-        seed_demo_user(db)
+        seed_demo_users(db)

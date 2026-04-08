@@ -123,7 +123,13 @@ async def predict_sign_from_image(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded image is empty."
         )
 
-    candidates = extract_landmark_feature_candidates(contents)
+    try:
+        candidates = extract_landmark_feature_candidates(contents)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     if not candidates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -196,6 +202,11 @@ async def predict_words_sequence(
         prediction = service.predict_from_frame_bytes(payloads, allowed_labels=allowed_labels)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
     return LabPredictionResponse(
         prediction=prediction.prediction,
@@ -257,6 +268,11 @@ async def predict_numbers_sequence(
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
 
         return LabPredictionResponse(
             prediction=result.prediction,
@@ -286,12 +302,23 @@ async def predict_numbers_sequence(
         except ValueError:
             # Fall through to static digit fallback when sequence is unclear.
             pass
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
 
     predictions: list[LabPredictionResponse] = []
     sample_stride = max(1, len(payloads) // 6)
     sampled_payloads = payloads[::sample_stride][:6]
     for payload in sampled_payloads:
-        candidates = extract_landmark_feature_candidates(payload)
+        try:
+            candidates = extract_landmark_feature_candidates(payload)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
         if not candidates:
             continue
         item = numbers_service.predict_best_of_candidates(candidates)

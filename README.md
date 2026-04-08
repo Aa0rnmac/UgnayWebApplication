@@ -28,16 +28,18 @@ Available launch profiles:
 - `Frontend: Next.js`
 - `Run Full Stack` (starts both)
 
-## Local database (already provided)
-- Host: `localhost`
-- Port: `5432`
-- Database: `fsl_learning_hub`
-- User: `fsl_app`
-- Password: `admin123`
+## Local database (default)
+- `backend/.env` currently points to `sqlite:///./fsl_learning_hub.db`
+- The local SQLite file lives in `backend/fsl_learning_hub.db`
+- You can still switch `DATABASE_URL` to PostgreSQL later if needed
+
+## Local ML storage
+- `backend/.env` now points datasets to `D:\MEGA\datasets`
+- `backend/.env` now points trained model artifacts to `D:\MEGA\artifacts`
 
 ## Demo Access
 - Student-facing pages still work in guest mode without login.
-- The sidebar now includes demo account switching for:
+- The login screen includes demo account switching for:
   - `student_demo` / `student123`
   - `teacher_demo` / `teacher123`
 - Backend still falls back to `student_demo` when no auth token is sent to student endpoints.

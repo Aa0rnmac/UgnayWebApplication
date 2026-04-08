@@ -3,14 +3,72 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  AlphabetModelStatus,
   LabPrediction,
+  NumbersModelStatus,
   NumbersCategory,
   RecognitionMode,
+  WordsModelStatus,
   WordsCategory,
+  getAlphabetModelStatus,
+  getNumbersModelStatus,
+  getWordsModelStatus,
   predictNumbersFromFrames,
   predictSignFromImage,
   predictWordsFromFrames
 } from "@/lib/api";
+
+type RecognitionStatuses = {
+  alphabet: AlphabetModelStatus | null;
+  numbers: NumbersModelStatus | null;
+  words: WordsModelStatus | null;
+  error: string | null;
+};
+
+type ModeAvailability = {
+  ready: boolean;
+  title: string;
+  detail: string;
+};
+
+function describeModelAvailability(
+  ready: boolean,
+  modelFound: boolean,
+  modelPath: string,
+  retrainScript: string,
+  label: string
+): string {
+  if (ready) {
+    return `${label} is loaded.`;
+  }
+
+  if (modelFound) {
+    return `Found trained ${label.toLowerCase()} at ${modelPath}, but the backend has not loaded it yet. Refresh status or relaunch the backend. If this keeps happening, rerun ${retrainScript} so the artifact matches the current backend format.`;
+  }
+
+  return `Missing trained ${label.toLowerCase()}: ${modelPath}. Restore that file or run ${retrainScript} after restoring the dataset.`;
+}
+
+async function loadRecognitionStatuses(): Promise<RecognitionStatuses> {
+  const [alphabetResult, numbersResult, wordsResult] = await Promise.allSettled([
+    getAlphabetModelStatus(),
+    getNumbersModelStatus(),
+    getWordsModelStatus()
+  ]);
+
+  const errors = [alphabetResult, numbersResult, wordsResult]
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) =>
+      result.reason instanceof Error ? result.reason.message : "Unable to load model status."
+    );
+
+  return {
+    alphabet: alphabetResult.status === "fulfilled" ? alphabetResult.value : null,
+    numbers: numbersResult.status === "fulfilled" ? numbersResult.value : null,
+    words: wordsResult.status === "fulfilled" ? wordsResult.value : null,
+    error: errors.length > 0 ? errors[0] : null
+  };
+}
 
 export default function SigningLabPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -29,6 +87,11 @@ export default function SigningLabPage() {
   const [running, setRunning] = useState(false);
   const [predicting, setPredicting] = useState(false);
   const [recognizedInput, setRecognizedInput] = useState("");
+  const [alphabetStatus, setAlphabetStatus] = useState<AlphabetModelStatus | null>(null);
+  const [numbersStatus, setNumbersStatus] = useState<NumbersModelStatus | null>(null);
+  const [wordsStatus, setWordsStatus] = useState<WordsModelStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const isSequenceMode = mode === "numbers" || mode === "words";
 
   type CaptureOptions = {
@@ -89,6 +152,118 @@ export default function SigningLabPage() {
     }
     setRecognizedInput(prediction);
   }, [prediction]);
+
+  async function refreshRecognitionStatuses() {
+    setStatusLoading(true);
+    const payload = await loadRecognitionStatuses();
+    setAlphabetStatus(payload.alphabet);
+    setNumbersStatus(payload.numbers);
+    setWordsStatus(payload.words);
+    setStatusError(payload.error);
+    setStatusLoading(false);
+  }
+
+  useEffect(() => {
+    void refreshRecognitionStatuses();
+  }, []);
+
+  function getCurrentModeAvailability(): ModeAvailability {
+    if (statusLoading) {
+      return {
+        ready: false,
+        title: "Checking lab recognition status",
+        detail: "Verifying whether the trained recognition models are available."
+      };
+    }
+
+    if (mode === "alphabet") {
+      if (alphabetStatus?.ready) {
+        return {
+          ready: true,
+          title: "Alphabet recognition ready",
+          detail: "Alphabet image recognition model is loaded."
+        };
+      }
+
+      return {
+        ready: false,
+        title: "Alphabet recognition unavailable",
+        detail:
+          alphabetStatus !== null
+            ? describeModelAvailability(
+                alphabetStatus.ready,
+                alphabetStatus.model_found,
+                alphabetStatus.model_path,
+                "backend/scripts/train_alphabet_model.py",
+                "alphabet model"
+              )
+            : `Unable to verify alphabet model status.${statusError ? ` ${statusError}` : ""}`
+      };
+    }
+
+    if (mode === "numbers") {
+      const needsMotionModel = numbersCategory !== "0-10";
+      if (
+        numbersStatus &&
+        ((needsMotionModel && numbersStatus.motion_ready) ||
+          (!needsMotionModel && numbersStatus.ready))
+      ) {
+        return {
+          ready: true,
+          title: "Numbers recognition ready",
+          detail: needsMotionModel
+            ? "Motion-based numbers model is loaded for 11-100."
+            : "Static numbers model is loaded for 0-10."
+        };
+      }
+
+      return {
+        ready: false,
+        title: "Numbers recognition unavailable",
+        detail:
+          numbersStatus !== null
+            ? needsMotionModel
+              ? describeModelAvailability(
+                  numbersStatus.motion_ready,
+                  numbersStatus.motion_model_found,
+                  numbersStatus.motion_model_path,
+                  "backend/scripts/train_numbers_motion_model.py",
+                  "numbers motion model"
+                )
+              : describeModelAvailability(
+                  numbersStatus.ready,
+                  numbersStatus.model_found,
+                  numbersStatus.model_path,
+                  "backend/scripts/train_numbers_model.py",
+                  "numbers model"
+                )
+            : `Unable to verify numbers model status.${statusError ? ` ${statusError}` : ""}`
+      };
+    }
+
+    if (wordsStatus?.ready) {
+      return {
+        ready: true,
+        title: "Words recognition ready",
+        detail: "Words sequence model is loaded."
+      };
+    }
+
+    return {
+      ready: false,
+      title: "Words recognition unavailable",
+      detail:
+        wordsStatus !== null
+          ? describeModelAvailability(
+              wordsStatus.ready,
+              wordsStatus.model_found,
+              wordsStatus.model_path,
+              "backend/scripts/train_words_model.py",
+              "words model"
+            )
+          : `Unable to verify words model status.${statusError ? ` ${statusError}` : ""}`
+    };
+  }
 
   async function startCamera() {
     setError(null);
@@ -267,6 +442,11 @@ export default function SigningLabPage() {
     if (!running || predictionInFlightRef.current) {
       return;
     }
+    const modeAvailability = getCurrentModeAvailability();
+    if (!modeAvailability.ready) {
+      setError(modeAvailability.detail);
+      return;
+    }
     predictionInFlightRef.current = true;
     setError(null);
     setPredicting(true);
@@ -311,6 +491,11 @@ export default function SigningLabPage() {
     if (!running || predictionInFlightRef.current) {
       return;
     }
+    const modeAvailability = getCurrentModeAvailability();
+    if (!modeAvailability.ready) {
+      setError(modeAvailability.detail);
+      return;
+    }
     predictionInFlightRef.current = true;
     setError(null);
     setPredicting(true);
@@ -324,15 +509,15 @@ export default function SigningLabPage() {
         wordsCategory === "responses" ||
         wordsCategory === "family" ||
         wordsCategory === "relationship";
-      const firstPassFrames = isPhraseHeavyCategory ? 18 : 15;
-      const firstPassDelay = isPhraseHeavyCategory ? 65 : 55;
-      const fallbackPassFrames = isPhraseHeavyCategory ? 14 : 12;
-      const fallbackPassDelay = isPhraseHeavyCategory ? 70 : 65;
-      const fallbackThreshold = isPhraseHeavyCategory ? 0.68 : 0.62;
+      const firstPassFrames = isPhraseHeavyCategory ? 24 : 20;
+      const firstPassDelay = isPhraseHeavyCategory ? 45 : 45;
+      const fallbackPassFrames = isPhraseHeavyCategory ? 30 : 24;
+      const fallbackPassDelay = isPhraseHeavyCategory ? 52 : 50;
+      const fallbackThreshold = isPhraseHeavyCategory ? 0.74 : 0.68;
       const captureProfile = {
-        maxWidth: isPhraseHeavyCategory ? 800 : 720,
-        maxHeight: isPhraseHeavyCategory ? 600 : 540,
-        jpegQuality: isPhraseHeavyCategory ? 0.9 : 0.86
+        maxWidth: isPhraseHeavyCategory ? 860 : 800,
+        maxHeight: isPhraseHeavyCategory ? 640 : 600,
+        jpegQuality: isPhraseHeavyCategory ? 0.92 : 0.9
       };
 
       setCaptureStatus("Capturing gesture...");
@@ -358,7 +543,7 @@ export default function SigningLabPage() {
         samples[0].confidence < fallbackThreshold;
 
       if (needsFallbackPass) {
-        setCaptureStatus("Capturing gesture...");
+        setCaptureStatus("Capturing a longer gesture...");
         await sleep(90);
         const fallbackPass = await captureFrameSequence(fallbackPassFrames, fallbackPassDelay, {
           ...captureProfile
@@ -427,20 +612,45 @@ export default function SigningLabPage() {
     if (!running || predictionInFlightRef.current) {
       return;
     }
+    const modeAvailability = getCurrentModeAvailability();
+    if (!modeAvailability.ready) {
+      setError(modeAvailability.detail);
+      return;
+    }
     predictionInFlightRef.current = true;
     setError(null);
     setPredicting(true);
 
     try {
       const isDynamicRange = numbersCategory !== "0-10";
-      const frameCount = isDynamicRange ? 16 : 12;
-      const frameDelay = isDynamicRange ? 85 : 90;
-      const minimumFrames = isDynamicRange ? 10 : 8;
+      const capturePlan = isDynamicRange
+        ? [
+            {
+              frameCount: 22,
+              frameDelay: 72,
+              minimumFrames: 16,
+              statusText: "Capturing gesture for 11-100..."
+            },
+            {
+              frameCount: 28,
+              frameDelay: 78,
+              minimumFrames: 18,
+              statusText: "Recapturing a longer 11-100 gesture..."
+            }
+          ]
+        : [
+            {
+              frameCount: 12,
+              frameDelay: 90,
+              minimumFrames: 8,
+              statusText: "Capturing gesture..."
+            }
+          ];
       const captureProfile = isDynamicRange
         ? {
-            maxWidth: 720,
-            maxHeight: 540,
-            jpegQuality: 0.88
+            maxWidth: 820,
+            maxHeight: 620,
+            jpegQuality: 0.9
           }
         : {
             maxWidth: 760,
@@ -449,19 +659,44 @@ export default function SigningLabPage() {
           };
 
       await runCaptureCountdown(3, sequenceAuto);
-      setCaptureStatus(isDynamicRange ? "Capturing gesture for 11-100..." : "Capturing gesture...");
-      const sequence = await captureFrameSequence(frameCount, frameDelay, captureProfile);
-      if (sequence.length < minimumFrames) {
-        setError("Not enough clear frames. Keep one hand centered and try again.");
-        return;
+      let lastErrorMessage: string | null = null;
+      for (let planIndex = 0; planIndex < capturePlan.length; planIndex += 1) {
+        const plan = capturePlan[planIndex];
+        setCaptureStatus(plan.statusText);
+        const sequence = await captureFrameSequence(plan.frameCount, plan.frameDelay, captureProfile);
+        if (sequence.length < plan.minimumFrames) {
+          lastErrorMessage = "Not enough clear frames. Keep one hand centered and try again.";
+          continue;
+        }
+
+        setCaptureStatus("Capture complete. You can remove your hand.");
+        await sleep(160);
+        setCaptureStatus("Analyzing captured gesture...");
+
+        try {
+          const result = await predictNumbersFromFrames(sequence, undefined, numbersCategory);
+          setPrediction(result.prediction);
+          setConfidence(result.confidence);
+          setTopCandidates(result.top_candidates);
+          lastErrorMessage = null;
+          break;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Numbers prediction failed";
+          lastErrorMessage = message;
+          if (
+            !isDynamicRange ||
+            planIndex === capturePlan.length - 1 ||
+            !message.toLowerCase().includes("no clear hand sequence")
+          ) {
+            throw err;
+          }
+          await sleep(120);
+        }
       }
-      setCaptureStatus("Capture complete. You can remove your hand.");
-      await sleep(160);
-      setCaptureStatus("Analyzing captured gesture...");
-      const result = await predictNumbersFromFrames(sequence, undefined, numbersCategory);
-      setPrediction(result.prediction);
-      setConfidence(result.confidence);
-      setTopCandidates(result.top_candidates);
+
+      if (lastErrorMessage) {
+        setError(lastErrorMessage);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Numbers prediction failed";
       setError(message);
@@ -492,6 +727,9 @@ export default function SigningLabPage() {
     if (!running) {
       return;
     }
+    if (!getCurrentModeAvailability().ready) {
+      return;
+    }
     if (isSequenceMode && !sequenceAuto) {
       return;
     }
@@ -514,6 +752,8 @@ export default function SigningLabPage() {
     };
   }, [running, mode, sequenceAuto, isSequenceMode, wordsCategory, numbersCategory]);
 
+  const currentModeStatus = getCurrentModeAvailability();
+
   return (
     <section className="space-y-4">
       <div className="panel panel-lively">
@@ -521,6 +761,29 @@ export default function SigningLabPage() {
         <p className="mt-2 text-sm text-muted">
           Alphabet runs live automatically. Numbers and Words support manual capture or auto analyze.
         </p>
+        <div
+          className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+            currentModeStatus.ready
+              ? "border-brandGreen/30 bg-brandGreenLight/40 text-slate-800"
+              : "border-brandYellow/40 bg-brandYellowLight/60 text-slate-800"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">{currentModeStatus.title}</p>
+              <p className="mt-1 text-xs text-slate-700">{currentModeStatus.detail}</p>
+            </div>
+            <button
+              className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+              onClick={() => {
+                void refreshRecognitionStatuses();
+              }}
+              type="button"
+            >
+              Refresh Status
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
@@ -640,7 +903,12 @@ export default function SigningLabPage() {
           {isSequenceMode ? (
             <div className="mt-3 flex flex-wrap gap-2">
               <button
-                className="rounded-lg bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandRed/90"
+                className={`rounded-lg px-3 py-2 text-xs font-semibold text-white transition ${
+                  currentModeStatus.ready
+                    ? "bg-brandRed hover:-translate-y-0.5 hover:bg-brandRed/90"
+                    : "cursor-not-allowed bg-slate-400"
+                }`}
+                disabled={!currentModeStatus.ready || statusLoading}
                 onClick={() => {
                   void runPrediction();
                 }}
@@ -649,7 +917,12 @@ export default function SigningLabPage() {
                 Analyze Sign Now
               </button>
               <button
-                className="rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandBlue/90"
+                className={`rounded-lg px-3 py-2 text-xs font-semibold text-white transition ${
+                  currentModeStatus.ready
+                    ? "bg-brandBlue hover:-translate-y-0.5 hover:bg-brandBlue/90"
+                    : "cursor-not-allowed bg-slate-400"
+                }`}
+                disabled={!currentModeStatus.ready || statusLoading}
                 onClick={() => setSequenceAuto((value) => !value)}
                 type="button"
               >

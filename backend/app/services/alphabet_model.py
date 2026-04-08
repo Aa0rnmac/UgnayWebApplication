@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import joblib
@@ -19,35 +18,40 @@ class AlphabetPrediction:
 
 class AlphabetModelService:
     def __init__(self) -> None:
-        self._loaded = False
         self._pipeline: Any | None = None
         self._classes: list[str] = []
-        self._model_path = self._resolve_model_path(settings.alphabet_model_path)
+        self._model_path = settings.resolve_artifact_path(settings.alphabet_model_path)
+        self._artifact_mtime_ns: int | None = None
 
-    @staticmethod
-    def _resolve_model_path(path_value: str) -> Path:
-        path = Path(path_value)
-        if path.is_absolute():
-            return path
-        backend_root = Path(__file__).resolve().parents[2]
-        return (backend_root / path).resolve()
+    def _reset_loaded_state(self) -> None:
+        self._pipeline = None
+        self._classes = []
 
     def _load_if_needed(self) -> None:
-        if self._loaded:
-            return
-        self._loaded = True
-
         if not self._model_path.exists():
+            self._reset_loaded_state()
+            self._artifact_mtime_ns = None
             return
 
+        current_mtime_ns = self._model_path.stat().st_mtime_ns
+        if (
+            self._artifact_mtime_ns == current_mtime_ns
+            and self._pipeline is not None
+            and bool(self._classes)
+        ):
+            return
+
+        self._reset_loaded_state()
         artifact = joblib.load(self._model_path)
         pipeline = artifact.get("pipeline")
-        classes = artifact.get("classes", [])
+        classes = artifact.get("classes") or list(getattr(pipeline, "classes_", []))
         if pipeline is None or not classes:
+            self._artifact_mtime_ns = current_mtime_ns
             return
 
         self._pipeline = pipeline
-        self._classes = list(classes)
+        self._classes = [str(item) for item in classes]
+        self._artifact_mtime_ns = current_mtime_ns
 
     def status(self) -> dict[str, object]:
         self._load_if_needed()

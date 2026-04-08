@@ -4,13 +4,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
+ENV_FILE = BACKEND_ROOT / ".env"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE), env_file_encoding="utf-8", extra="ignore"
+    )
 
     database_url: str = "postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub"
     datasets_root: str = "datasets"
+    artifacts_root: str = "artifacts"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     session_hours: int = 24
@@ -50,6 +55,24 @@ class Settings(BaseSettings):
         if configured.is_absolute():
             return configured
         return (PROJECT_ROOT / configured).resolve()
+
+    @property
+    def artifacts_root_path(self) -> Path:
+        configured = Path(self.artifacts_root).expanduser()
+        if configured.is_absolute():
+            return configured
+        return (PROJECT_ROOT / configured).resolve()
+
+    def resolve_artifact_path(self, path_value: str) -> Path:
+        path = Path(path_value).expanduser()
+        if path.is_absolute():
+            return path
+
+        parts = list(path.parts)
+        if parts and parts[0].lower() == "artifacts":
+            path = Path(*parts[1:]) if len(parts) > 1 else Path()
+
+        return (self.artifacts_root_path / path).resolve()
 
 
 settings = Settings()
