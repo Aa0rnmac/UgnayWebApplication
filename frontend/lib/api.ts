@@ -1,4 +1,4 @@
-import { fetchWithApiFallback, getApiBaseCandidates } from "@/lib/api-base";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 
 function getStoredToken(): string | undefined {
   if (typeof window === "undefined") {
@@ -11,7 +11,7 @@ function getStoredToken(): string | undefined {
 export type ApiUser = {
   id: number;
   username: string;
-  role?: "student" | "teacher" | "admin" | null;
+  role?: "student" | "teacher";
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
@@ -28,6 +28,25 @@ export type AuthResponse = {
   user: ApiUser;
 };
 
+export type ForgotPasswordRequestResponse = {
+  message: string;
+};
+
+export type TeacherInviteVerifyQrResponse = {
+  invite_code: string;
+  message: string;
+};
+
+export type TeacherInviteVerifyPasskeyResponse = {
+  onboarding_token: string;
+  message: string;
+};
+
+export type TeacherInviteIssueCredentialsResponse = {
+  message: string;
+  username: string;
+};
+
 export type RegistrationPayload = {
   first_name: string;
   middle_name?: string;
@@ -37,7 +56,6 @@ export type RegistrationPayload = {
   email: string;
   phone_number: string;
   reference_number: string;
-  requested_batch_name?: string;
   reference_image: File;
 };
 
@@ -52,173 +70,12 @@ export type RegistrationRecord = {
   phone_number: string;
   reference_number: string;
   reference_image_path: string | null;
-  requested_batch_name: string | null;
-  status: string;
-  validated_at: string | null;
-  validated_by: string | null;
-  rejected_at: string | null;
-  rejected_by: string | null;
-  linked_user_id: number | null;
-  batch_id: number | null;
-  issued_username: string | null;
-  credential_email_status: string | null;
-  credential_sent_at: string | null;
-  credential_email_error: string | null;
-  notes: string | null;
   created_at: string;
 };
 
 export type RegistrationSubmitResponse = {
   message: string;
   registration: RegistrationRecord;
-};
-
-export type TeacherRegistrationApprovalPayload = {
-  issued_username: string;
-  batch_name: string;
-  current_week_number: number;
-  notes?: string;
-};
-
-export type TeacherRegistrationRejectPayload = {
-  notes?: string;
-};
-
-export type TeacherRegistrationActionResponse = {
-  message: string;
-  registration: RegistrationRecord;
-};
-
-export type TeacherBatchStudent = {
-  user_id: number;
-  username: string;
-  full_name: string;
-  email?: string | null;
-};
-
-export type TeacherBatch = {
-  id: number;
-  name: string;
-  current_week_number: number;
-  student_count: number;
-  students: TeacherBatchStudent[];
-};
-
-export type TeacherAnalyticsSummary = {
-  filtered_attempts: number;
-  filtered_students: number;
-  average_score: number | null;
-  support_queue_count: number;
-  on_track_count: number;
-  assessment_ready_count: number;
-  snapshot_evidence_count: number;
-  latest_attempted_at: string | null;
-  low_score_threshold: number;
-  ready_score_threshold: number;
-};
-
-export type TeacherWrongItemStat = {
-  module_id: number;
-  module_title: string;
-  assessment_id: string;
-  assessment_title: string;
-  assessment_type: string;
-  assessment_item_id: string;
-  prompt: string;
-  expected_response: string | null;
-  miss_count: number;
-  appearance_count: number;
-  miss_rate_percent: number;
-  unique_student_count: number;
-  latest_submitted_at: string | null;
-};
-
-export type TeacherLowScoringStudent = {
-  user_id: number;
-  username: string;
-  full_name: string;
-  batch_id: number | null;
-  batch_name: string | null;
-  attempt_count: number;
-  average_score: number;
-  latest_score: number;
-  latest_module_id: number;
-  latest_module_title: string;
-  latest_assessment_title: string;
-  latest_submitted_at: string;
-};
-
-export type TeacherRecentAttempt = {
-  attempt_id: number;
-  user_id: number;
-  username: string;
-  full_name: string;
-  batch_id: number | null;
-  batch_name: string | null;
-  module_id: number;
-  module_title: string;
-  assessment_id: string;
-  assessment_title: string;
-  assessment_type: string;
-  score_percent: number;
-  score_correct: number;
-  score_total: number;
-  wrong_answer_count: number;
-  snapshot_count: number;
-  submitted_at: string;
-};
-
-export type TeacherSnapshotEvidence = {
-  attempt_id: number;
-  user_id: number;
-  username: string;
-  full_name: string;
-  batch_id: number | null;
-  batch_name: string | null;
-  module_id: number;
-  module_title: string;
-  assessment_title: string;
-  assessment_type: string;
-  assessment_item_id: string;
-  label: string | null;
-  prompt: string | null;
-  expected_response: string | null;
-  response_text: string | null;
-  is_correct: boolean | null;
-  image_path: string;
-  submitted_at: string;
-};
-
-export type TeacherInterventionSuggestion = {
-  priority: string;
-  title: string;
-  rationale: string;
-  suggested_action: string;
-};
-
-export type TeacherAnalyticsOverview = {
-  summary: TeacherAnalyticsSummary;
-  wrong_items: TeacherWrongItemStat[];
-  low_scoring_students: TeacherLowScoringStudent[];
-  recent_attempts: TeacherRecentAttempt[];
-  snapshot_evidence: TeacherSnapshotEvidence[];
-  intervention_suggestions: TeacherInterventionSuggestion[];
-};
-
-export type TeacherAnalyticsFilters = {
-  batch_id?: number;
-  module_id?: number;
-  student_id?: number;
-  low_score_threshold?: number;
-  ready_score_threshold?: number;
-};
-
-export type TeacherAnalyticsOverviewOptions = TeacherAnalyticsFilters & {
-  wrong_items_limit?: number;
-  low_score_limit?: number;
-  recent_limit?: number;
-  snapshot_limit?: number;
-  suggestion_limit?: number;
 };
 
 export type ProfileUpdatePayload = {
@@ -261,60 +118,6 @@ export type Assessment = {
   answer: string;
 };
 
-export type AssessmentAttemptAnswerRecord = {
-  assessment_item_id: string;
-  prompt: string;
-  response_text: string | null;
-  expected_response: string | null;
-  is_correct: boolean;
-};
-
-export type AssessmentAttemptSnapshotRecord = {
-  assessment_item_id: string;
-  label: string | null;
-  image_path: string;
-};
-
-export type AssessmentAttemptRecord = {
-  id: number;
-  user_id: number;
-  module_id: number;
-  assessment_id: string;
-  assessment_title: string;
-  assessment_type: string;
-  score_percent: number;
-  score_correct: number;
-  score_total: number;
-  answers: AssessmentAttemptAnswerRecord[];
-  snapshots: AssessmentAttemptSnapshotRecord[];
-  submitted_at: string;
-};
-
-export type AssessmentAttemptAnswerPayload = {
-  assessment_item_id: string;
-  prompt: string;
-  response_text?: string | null;
-  expected_response?: string | null;
-  is_correct: boolean;
-};
-
-export type AssessmentAttemptSnapshotPayload = {
-  assessment_item_id: string;
-  label?: string | null;
-  image_data_url: string;
-};
-
-export type AssessmentAttemptPayload = {
-  assessment_id: string;
-  assessment_title: string;
-  assessment_type: string;
-  score_percent: number;
-  score_correct: number;
-  score_total: number;
-  answers: AssessmentAttemptAnswerPayload[];
-  snapshots?: AssessmentAttemptSnapshotPayload[];
-};
-
 export type ModuleItem = {
   id: number;
   slug: string;
@@ -326,25 +129,17 @@ export type ModuleItem = {
   is_locked: boolean;
   status: "in_progress" | "completed";
   progress_percent: number;
-  completed_lessons: string[];
   assessment_score: number | null;
-  latest_assessment_attempt: AssessmentAttemptRecord | null;
-};
-
-export type TeacherModuleItem = {
-  id: number;
-  slug: string;
-  title: string;
-  description: string;
-  order_index: number;
-  lessons: Lesson[];
-  is_placeholder: boolean;
 };
 
 export type LabPrediction = {
   prediction: string;
   confidence: number;
   top_candidates: string[];
+};
+
+export type OpenPalmDetection = {
+  open_palm: boolean;
 };
 
 export type RecognitionMode = "alphabet" | "numbers" | "words";
@@ -456,11 +251,9 @@ export type WordsModelStatus = {
 
 async function request<T>(path: string, options?: RequestInit, token?: string): Promise<T> {
   const headers = new Headers(options?.headers);
-  const hasJsonBody = options?.body !== undefined && !(options.body instanceof FormData);
-  if (hasJsonBody) {
+  if (!(options?.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Accept", "application/json");
   const authToken = token ?? getStoredToken();
   if (authToken) {
     headers.set("Authorization", `Bearer ${authToken}`);
@@ -468,18 +261,15 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
 
   let response: Response;
   try {
-    const result = await fetchWithApiFallback(path, {
+    response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers,
       cache: "no-store"
     });
-    response = result.response;
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown network error";
-    const candidates = getApiBaseCandidates();
-    const apiBases = candidates.join(" or ");
     throw new Error(
-      `Unable to reach API at ${apiBases}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
+      `Unable to reach API at ${API_BASE}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
     );
   }
 
@@ -495,25 +285,6 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
   return response.json() as Promise<T>;
 }
 
-function buildTeacherAnalyticsQuery(
-  options?: Record<string, string | number | undefined | null>
-): string {
-  if (!options) {
-    return "";
-  }
-
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(options)) {
-    if (value === undefined || value === null || value === "") {
-      continue;
-    }
-    params.set(key, String(value));
-  }
-
-  const query = params.toString();
-  return query ? `?${query}` : "";
-}
-
 export function register(username: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>("/auth/register", {
     method: "POST",
@@ -525,6 +296,57 @@ export function login(username: string, password: string): Promise<AuthResponse>
   return request<AuthResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password })
+  });
+}
+
+export function requestForgotPasswordOtp(
+  usernameOrEmail: string
+): Promise<ForgotPasswordRequestResponse> {
+  return request<ForgotPasswordRequestResponse>("/auth/forgot-password/request", {
+    method: "POST",
+    body: JSON.stringify({ username_or_email: usernameOrEmail })
+  });
+}
+
+export function verifyForgotPasswordOtp(
+  usernameOrEmail: string,
+  otpCode: string,
+  newPassword: string
+): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/forgot-password/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      username_or_email: usernameOrEmail,
+      otp_code: otpCode,
+      new_password: newPassword
+    })
+  });
+}
+
+export function verifyTeacherInviteQr(qrPayload: string): Promise<TeacherInviteVerifyQrResponse> {
+  return request<TeacherInviteVerifyQrResponse>("/auth/teacher-invite/verify-qr", {
+    method: "POST",
+    body: JSON.stringify({ qr_payload: qrPayload })
+  });
+}
+
+export function verifyTeacherInvitePasskey(
+  inviteCode: string,
+  passkey: string
+): Promise<TeacherInviteVerifyPasskeyResponse> {
+  return request<TeacherInviteVerifyPasskeyResponse>("/auth/teacher-invite/verify-passkey", {
+    method: "POST",
+    body: JSON.stringify({ invite_code: inviteCode, passkey })
+  });
+}
+
+export function issueTeacherCredentials(
+  onboardingToken: string,
+  email: string
+): Promise<TeacherInviteIssueCredentialsResponse> {
+  return request<TeacherInviteIssueCredentialsResponse>("/auth/teacher-invite/issue-credentials", {
+    method: "POST",
+    body: JSON.stringify({ onboarding_token: onboardingToken, email })
   });
 }
 
@@ -576,9 +398,6 @@ export async function submitRegistration(
   }
   data.append("birth_date", payload.birth_date.trim());
   data.append("address", payload.address.trim());
-  if (payload.requested_batch_name?.trim()) {
-    data.append("requested_batch_name", payload.requested_batch_name.trim());
-  }
   data.append("reference_image", payload.reference_image);
 
   return request<RegistrationSubmitResponse>("/registrations", {
@@ -595,132 +414,16 @@ export function getModules(token?: string): Promise<ModuleItem[]> {
   return request<ModuleItem[]>("/modules", undefined, token);
 }
 
-export function getModule(moduleId: number, token?: string): Promise<ModuleItem> {
-  return request<ModuleItem>(`/modules/${moduleId}`, undefined, token);
-}
-
-export function getTeacherModuleCatalog(token?: string): Promise<TeacherModuleItem[]> {
-  return request<TeacherModuleItem[]>("/teacher/modules/catalog", undefined, token);
-}
-
-export function getTeacherModuleDetail(
-  moduleId: number,
-  token?: string
-): Promise<TeacherModuleItem> {
-  return request<TeacherModuleItem>(`/teacher/modules/${moduleId}`, undefined, token);
-}
-
-export function getTeacherRegistrations(statusFilter?: string): Promise<RegistrationRecord[]> {
-  const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
-  return request<RegistrationRecord[]>(`/teacher/registrations${query}`);
-}
-
-export function approveTeacherRegistration(
-  registrationId: number,
-  payload: TeacherRegistrationApprovalPayload
-): Promise<TeacherRegistrationActionResponse> {
-  return request<TeacherRegistrationActionResponse>(
-    `/teacher/registrations/${registrationId}/approve`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload)
-    }
-  );
-}
-
-export function rejectTeacherRegistration(
-  registrationId: number,
-  payload: TeacherRegistrationRejectPayload
-): Promise<TeacherRegistrationActionResponse> {
-  return request<TeacherRegistrationActionResponse>(
-    `/teacher/registrations/${registrationId}/reject`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload)
-    }
-  );
-}
-
-export function resendTeacherRegistrationCredentials(
-  registrationId: number
-): Promise<TeacherRegistrationActionResponse> {
-  return request<TeacherRegistrationActionResponse>(
-    `/teacher/registrations/${registrationId}/resend-credentials`,
-    {
-      method: "POST"
-    }
-  );
-}
-
-export function getTeacherBatches(): Promise<TeacherBatch[]> {
-  return request<TeacherBatch[]>("/teacher/batches");
-}
-
-export function updateTeacherBatch(
-  batchId: number,
-  currentWeekNumber: number
-): Promise<TeacherBatch> {
-  return request<TeacherBatch>(`/teacher/batches/${batchId}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      current_week_number: currentWeekNumber
-    })
-  });
-}
-
-export function getTeacherAnalyticsOverview(
-  options?: TeacherAnalyticsOverviewOptions
-): Promise<TeacherAnalyticsOverview> {
-  return request<TeacherAnalyticsOverview>(
-    `/teacher/analytics/overview${buildTeacherAnalyticsQuery(options)}`
-  );
-}
-
-export function getTeacherWrongItems(
-  options?: TeacherAnalyticsFilters & { limit?: number }
-): Promise<TeacherWrongItemStat[]> {
-  return request<TeacherWrongItemStat[]>(
-    `/teacher/analytics/wrong-items${buildTeacherAnalyticsQuery(options)}`
-  );
-}
-
-export function getTeacherLowScoringStudents(
-  options?: TeacherAnalyticsFilters & { limit?: number }
-): Promise<TeacherLowScoringStudent[]> {
-  return request<TeacherLowScoringStudent[]>(
-    `/teacher/analytics/low-scoring-students${buildTeacherAnalyticsQuery(options)}`
-  );
-}
-
-export function getTeacherRecentAttempts(
-  options?: TeacherAnalyticsFilters & { limit?: number }
-): Promise<TeacherRecentAttempt[]> {
-  return request<TeacherRecentAttempt[]>(
-    `/teacher/analytics/recent-attempts${buildTeacherAnalyticsQuery(options)}`
-  );
-}
-
-export function getTeacherSnapshotEvidence(
-  options?: TeacherAnalyticsFilters & { limit?: number }
-): Promise<TeacherSnapshotEvidence[]> {
-  return request<TeacherSnapshotEvidence[]>(
-    `/teacher/analytics/snapshot-evidence${buildTeacherAnalyticsQuery(options)}`
-  );
-}
-
-export function getTeacherInterventionSuggestions(
-  options?: TeacherAnalyticsFilters & { limit?: number }
-): Promise<TeacherInterventionSuggestion[]> {
-  return request<TeacherInterventionSuggestion[]>(
-    `/teacher/analytics/interventions${buildTeacherAnalyticsQuery(options)}`
-  );
-}
-
 export function updateModuleProgress(
   moduleId: number,
   payload: {
     completed_lesson_id?: string;
     assessment_score?: number;
+    assessment_right?: number;
+    assessment_wrong?: number;
+    assessment_total?: number;
+    assessment_title?: string;
+    improvement_areas?: string[];
     mark_completed?: boolean;
   },
   token?: string
@@ -730,24 +433,6 @@ export function updateModuleProgress(
     {
       method: "POST",
       body: JSON.stringify(payload)
-    },
-    token
-  );
-}
-
-export function submitAssessmentAttempt(
-  moduleId: number,
-  payload: AssessmentAttemptPayload,
-  token?: string
-): Promise<AssessmentAttemptRecord> {
-  return request<AssessmentAttemptRecord>(
-    `/modules/${moduleId}/assessment-attempts`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        ...payload,
-        snapshots: payload.snapshots ?? [],
-      }),
     },
     token
   );
@@ -778,6 +463,20 @@ export function predictSignFromImage(
 
   return request<LabPrediction>(
     "/lab/predict-image",
+    {
+      method: "POST",
+      body: data
+    },
+    token
+  );
+}
+
+export function detectOpenPalmFromImage(file: File, token?: string): Promise<OpenPalmDetection> {
+  const data = new FormData();
+  data.append("image", file);
+
+  return request<OpenPalmDetection>(
+    "/lab/detect-open-palm",
     {
       method: "POST",
       body: data

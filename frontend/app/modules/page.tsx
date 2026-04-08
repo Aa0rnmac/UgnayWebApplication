@@ -81,7 +81,6 @@ export default function ModulesPage() {
     <section className="space-y-4">
       <div className="panel panel-lively">
         <h2 className="text-2xl font-semibold title-gradient">Learning Modules</h2>
-        <p className="mt-2 text-sm text-muted">Choose a module card to open that module only.</p>
       </div>
 
       {loading ? <p className="text-sm text-muted">Loading modules...</p> : null}

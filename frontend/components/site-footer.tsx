@@ -9,7 +9,7 @@ export function SiteFooter({ variant = "default" }: SiteFooterProps) {
     <footer
       className={[
         "border-t border-brandBorder px-4 py-4 md:px-8",
-        isBar ? "bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.06)]" : "bg-white/92 backdrop-blur-sm"
+        isBar ? "bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.06)]" : "bg-white"
       ].join(" ")}
     >
       <div className="mx-auto grid w-full max-w-6xl gap-3 text-sm text-slate-700 md:grid-cols-2">

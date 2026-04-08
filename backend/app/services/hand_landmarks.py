@@ -52,6 +52,22 @@ def _extract_from_bgr_image(
     return _normalize_landmarks(landmarks)
 
 
+def _extract_raw_landmarks_from_bgr_image(
+    image_bgr: np.ndarray, hands: mp.solutions.hands.Hands
+) -> np.ndarray | None:
+    if image_bgr is None or image_bgr.size == 0:
+        return None
+
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    result = hands.process(image_rgb)
+
+    if not result.multi_hand_landmarks:
+        return None
+
+    raw = result.multi_hand_landmarks[0].landmark
+    return np.array([[item.x, item.y, item.z] for item in raw], dtype=np.float32)
+
+
 def _decode_image(image_bytes: bytes) -> np.ndarray | None:
     _ensure_lab_dependencies()
     data = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -113,3 +129,39 @@ def extract_landmark_features_pair(image_bytes: bytes) -> tuple[np.ndarray | Non
     if len(candidates) == 1:
         return candidates[0], None
     return candidates[0], candidates[1]
+
+
+def _is_open_palm_landmarks(landmarks: np.ndarray) -> bool:
+    if landmarks.shape != (21, 3):
+        return False
+
+    index_open = landmarks[8, 1] < landmarks[6, 1]
+    middle_open = landmarks[12, 1] < landmarks[10, 1]
+    ring_open = landmarks[16, 1] < landmarks[14, 1]
+    pinky_open = landmarks[20, 1] < landmarks[18, 1]
+
+    open_count = sum((index_open, middle_open, ring_open, pinky_open))
+    return open_count >= 4
+
+
+def detect_open_palm_from_image(image_bytes: bytes) -> bool:
+    image_bgr = _decode_image(image_bytes)
+    if image_bgr is None:
+        return False
+
+    variants = _build_image_variants(image_bgr)
+    with mp.solutions.hands.Hands(
+        static_image_mode=True,
+        max_num_hands=1,
+        min_detection_confidence=settings.mediapipe_detection_confidence,
+        model_complexity=settings.mediapipe_model_complexity,
+    ) as hands:
+        for variant in variants:
+            for frame in (variant, cv2.flip(variant, 1)):
+                landmarks = _extract_raw_landmarks_from_bgr_image(frame, hands)
+                if landmarks is None:
+                    continue
+                if _is_open_palm_landmarks(landmarks):
+                    return True
+
+    return False

@@ -15,6 +15,10 @@ class LabPredictionResponse(BaseModel):
     top_candidates: list[str]
 
 
+class OpenPalmDetectionResponse(BaseModel):
+    open_palm: bool
+
+
 class RecognitionModeResponse(BaseModel):
     mode: Literal["alphabet", "numbers", "words"]
 

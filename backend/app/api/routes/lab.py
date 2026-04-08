@@ -13,6 +13,7 @@ from app.schemas.lab import (
     LabPredictionResponse,
     NumbersDatasetStatusResponse,
     NumbersModelStatusResponse,
+    OpenPalmDetectionResponse,
     WordsDatasetStatusResponse,
     WordsModelStatusResponse,
 )
@@ -22,7 +23,7 @@ from app.services.custom_numbers_motion_dataset import (
     labels_for_number_group,
     normalize_number_group,
 )
-from app.services.hand_landmarks import extract_landmark_feature_candidates
+from app.services.hand_landmarks import detect_open_palm_from_image, extract_landmark_feature_candidates
 from app.services.numbers_dataset import get_numbers_dataset_status
 from app.services.numbers_motion_model import get_numbers_motion_model_service
 from app.services.numbers_model import get_numbers_model_service
@@ -157,6 +158,21 @@ async def predict_sign_from_image(
         confidence=prediction.confidence,
         top_candidates=prediction.top_candidates,
     )
+
+
+@router.post("/detect-open-palm", response_model=OpenPalmDetectionResponse)
+async def detect_open_palm(
+    image: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> OpenPalmDetectionResponse:
+    del current_user
+    contents = await image.read()
+    if not contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded image is empty."
+        )
+
+    return OpenPalmDetectionResponse(open_palm=detect_open_palm_from_image(contents))
 
 
 @router.post("/predict-words-sequence", response_model=LabPredictionResponse)

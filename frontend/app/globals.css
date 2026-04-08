@@ -21,7 +21,7 @@ html,
 body {
   margin: 0;
   padding: 0;
-  font-family: var(--font-display), "Segoe UI", sans-serif;
+  font-family: var(--font-sans), "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   color: #1c1c2e;
 }
 

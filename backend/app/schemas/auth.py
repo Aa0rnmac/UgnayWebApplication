@@ -1,5 +1,6 @@
 from datetime import date
 import re
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -102,6 +103,7 @@ class UserOut(BaseModel):
     birth_date: date | None = None
     profile_image_path: str | None = None
     must_change_password: bool = False
+    role: Literal["student", "teacher"] = "student"
 
 
 class UserProfileUpdate(BaseModel):
@@ -154,6 +156,88 @@ class PasswordChangeRequest(BaseModel):
         return value
 
 
+class ForgotPasswordRequest(BaseModel):
+    username_or_email: str = Field(min_length=1, max_length=255)
+
+    @field_validator("username_or_email")
+    @classmethod
+    def validate_identity(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Username or email is required.")
+        return trimmed
+
+
+class ForgotPasswordVerifyRequest(BaseModel):
+    username_or_email: str = Field(min_length=1, max_length=255)
+    otp_code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8, max_length=120)
+
+    @field_validator("username_or_email")
+    @classmethod
+    def validate_identity(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Username or email is required.")
+        return trimmed
+
+    @field_validator("otp_code")
+    @classmethod
+    def validate_otp_code(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not re.fullmatch(r"\d{6}", trimmed):
+            raise ValueError("OTP code must be a 6-digit number.")
+        return trimmed
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if not PASSWORD_PATTERN.match(value):
+            raise ValueError(
+                "New password must be at least 8 characters and include 1 uppercase letter, 1 number, and 1 symbol."
+            )
+        return value
+
+
 class AuthResponse(BaseModel):
     token: str
     user: UserOut
+
+
+class TeacherInviteVerifyQrRequest(BaseModel):
+    qr_payload: str = Field(min_length=1, max_length=2048)
+
+
+class TeacherInviteVerifyQrResponse(BaseModel):
+    invite_code: str
+    message: str
+
+
+class TeacherInviteVerifyPasskeyRequest(BaseModel):
+    invite_code: str = Field(min_length=1, max_length=120)
+    passkey: str = Field(min_length=4, max_length=120)
+
+
+class TeacherInviteVerifyPasskeyResponse(BaseModel):
+    onboarding_token: str
+    message: str
+
+
+class TeacherInviteIssueCredentialsRequest(BaseModel):
+    onboarding_token: str = Field(min_length=1, max_length=4096)
+    email: str = Field(min_length=5, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        trimmed = value.strip().lower()
+        if not EMAIL_PATTERN.match(trimmed):
+            raise ValueError(
+                "Email must be in a valid format (example: name@gmail.com, name@hotmail.com, name@yahoo.com)."
+            )
+        return trimmed
+
+
+class TeacherInviteIssueCredentialsResponse(BaseModel):
+    message: str
+    username: str

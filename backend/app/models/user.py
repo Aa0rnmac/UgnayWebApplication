@@ -23,11 +23,17 @@ class User(Base):
     profile_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"), nullable=True, index=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="student", server_default="student"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    password_reset_otps = relationship(
+        "PasswordResetOtp", back_populates="user", cascade="all, delete-orphan"
+    )
     progress_entries = relationship(
         "UserModuleProgress", back_populates="user", cascade="all, delete-orphan"
     )

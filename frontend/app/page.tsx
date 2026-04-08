@@ -1,19 +1,175 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { useAuth } from "@/components/auth-context";
-import { AuthSwitcher } from "@/components/auth-switcher";
+import {
+  issueTeacherCredentials,
+  login,
+  requestForgotPasswordOtp,
+  verifyForgotPasswordOtp,
+  verifyTeacherInvitePasskey,
+  verifyTeacherInviteQr,
+} from "@/lib/api";
+import { isStrongPassword } from "@/lib/validation";
+
+type TeacherStep = "scan" | "passkey" | "email" | "done";
 
 export default function LoginPage() {
-  const router = useRouter();
-  const { loading, login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotIdentity, setForgotIdentity] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
+
+  const [teacherOpen, setTeacherOpen] = useState(false);
+  const [teacherStep, setTeacherStep] = useState<TeacherStep>("scan");
+  const [teacherMessage, setTeacherMessage] = useState<string | null>(null);
+  const [teacherError, setTeacherError] = useState<string | null>(null);
+  const [teacherSubmitting, setTeacherSubmitting] = useState(false);
+  const [barcodeSupported, setBarcodeSupported] = useState(false);
+  const [manualQrPayload, setManualQrPayload] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [passkey, setPasskey] = useState("");
+  const [onboardingToken, setOnboardingToken] = useState("");
+  const [teacherEmail, setTeacherEmail] = useState("");
+  const [issuedUsername, setIssuedUsername] = useState("");
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanIntervalRef = useRef<number | null>(null);
+  const scanInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    setBarcodeSupported(Boolean((window as { BarcodeDetector?: unknown }).BarcodeDetector));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopScan();
+    };
+  }, []);
+
+  function stopScan() {
+    if (scanIntervalRef.current !== null) {
+      window.clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }
+
+  function resetTeacherFlow() {
+    stopScan();
+    setTeacherStep("scan");
+    setTeacherMessage(null);
+    setTeacherError(null);
+    setTeacherSubmitting(false);
+    setManualQrPayload("");
+    setInviteCode("");
+    setPasskey("");
+    setOnboardingToken("");
+    setTeacherEmail("");
+    setIssuedUsername("");
+  }
+
+  function openTeacherFlow() {
+    resetTeacherFlow();
+    setTeacherOpen(true);
+    void startScan();
+  }
+
+  function closeTeacherFlow() {
+    setTeacherOpen(false);
+    resetTeacherFlow();
+  }
+
+  async function verifyQrPayloadFlow(payload: string) {
+    setTeacherSubmitting(true);
+    setTeacherError(null);
+    setTeacherMessage(null);
+    try {
+      const response = await verifyTeacherInviteQr(payload);
+      setInviteCode(response.invite_code);
+      setTeacherMessage(response.message);
+      setTeacherStep("passkey");
+      stopScan();
+    } catch (scanError) {
+      const message = scanError instanceof Error ? scanError.message : "Unable to verify QR.";
+      setTeacherError(message);
+    } finally {
+      setTeacherSubmitting(false);
+    }
+  }
+
+  async function startScan() {
+    if (!barcodeSupported) {
+      return;
+    }
+    setTeacherError(null);
+    setTeacherMessage("Scanning QR...");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch {
+      setTeacherMessage(null);
+      setTeacherError("Unable to access camera for QR scanning.");
+      return;
+    }
+
+    const detectorCtor = (window as { BarcodeDetector?: new (options: { formats: string[] }) => { detect: (target: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } })
+      .BarcodeDetector;
+    if (!detectorCtor) {
+      setTeacherError("QR scanner is not available in this browser.");
+      return;
+    }
+    const detector = new detectorCtor({ formats: ["qr_code"] });
+
+    scanIntervalRef.current = window.setInterval(() => {
+      if (!videoRef.current || scanInFlightRef.current) {
+        return;
+      }
+      scanInFlightRef.current = true;
+      void detector
+        .detect(videoRef.current)
+        .then((codes) => {
+          const first = codes[0]?.rawValue?.trim();
+          if (first) {
+            stopScan();
+            void verifyQrPayloadFlow(first);
+          }
+        })
+        .catch(() => {
+          // Keep scanning silently.
+        })
+        .finally(() => {
+          scanInFlightRef.current = false;
+        });
+    }, 500);
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -21,9 +177,10 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const user = await login(username.trim(), password);
-      router.push(user.role === "teacher" ? "/teacher" : "/dashboard");
-      router.refresh();
+      const response = await login(username.trim(), password);
+      window.localStorage.setItem("auth_token", response.token);
+      window.localStorage.setItem("auth_username", response.user.username);
+      window.location.href = "/dashboard";
     } catch (loginError) {
       const message = loginError instanceof Error ? loginError.message : "Login failed.";
       setError(message);
@@ -32,14 +189,113 @@ export default function LoginPage() {
     }
   }
 
+  async function onRequestOtp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setForgotSubmitting(true);
+    setForgotError(null);
+    setForgotMessage(null);
+
+    try {
+      const response = await requestForgotPasswordOtp(forgotIdentity.trim());
+      setOtpRequested(true);
+      setForgotMessage(response.message);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to request OTP code.";
+      setForgotError(message);
+    } finally {
+      setForgotSubmitting(false);
+    }
+  }
+
+  async function onVerifyOtpAndReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setForgotSubmitting(true);
+    setForgotError(null);
+    setForgotMessage(null);
+
+    if (!/^\d{6}$/.test(otpCode.trim())) {
+      setForgotSubmitting(false);
+      setForgotError("OTP code must be exactly 6 digits.");
+      return;
+    }
+
+    if (!isStrongPassword(newPassword)) {
+      setForgotSubmitting(false);
+      setForgotError(
+        "New password must be at least 8 characters with 1 uppercase letter, 1 number, and 1 symbol."
+      );
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setForgotSubmitting(false);
+      setForgotError("New password and confirm password do not match.");
+      return;
+    }
+
+    try {
+      const response = await verifyForgotPasswordOtp(
+        forgotIdentity.trim(),
+        otpCode.trim(),
+        newPassword
+      );
+      window.localStorage.setItem("auth_token", response.token);
+      window.localStorage.setItem("auth_username", response.user.username);
+      window.location.href = "/dashboard";
+    } catch (verifyError) {
+      const message =
+        verifyError instanceof Error ? verifyError.message : "Failed to verify OTP code.";
+      setForgotError(message);
+    } finally {
+      setForgotSubmitting(false);
+    }
+  }
+
+  async function onTeacherPasskeySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTeacherSubmitting(true);
+    setTeacherError(null);
+    setTeacherMessage(null);
+    try {
+      const response = await verifyTeacherInvitePasskey(inviteCode, passkey.trim());
+      setOnboardingToken(response.onboarding_token);
+      setTeacherMessage(response.message);
+      setTeacherStep("email");
+    } catch (passkeyError) {
+      const message = passkeyError instanceof Error ? passkeyError.message : "Invalid passkey.";
+      setTeacherError(message);
+    } finally {
+      setTeacherSubmitting(false);
+    }
+  }
+
+  async function onTeacherEmailSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTeacherSubmitting(true);
+    setTeacherError(null);
+    setTeacherMessage(null);
+    try {
+      const response = await issueTeacherCredentials(onboardingToken, teacherEmail.trim());
+      setIssuedUsername(response.username);
+      setTeacherMessage("Credentials sent to teacher email successfully.");
+      setTeacherStep("done");
+    } catch (issueError) {
+      const message =
+        issueError instanceof Error ? issueError.message : "Unable to issue teacher credentials.";
+      setTeacherError(message);
+    } finally {
+      setTeacherSubmitting(false);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <div className="panel panel-lively">
-        <h2 className="text-3xl font-bold title-gradient">Sign In</h2>
+        <h2 className="text-3xl font-bold title-gradient">Student Login</h2>
         <p className="mt-2 text-sm text-muted">
-          Sign in with your assigned account, open student registration, or create a teacher
-          account with the school-issued passkey. Demo access is still available below for quick
-          previews.
+          Login using the initial credentials sent by your teacher after payment reference
+          validation.
         </p>
       </div>
 
@@ -69,7 +325,7 @@ export default function LoginPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={loading || submitting}
+            disabled={submitting}
             type="submit"
           >
             {submitting ? "Logging in..." : "Login"}
@@ -79,32 +335,291 @@ export default function LoginPage() {
             className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
             href="/register"
           >
-            Student Registration
+            Open Registration
           </Link>
-          <Link
-            className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/register/teacher"
-          >
-            Teacher Registration
-          </Link>
-        </div>
 
-        <p className="text-xs text-muted">
-          Teachers need the current registration passkey from the coordinator or administrator.
-        </p>
+          <button
+            className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+            onClick={() => {
+              setForgotOpen((open) => !open);
+              setForgotError(null);
+              setForgotMessage(null);
+            }}
+            type="button"
+          >
+            {forgotOpen ? "Close Forgot Password" : "Forgot Password?"}
+          </button>
+
+          <button
+            className="ml-auto rounded-lg border border-brandBlue bg-brandBlueLight px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight/70"
+            onClick={openTeacherFlow}
+            type="button"
+          >
+            Scan QR
+          </button>
+        </div>
 
         {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
       </form>
 
-      <div className="panel panel-lively">
-        <p className="text-xs uppercase tracking-wider label-accent">Demo Access</p>
-        <p className="mt-2 text-sm text-muted">
-          Use the built-in demo profiles if you want to preview both role experiences quickly.
-        </p>
-        <div className="mt-4">
-          <AuthSwitcher />
+      {forgotOpen ? (
+        <div className="panel panel-lively space-y-4">
+          <h3 className="text-xl font-semibold text-slate-900">Forgot Password</h3>
+          <p className="text-sm text-slate-700">
+            Enter your username or email to receive a 6-digit OTP code. After verification, your
+            password will be reset and you will be logged in automatically.
+          </p>
+
+          <form className="space-y-3" onSubmit={otpRequested ? onVerifyOtpAndReset : onRequestOtp}>
+            <label className="block text-sm font-semibold text-slate-800">
+              Username or Email
+              <input
+                className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                onChange={(event) => setForgotIdentity(event.target.value)}
+                required
+                type="text"
+                value={forgotIdentity}
+              />
+            </label>
+
+            {otpRequested ? (
+              <>
+                <label className="block text-sm font-semibold text-slate-800">
+                  OTP Code
+                  <input
+                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    inputMode="numeric"
+                    maxLength={6}
+                    onChange={(event) => setOtpCode(event.target.value)}
+                    required
+                    type="text"
+                    value={otpCode}
+                  />
+                </label>
+
+                <label className="block text-sm font-semibold text-slate-800">
+                  New Password
+                  <input
+                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    required
+                    type="password"
+                    value={newPassword}
+                  />
+                </label>
+
+                <label className="block text-sm font-semibold text-slate-800">
+                  Confirm New Password
+                  <input
+                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    required
+                    type="password"
+                    value={confirmPassword}
+                  />
+                </label>
+              </>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={forgotSubmitting}
+                type="submit"
+              >
+                {forgotSubmitting
+                  ? otpRequested
+                    ? "Verifying..."
+                    : "Sending OTP..."
+                  : otpRequested
+                    ? "Verify OTP and Continue"
+                    : "Send OTP Code"}
+              </button>
+
+              {otpRequested ? (
+                <button
+                  className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                  disabled={forgotSubmitting}
+                  onClick={() => {
+                    setOtpRequested(false);
+                    setOtpCode("");
+                    setNewPassword("");
+                    setConfirmPassword("");
+                    setForgotError(null);
+                    setForgotMessage(null);
+                  }}
+                  type="button"
+                >
+                  Back
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          {forgotMessage ? (
+            <p className="rounded-lg border border-brandGreen/35 bg-brandGreenLight px-3 py-2 text-sm text-slate-800">
+              {forgotMessage}
+            </p>
+          ) : null}
+          {forgotError ? (
+            <p className="rounded-lg border border-brandRed/35 bg-brandRedLight px-3 py-2 text-sm text-brandRed">
+              {forgotError}
+            </p>
+          ) : null}
         </div>
-      </div>
+      ) : null}
+
+      {teacherOpen ? (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/45 p-4">
+          <div className="w-full max-w-xl rounded-2xl border border-brandBorder bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-semibold text-slate-900">Teacher Onboarding</h3>
+              <button
+                className="rounded border border-brandBorder bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-brandMutedSurface"
+                onClick={closeTeacherFlow}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="mt-2 text-sm text-slate-700">
+              Step {teacherStep === "scan" ? "1" : teacherStep === "passkey" ? "2" : teacherStep === "email" ? "3" : "Done"} of 3
+            </p>
+
+            {teacherStep === "scan" ? (
+              <div className="mt-4 space-y-3">
+                {barcodeSupported ? (
+                  <>
+                    <video
+                      autoPlay
+                      className="h-64 w-full rounded-xl border border-slate-300 bg-slate-900 object-cover"
+                      playsInline
+                      ref={videoRef}
+                    />
+                    <p className="text-xs text-slate-600">
+                      Point the camera at the teacher QR code.
+                    </p>
+                  </>
+                ) : (
+                  <p className="rounded-lg border border-brandYellow/35 bg-brandYellowLight px-3 py-2 text-sm text-slate-700">
+                    QR scanner is not available in this browser. Use manual QR payload input below.
+                  </p>
+                )}
+
+                <label className="block text-sm font-semibold text-slate-800">
+                  Manual QR Payload (fallback)
+                  <textarea
+                    className="mt-1 min-h-[88px] w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) => setManualQrPayload(event.target.value)}
+                    placeholder="Paste QR payload here if camera scan is unavailable."
+                    value={manualQrPayload}
+                  />
+                </label>
+                <button
+                  className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!manualQrPayload.trim() || teacherSubmitting}
+                  onClick={() => {
+                    void verifyQrPayloadFlow(manualQrPayload.trim());
+                  }}
+                  type="button"
+                >
+                  Verify QR
+                </button>
+              </div>
+            ) : null}
+
+            {teacherStep === "passkey" ? (
+              <form className="mt-4 space-y-3" onSubmit={onTeacherPasskeySubmit}>
+                <label className="block text-sm font-semibold text-slate-800">
+                  Passkey
+                  <input
+                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) => setPasskey(event.target.value)}
+                    required
+                    type="password"
+                    value={passkey}
+                  />
+                </label>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={teacherSubmitting}
+                    type="submit"
+                  >
+                    {teacherSubmitting ? "Verifying..." : "Verify Passkey"}
+                  </button>
+                  <button
+                    className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                    onClick={() => {
+                      setTeacherStep("scan");
+                      setPasskey("");
+                      setTeacherError(null);
+                      setTeacherMessage(null);
+                      void startScan();
+                    }}
+                    type="button"
+                  >
+                    Back
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {teacherStep === "email" ? (
+              <form className="mt-4 space-y-3" onSubmit={onTeacherEmailSubmit}>
+                <label className="block text-sm font-semibold text-slate-800">
+                  Teacher Email
+                  <input
+                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) => setTeacherEmail(event.target.value)}
+                    required
+                    type="email"
+                    value={teacherEmail}
+                  />
+                </label>
+                <button
+                  className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={teacherSubmitting}
+                  type="submit"
+                >
+                  {teacherSubmitting ? "Sending..." : "Send Initial Credentials"}
+                </button>
+              </form>
+            ) : null}
+
+            {teacherStep === "done" ? (
+              <div className="mt-4 space-y-3">
+                <p className="rounded-lg border border-brandGreen/35 bg-brandGreenLight px-3 py-2 text-sm text-slate-800">
+                  Teacher account created. Credentials were sent to email.
+                </p>
+                <p className="text-sm text-slate-700">
+                  Issued username: <span className="font-semibold">{issuedUsername}</span>
+                </p>
+                <button
+                  className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
+                  onClick={closeTeacherFlow}
+                  type="button"
+                >
+                  Done
+                </button>
+              </div>
+            ) : null}
+
+            {teacherMessage ? (
+              <p className="mt-3 rounded-lg border border-brandBlue/30 bg-brandBlueLight px-3 py-2 text-sm text-slate-800">
+                {teacherMessage}
+              </p>
+            ) : null}
+            {teacherError ? (
+              <p className="mt-3 rounded-lg border border-brandRed/35 bg-brandRedLight px-3 py-2 text-sm text-brandRed">
+                {teacherError}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

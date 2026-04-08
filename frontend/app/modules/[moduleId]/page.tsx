@@ -5,13 +5,22 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  AssessmentAttemptPayload,
-  AssessmentAttemptRecord,
+  detectOpenPalmFromImage,
   getModules,
   ModuleItem,
-  submitAssessmentAttempt,
+  predictSignFromImage,
   updateModuleProgress,
 } from "@/lib/api";
+
+type AssessmentReportPayload = {
+  assessmentId: string;
+  assessmentTitle: string;
+  right: number;
+  wrong: number;
+  total: number;
+  scorePercent: number;
+  improvementAreas: string[];
+};
 
 const MODULE1_AI_SIGN_IMAGES = [
   { letter: "A", src: "/module-assets/m1/ai/a.png" },
@@ -215,29 +224,32 @@ const MODULE1_LABELING_ITEMS = MODULE1_ASSESSMENT2_IMAGE_ORDER.map((letter) => (
   src: `/module-assets/m1/assessment2/${letter.toLowerCase()}.png`
 }));
 
-const MODULE1_SIGNING_CHALLENGE_STEPS = [
-  {
-    id: "m1-step-name",
-    title: "Task 1: Given Name",
-    prompt: "Sign this given name: ANA",
-    imageSrc: null,
-    expected: "ANA",
-  },
-  {
-    id: "m1-step-animal",
-    title: "Task 2: Animal Image",
-    prompt: "Sign what animal is shown in the image.",
-    imageSrc: "/module-assets/m1/assessment/animal-cat.svg",
-    expected: "CAT",
-  },
-  {
-    id: "m1-step-thing",
-    title: "Task 3: Thing Image",
-    prompt: "Sign what thing is shown in the image.",
-    imageSrc: "/module-assets/m1/assessment/object-book.svg",
-    expected: "BOOK",
-  }
+const MODULE1_SIGNING_CHALLENGE_ITEMS = [
+  "CHURCH",
+  "MALL",
+  "ZOO",
+  "PARK",
+  "ALLYSSA",
+  "AARON",
+  "PRINCESS",
+  "JOHN",
+  "BOX",
+  "SCHOOL",
+  "TREE",
+  "CHAIR",
+  "FLOWER",
+  "CAT",
+  "DOG",
+  "RABBIT",
+  "SHARK"
 ] as const;
+
+const MODULE1_SIGNING_CHALLENGE_STEPS = MODULE1_SIGNING_CHALLENGE_ITEMS.map((item, index) => ({
+  id: `m1-step-${index + 1}`,
+  title: `Task ${index + 1}`,
+  prompt: `Sign this word/name: ${item}`,
+  imageSrc: null
+}));
 
 const MODULE2_ASSESSMENT_OPTIONS = [
   {
@@ -253,7 +265,17 @@ const MODULE2_ASSESSMENT_OPTIONS = [
   {
     id: "m2-assessment-3",
     title: "Assessment 3",
-    subtitle: "Camera: Sign 11, 15, 50, 100, 90, 85"
+    subtitle: "Camera: Sign 11-20 (at least 5)"
+  },
+  {
+    id: "m2-assessment-4",
+    title: "Assessment 4",
+    subtitle: "Camera: Sign 31-40 (at least 5)"
+  },
+  {
+    id: "m2-assessment-5",
+    title: "Assessment 5",
+    subtitle: "Camera: Sign 91-100 (at least 5)"
   }
 ] as const;
 
@@ -270,13 +292,43 @@ const MODULE2_SIGN_1_TO_10_STEPS = [
   { id: "m2-a2-10", number: 10 }
 ] as const;
 
-const MODULE2_SIGN_SET_STEPS = [
+const MODULE2_SIGN_11_TO_20_STEPS = [
   { id: "m2-a3-11", number: 11 },
+  { id: "m2-a3-12", number: 12 },
+  { id: "m2-a3-13", number: 13 },
+  { id: "m2-a3-14", number: 14 },
   { id: "m2-a3-15", number: 15 },
-  { id: "m2-a3-50", number: 50 },
-  { id: "m2-a3-100", number: 100 },
-  { id: "m2-a3-90", number: 90 },
-  { id: "m2-a3-85", number: 85 }
+  { id: "m2-a3-16", number: 16 },
+  { id: "m2-a3-17", number: 17 },
+  { id: "m2-a3-18", number: 18 },
+  { id: "m2-a3-19", number: 19 },
+  { id: "m2-a3-20", number: 20 }
+] as const;
+
+const MODULE2_SIGN_31_TO_40_STEPS = [
+  { id: "m2-a4-31", number: 31 },
+  { id: "m2-a4-32", number: 32 },
+  { id: "m2-a4-33", number: 33 },
+  { id: "m2-a4-34", number: 34 },
+  { id: "m2-a4-35", number: 35 },
+  { id: "m2-a4-36", number: 36 },
+  { id: "m2-a4-37", number: 37 },
+  { id: "m2-a4-38", number: 38 },
+  { id: "m2-a4-39", number: 39 },
+  { id: "m2-a4-40", number: 40 }
+] as const;
+
+const MODULE2_SIGN_91_TO_100_STEPS = [
+  { id: "m2-a5-91", number: 91 },
+  { id: "m2-a5-92", number: 92 },
+  { id: "m2-a5-93", number: 93 },
+  { id: "m2-a5-94", number: 94 },
+  { id: "m2-a5-95", number: 95 },
+  { id: "m2-a5-96", number: 96 },
+  { id: "m2-a5-97", number: 97 },
+  { id: "m2-a5-98", number: 98 },
+  { id: "m2-a5-99", number: 99 },
+  { id: "m2-a5-100", number: 100 }
 ] as const;
 
 const MODULE3_ASSESSMENT_OPTIONS = [
@@ -451,6 +503,42 @@ const MODULE8_GESTURE_TARGETS = [
   { id: "m8-g10", label: "FAST" }
 ] as const;
 
+function isValidPredictionToken(value: string) {
+  const token = value.trim();
+  return token.length > 0 && token !== "No prediction yet." && token !== "UNSURE";
+}
+
+async function captureVideoFrameAsFile(video: HTMLVideoElement | null): Promise<File | null> {
+  if (!video) {
+    return null;
+  }
+
+  const sourceWidth = video.videoWidth || 640;
+  const sourceHeight = video.videoHeight || 480;
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sourceWidth;
+  canvas.height = sourceHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(video, 0, 0, sourceWidth, sourceHeight);
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((value) => resolve(value), "image/jpeg", 0.92);
+  });
+  if (!blob) {
+    return null;
+  }
+
+  return new File([blob], "assessment-frame.jpg", { type: "image/jpeg" });
+}
+
 function SignCardImage({ letter, src }: { letter: string; src: string }) {
   const [available, setAvailable] = useState(true);
 
@@ -529,90 +617,21 @@ function LessonVideoCard({ src, title }: { src: string; title: string }) {
   );
 }
 
-type ChoiceQuestion = { id: string; question: string; choices: string[]; answer: string };
-type AssessmentSubmitHandler = (payload: AssessmentAttemptPayload) => Promise<AssessmentAttemptRecord>;
-
-function normalizeAssessmentValue(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toUpperCase();
-}
-
-function captureVideoSnapshot(videoElement: HTMLVideoElement | null): string | null {
-  if (!videoElement || videoElement.videoWidth <= 0 || videoElement.videoHeight <= 0) {
-    return null;
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = videoElement.videoWidth;
-  canvas.height = videoElement.videoHeight;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return null;
-  }
-
-  context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/png");
-}
-
-function AssessmentSaveNotice({
-  latestAttempt,
-  saveError,
-  saveMessage,
-  saving,
-}: {
-  latestAttempt?: AssessmentAttemptRecord | null;
-  saveError: string | null;
-  saveMessage: string | null;
-  saving: boolean;
-}) {
-  if (!saving && !saveError && !saveMessage && !latestAttempt) {
-    return null;
-  }
-
-  return (
-    <div className="mt-4 space-y-2">
-      {saving ? (
-        <p className="rounded-lg border border-brandBlue/25 bg-brandBlueLight px-3 py-2 text-sm font-semibold text-slate-800">
-          Saving assessment attempt...
-        </p>
-      ) : null}
-      {saveMessage ? (
-        <p className="rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-          {saveMessage}
-        </p>
-      ) : null}
-      {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
-      {latestAttempt ? (
-        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
-          Last saved: {latestAttempt.score_correct}/{latestAttempt.score_total} (
-          {latestAttempt.score_percent.toFixed(1)}%) with {latestAttempt.snapshots.length} snapshot
-          {latestAttempt.snapshots.length === 1 ? "" : "s"} on{" "}
-          {new Date(latestAttempt.submitted_at).toLocaleString()}.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 function Module1AssessmentOne({
-  assessmentId,
-  latestAttempt,
-  onSave,
   questions,
+  onSubmitResult
 }: {
-  assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  onSave: AssessmentSubmitHandler;
-  questions: ChoiceQuestion[];
+  questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [reported, setReported] = useState(false);
 
   useEffect(() => {
     setSelectedChoices({});
     setShowResult(false);
+    setReported(false);
   }, [questions]);
 
   const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
@@ -623,38 +642,6 @@ function Module1AssessmentOne({
     }
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
-
-  async function saveAssessment() {
-    setShowResult(true);
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-
-    try {
-      await onSave({
-        assessment_id: assessmentId,
-        assessment_title: "Assessment 1",
-        assessment_type: "multiple_choice",
-        score_percent: questions.length > 0 ? (score / questions.length) * 100 : 0,
-        score_correct: score,
-        score_total: questions.length || 1,
-        answers: questions.map((question) => ({
-          assessment_item_id: question.id,
-          prompt: question.question,
-          response_text: selectedChoices[question.id] ?? null,
-          expected_response: question.answer,
-          is_correct: selectedChoices[question.id] === question.answer,
-        })),
-      });
-      setSaveMessage("Assessment 1 answers and score saved.");
-    } catch (saveAttemptError) {
-      setSaveError(
-        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -705,7 +692,10 @@ function Module1AssessmentOne({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => setShowResult(true)}
+          onClick={() => {
+            setShowResult(true);
+            submitAssessmentResult();
+          }}
           type="button"
         >
           Check Answers
@@ -713,16 +703,6 @@ function Module1AssessmentOne({
         <span className="text-xs text-slate-500">
           Answered {answeredCount}/{questions.length}
         </span>
-        <button
-          className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={saving || answeredCount === 0}
-          onClick={() => {
-            void saveAssessment();
-          }}
-          type="button"
-        >
-          {saving ? "Saving..." : "Save Attempt"}
-        </button>
       </div>
 
       {showResult ? (
@@ -730,79 +710,29 @@ function Module1AssessmentOne({
           Score: {score}/{questions.length}
         </p>
       ) : null}
-
-      <AssessmentSaveNotice
-        latestAttempt={latestAttempt}
-        saveError={saveError}
-        saveMessage={saveMessage}
-        saving={saving}
-      />
     </div>
   );
 }
 
 function Module1AssessmentTwo({
-  assessmentId,
-  latestAttempt,
-  onSave,
+  onSubmitResult
 }: {
-  assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  onSave: AssessmentSubmitHandler;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [reported, setReported] = useState(false);
 
   useEffect(() => {
     setAnswers({});
     setShowResult(false);
+    setReported(false);
   }, []);
 
   const correctCount = MODULE1_LABELING_ITEMS.reduce((total, item) => {
     const value = answers[item.id]?.trim().toUpperCase() ?? "";
     return total + (value === item.answer ? 1 : 0);
   }, 0);
-
-  async function saveAssessment() {
-    setShowResult(true);
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-
-    try {
-      await onSave({
-        assessment_id: assessmentId,
-        assessment_title: "Assessment 2",
-        assessment_type: "typed_labeling",
-        score_percent:
-          MODULE1_LABELING_ITEMS.length > 0
-            ? (correctCount / MODULE1_LABELING_ITEMS.length) * 100
-            : 0,
-        score_correct: correctCount,
-        score_total: MODULE1_LABELING_ITEMS.length || 1,
-        answers: MODULE1_LABELING_ITEMS.map((item) => {
-          const responseValue = answers[item.id] ?? "";
-          return {
-            assessment_item_id: item.id,
-            prompt: `Identify the letter shown in image ${item.id}.`,
-            response_text: responseValue || null,
-            expected_response: item.answer,
-            is_correct: normalizeAssessmentValue(responseValue) === item.answer,
-          };
-        }),
-      });
-      setSaveMessage("Assessment 2 answers saved with the latest score.");
-    } catch (saveAttemptError) {
-      setSaveError(
-        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -849,7 +779,10 @@ function Module1AssessmentTwo({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => setShowResult(true)}
+          onClick={() => {
+            setShowResult(true);
+            submitAssessmentResult();
+          }}
           type="button"
         >
           Check Answers
@@ -859,54 +792,59 @@ function Module1AssessmentTwo({
             Score: {correctCount}/{MODULE1_LABELING_ITEMS.length}
           </span>
         ) : null}
-        <button
-          className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={saving}
-          onClick={() => {
-            void saveAssessment();
-          }}
-          type="button"
-        >
-          {saving ? "Saving..." : "Save Attempt"}
-        </button>
       </div>
-
-      <AssessmentSaveNotice
-        latestAttempt={latestAttempt}
-        saveError={saveError}
-        saveMessage={saveMessage}
-        saving={saving}
-      />
     </div>
   );
 }
 
 function Module1AssessmentThree({
-  assessmentId,
-  latestAttempt,
-  onSave,
+  onSubmitResult
 }: {
-  assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  onSave: AssessmentSubmitHandler;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
+  const ALPHABET_PALM_COOLDOWN_MS = 900;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
+  const openPalmInFlightRef = useRef(false);
+  const palmRaisedRef = useRef(false);
+  const lastPalmCommitAtRef = useRef(0);
+  const hiddenPredictionRef = useRef("No prediction yet.");
+  const blockedTokenRef = useRef<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
-  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [recognizedTrail, setRecognizedTrail] = useState("");
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
 
   const activeStep = MODULE1_SIGNING_CHALLENGE_STEPS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE1_SIGNING_CHALLENGE_STEPS.length;
 
+  function currentDetectedGesture() {
+    const recognized = (recognizedByStep[activeStep.id] ?? "").trim();
+    if (recognized) {
+      return recognized;
+    }
+    return "";
+  }
+
+  useEffect(() => {
+    hiddenPredictionRef.current = hiddenPrediction;
+  }, [hiddenPrediction]);
+
+  useEffect(() => {
+    blockedTokenRef.current = blockedTokenAfterClear;
+  }, [blockedTokenAfterClear]);
+
   useEffect(() => {
     return () => {
+      palmRaisedRef.current = false;
+      lastPalmCommitAtRef.current = 0;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -947,14 +885,111 @@ function Module1AssessmentThree({
     await startCamera();
   }
 
-  function submitCurrentStep() {
-    const value = (recognizedInputs[activeStep.id] ?? "").trim();
-    if (!value) {
-      setError("Please enter the recognized gesture before continuing.");
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
       return;
     }
-    if (!capturedSnapshots[activeStep.id]) {
-      setError("Capture a snapshot for this task before continuing.");
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "alphabet");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Keep UI clean; hidden prediction should not block the assessment flow.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+  }, [hiddenPrediction, blockedTokenAfterClear]);
+
+  useEffect(() => {
+    if (!running) {
+      palmRaisedRef.current = false;
+      return;
+    }
+
+    let cancelled = false;
+
+    async function checkOpenPalmSignal() {
+      if (cancelled || openPalmInFlightRef.current) {
+        return;
+      }
+      openPalmInFlightRef.current = true;
+      try {
+        const frame = await captureVideoFrameAsFile(videoRef.current);
+        if (!frame) {
+          return;
+        }
+        const result = await detectOpenPalmFromImage(frame);
+        const openPalm = result.open_palm;
+        const now = Date.now();
+
+        if (
+          openPalm &&
+          !palmRaisedRef.current &&
+          now - lastPalmCommitAtRef.current >= ALPHABET_PALM_COOLDOWN_MS
+        ) {
+          const token = hiddenPredictionRef.current.trim();
+          const blockedToken = blockedTokenRef.current;
+          if (
+            isValidPredictionToken(token) &&
+            (!blockedToken || blockedToken !== token)
+          ) {
+            const isRapidDuplicate =
+              token === lastRecognizedToken &&
+              now - lastPalmCommitAtRef.current < ALPHABET_PALM_COOLDOWN_MS;
+            if (!isRapidDuplicate) {
+              setRecognizedByStep((previous) => ({
+                ...previous,
+                [activeStep.id]: token
+              }));
+              setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+              setLastRecognizedToken(token);
+              lastPalmCommitAtRef.current = now;
+            }
+          }
+        }
+
+        palmRaisedRef.current = openPalm;
+      } catch {
+        // Keep silent to avoid noisy UI.
+      } finally {
+        openPalmInFlightRef.current = false;
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void checkOpenPalmSignal();
+    }, 420);
+    void checkOpenPalmSignal();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      palmRaisedRef.current = false;
+    };
+  }, [running, activeStep.id, lastRecognizedToken]);
+
+  function submitCurrentStep() {
+    const value = currentDetectedGesture();
+    if (!value) {
+      setError("Please wait for a recognized gesture before continuing.");
       return;
     }
 
@@ -967,93 +1002,54 @@ function Module1AssessmentThree({
       setActiveStepIndex((index) =>
         Math.min(MODULE1_SIGNING_CHALLENGE_STEPS.length - 1, index + 1)
       );
+      return;
+    }
+
+    if (!reported) {
+      const total = MODULE1_SIGNING_CHALLENGE_STEPS.length;
+      const right = completedStepIds.includes(activeStep.id)
+        ? completedStepIds.length
+        : completedStepIds.length + 1;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = MODULE1_SIGNING_CHALLENGE_STEPS.filter(
+        (step) => !(step.id === activeStep.id || completedStepIds.includes(step.id))
+      ).map((step) => step.prompt);
+      onSubmitResult?.({
+        assessmentId: "m1-assessment-3",
+        assessmentTitle: "Assessment 3",
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas,
+      });
+      setReported(true);
     }
   }
 
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeStep.id]: ""
     }));
-  }
-
-  function captureCurrentSnapshot() {
-    const snapshot = captureVideoSnapshot(videoRef.current);
-    if (!snapshot) {
-      setError("Unable to capture a snapshot. Start the camera first.");
-      return;
-    }
-
-    setError(null);
-    setCapturedSnapshots((previous) => ({
-      ...previous,
-      [activeStep.id]: snapshot,
-    }));
-  }
-
-  async function saveAssessment() {
-    if (!allDone) {
-      setSaveError("Complete all signing tasks before saving this assessment.");
-      return;
-    }
-
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-
-    const correctCount = MODULE1_SIGNING_CHALLENGE_STEPS.reduce((total, step) => {
-      const responseValue = recognizedInputs[step.id] ?? "";
-      return total + (normalizeAssessmentValue(responseValue) === step.expected ? 1 : 0);
-    }, 0);
-
-    try {
-      await onSave({
-        assessment_id: assessmentId,
-        assessment_title: "Assessment 3",
-        assessment_type: "camera_signing",
-        score_percent:
-          MODULE1_SIGNING_CHALLENGE_STEPS.length > 0
-            ? (correctCount / MODULE1_SIGNING_CHALLENGE_STEPS.length) * 100
-            : 0,
-        score_correct: correctCount,
-        score_total: MODULE1_SIGNING_CHALLENGE_STEPS.length || 1,
-        answers: MODULE1_SIGNING_CHALLENGE_STEPS.map((step) => {
-          const responseValue = recognizedInputs[step.id] ?? "";
-          return {
-            assessment_item_id: step.id,
-            prompt: step.prompt,
-            response_text: responseValue || null,
-            expected_response: step.expected,
-            is_correct: normalizeAssessmentValue(responseValue) === step.expected,
-          };
-        }),
-        snapshots: MODULE1_SIGNING_CHALLENGE_STEPS.flatMap((step) =>
-          capturedSnapshots[step.id]
-            ? [
-                {
-                  assessment_item_id: step.id,
-                  label: step.title,
-                  image_data_url: capturedSnapshots[step.id],
-                },
-              ]
-            : []
-        ),
-      });
-      setSaveMessage("Assessment 3 answers and snapshots saved.");
-    } catch (saveAttemptError) {
-      setSaveError(
-        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
-      );
-    } finally {
-      setSaving(false);
-    }
+    palmRaisedRef.current = false;
+    lastPalmCommitAtRef.current = 0;
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="text-xl font-semibold text-slate-900">Assessment 3</h3>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -1089,6 +1085,16 @@ function Module1AssessmentThree({
                 </span>
               </span>
             </button>
+            <button
+              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!running}
+              onClick={() => {
+                void runHiddenPrediction();
+              }}
+              type="button"
+            >
+              Analyze Sign Now
+            </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
               {running ? "Camera active" : "Camera off"}
             </span>
@@ -1114,36 +1120,22 @@ function Module1AssessmentThree({
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeStep.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeStep.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-              onClick={captureCurrentSnapshot}
-              type="button"
-            >
-              {capturedSnapshots[activeStep.id] ? "Retake Snapshot" : "Capture Snapshot"}
-            </button>
-          </div>
-          {capturedSnapshots[activeStep.id] ? (
-            <img
-              alt={`${activeStep.title} snapshot`}
-              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
-              src={capturedSnapshots[activeStep.id]}
-            />
-          ) : null}
+          <button
+            className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+            onClick={clearCurrentInput}
+            type="button"
+          >
+            Clear Input
+          </button>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
@@ -1171,16 +1163,6 @@ function Module1AssessmentThree({
               Assessment complete. All tasks submitted.
             </p>
           ) : null}
-          <button
-            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={saving || !allDone}
-            onClick={() => {
-              void saveAssessment();
-            }}
-            type="button"
-          >
-            {saving ? "Saving..." : "Save Attempt"}
-          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -1188,13 +1170,6 @@ function Module1AssessmentThree({
           >
             Open Free Signing Lab
           </Link>
-
-          <AssessmentSaveNotice
-            latestAttempt={latestAttempt}
-            saveError={saveError}
-            saveMessage={saveMessage}
-            saving={saving}
-          />
         </aside>
       </div>
     </div>
@@ -1202,27 +1177,26 @@ function Module1AssessmentThree({
 }
 
 function Module2AssessmentOne({
-  assessmentId,
-  latestAttempt,
   questions,
   moduleLabel,
-  onSave,
+  assessmentId,
+  assessmentTitle = "Assessment 1",
+  onSubmitResult
 }: {
-  assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  questions: ChoiceQuestion[];
+  questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
   moduleLabel: string;
-  onSave: AssessmentSubmitHandler;
+  assessmentId: string;
+  assessmentTitle?: string;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [reported, setReported] = useState(false);
 
   useEffect(() => {
     setSelectedChoices({});
     setShowResult(false);
+    setReported(false);
   }, [questions]);
 
   const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
@@ -1233,38 +1207,6 @@ function Module2AssessmentOne({
     }
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
-
-  async function saveAssessment() {
-    setShowResult(true);
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-
-    try {
-      await onSave({
-        assessment_id: assessmentId,
-        assessment_title: "Assessment 1",
-        assessment_type: "multiple_choice",
-        score_percent: questions.length > 0 ? (score / questions.length) * 100 : 0,
-        score_correct: score,
-        score_total: questions.length || 1,
-        answers: questions.map((question) => ({
-          assessment_item_id: question.id,
-          prompt: question.question,
-          response_text: selectedChoices[question.id] ?? null,
-          expected_response: question.answer,
-          is_correct: selectedChoices[question.id] === question.answer,
-        })),
-      });
-      setSaveMessage(`${moduleLabel} assessment answers saved.`);
-    } catch (saveAttemptError) {
-      setSaveError(
-        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -1315,7 +1257,10 @@ function Module2AssessmentOne({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => setShowResult(true)}
+          onClick={() => {
+            setShowResult(true);
+            submitAssessmentResult();
+          }}
           type="button"
         >
           Check Answers
@@ -1323,16 +1268,6 @@ function Module2AssessmentOne({
         <span className="text-xs text-slate-500">
           Answered {answeredCount}/{questions.length}
         </span>
-        <button
-          className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={saving || answeredCount === 0}
-          onClick={() => {
-            void saveAssessment();
-          }}
-          type="button"
-        >
-          {saving ? "Saving..." : "Save Attempt"}
-        </button>
       </div>
 
       {showResult ? (
@@ -1340,46 +1275,44 @@ function Module2AssessmentOne({
           Score: {score}/{questions.length}
         </p>
       ) : null}
-
-      <AssessmentSaveNotice
-        latestAttempt={latestAttempt}
-        saveError={saveError}
-        saveMessage={saveMessage}
-        saving={saving}
-      />
     </div>
   );
 }
 
 function NumbersCameraAssessment({
   assessmentId,
-  latestAttempt,
-  onSave,
   title,
   intro,
-  targets
+  targets,
+  minimumRequired = targets.length,
+  onSubmitResult
 }: {
   assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  onSave: AssessmentSubmitHandler;
   title: string;
   intro: string;
   targets: readonly { id: string; number: number }[];
+  minimumRequired?: number;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
-  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [recognizedTrail, setRecognizedTrail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
 
   const activeStep = targets[activeStepIndex];
+  const reachedMinimum = completedStepIds.length >= minimumRequired;
   const allDone = completedStepIds.length >= targets.length;
+  const currentDetectedGesture = (recognizedByStep[activeStep.id] ?? "").trim();
 
   useEffect(() => {
     return () => {
@@ -1423,14 +1356,55 @@ function NumbersCameraAssessment({
     await startCamera();
   }
 
-  function submitCurrentStep() {
-    const value = (recognizedInputs[activeStep.id] ?? "").trim();
-    if (!value) {
-      setError("Please enter the recognized gesture before continuing.");
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
       return;
     }
-    if (!capturedSnapshots[activeStep.id]) {
-      setError("Capture a snapshot for this number before continuing.");
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "numbers");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Hidden prediction failures should not break the flow.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+    if (token === lastRecognizedToken) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+
+    setRecognizedByStep((previous) => ({
+      ...previous,
+      [activeStep.id]: token
+    }));
+    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+    setLastRecognizedToken(token);
+    setHiddenPrediction("No prediction yet.");
+  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeStep.id]);
+
+  function submitCurrentStep() {
+    const value = currentDetectedGesture.trim();
+    if (!value) {
+      setError("Please wait for a recognized gesture before continuing.");
       return;
     }
 
@@ -1444,80 +1418,47 @@ function NumbersCameraAssessment({
     }
   }
 
+  function finishAssessment() {
+    if (!reachedMinimum) {
+      setError(`Please complete at least ${minimumRequired} number signs before submitting.`);
+      return;
+    }
+    setError(null);
+    setSubmitted(true);
+    if (!reported) {
+      const total = targets.length;
+      const right = completedStepIds.length;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = targets
+        .filter((step) => !completedStepIds.includes(step.id))
+        .map((step) => `Practice number ${step.number}`);
+      onSubmitResult?.({
+        assessmentId,
+        assessmentTitle: title,
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas,
+      });
+      setReported(true);
+    }
+  }
+
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeStep.id]: ""
     }));
-  }
-
-  function captureCurrentSnapshot() {
-    const snapshot = captureVideoSnapshot(videoRef.current);
-    if (!snapshot) {
-      setError("Unable to capture a snapshot. Start the camera first.");
-      return;
-    }
-
-    setError(null);
-    setCapturedSnapshots((previous) => ({
-      ...previous,
-      [activeStep.id]: snapshot,
-    }));
-  }
-
-  async function saveAssessment() {
-    if (!allDone) {
-      setSaveError("Complete every number task before saving this assessment.");
-      return;
-    }
-
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-
-    const correctCount = targets.reduce((total, step) => {
-      const responseValue = recognizedInputs[step.id] ?? "";
-      return total + (normalizeAssessmentValue(responseValue) === String(step.number) ? 1 : 0);
-    }, 0);
-
-    try {
-      await onSave({
-        assessment_id: assessmentId,
-        assessment_title: title,
-        assessment_type: "camera_numbers",
-        score_percent: targets.length > 0 ? (correctCount / targets.length) * 100 : 0,
-        score_correct: correctCount,
-        score_total: targets.length || 1,
-        answers: targets.map((step) => {
-          const responseValue = recognizedInputs[step.id] ?? "";
-          return {
-            assessment_item_id: step.id,
-            prompt: `Sign the number ${step.number}.`,
-            response_text: responseValue || null,
-            expected_response: String(step.number),
-            is_correct: normalizeAssessmentValue(responseValue) === String(step.number),
-          };
-        }),
-        snapshots: targets.flatMap((step) =>
-          capturedSnapshots[step.id]
-            ? [
-                {
-                  assessment_item_id: step.id,
-                  label: `Number ${step.number}`,
-                  image_data_url: capturedSnapshots[step.id],
-                },
-              ]
-            : []
-        ),
-      });
-      setSaveMessage(`${title} saved with answers and snapshots.`);
-    } catch (saveAttemptError) {
-      setSaveError(
-        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
-      );
-    } finally {
-      setSaving(false);
-    }
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
@@ -1525,7 +1466,7 @@ function NumbersCameraAssessment({
       <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
       <p className="sr-only">{intro}</p>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -1561,6 +1502,16 @@ function NumbersCameraAssessment({
                 </span>
               </span>
             </button>
+            <button
+              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!running}
+              onClick={() => {
+                void runHiddenPrediction();
+              }}
+              type="button"
+            >
+              Analyze Sign Now
+            </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
               {running ? "Camera active" : "Camera off"}
             </span>
@@ -1574,7 +1525,7 @@ function NumbersCameraAssessment({
             <span className="text-5xl font-bold text-brandBlue">{activeStep.number}</span>
           </div>
           <p className="mt-3 text-sm text-slate-700">
-            Sign the number shown above, enter your recognized gesture, then click Next or Submit.
+            Sign the number shown above. The recognized output appears automatically below.
           </p>
 
           <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
@@ -1582,36 +1533,15 @@ function NumbersCameraAssessment({
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeStep.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeStep.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-              onClick={captureCurrentSnapshot}
-              type="button"
-            >
-              {capturedSnapshots[activeStep.id] ? "Retake Snapshot" : "Capture Snapshot"}
-            </button>
-          </div>
-          {capturedSnapshots[activeStep.id] ? (
-            <img
-              alt={`Snapshot for number ${activeStep.number}`}
-              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
-              src={capturedSnapshots[activeStep.id]}
-            />
-          ) : null}
           <button
             className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             onClick={clearCurrentInput}
@@ -1634,29 +1564,31 @@ function NumbersCameraAssessment({
               onClick={submitCurrentStep}
               type="button"
             >
-              {activeStepIndex === targets.length - 1 ? "Submit" : "Next"}
+              {activeStepIndex === targets.length - 1 ? "Mark Done" : "Next"}
             </button>
+            {reachedMinimum ? (
+              <button
+                className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                onClick={finishAssessment}
+                type="button"
+              >
+                Finish
+              </button>
+            ) : null}
           </div>
 
           <p className="mt-3 text-xs text-slate-600">
             Completed: {completedStepIds.length}/{targets.length}
           </p>
+          {minimumRequired < targets.length ? (
+            <p className="mt-1 text-xs text-slate-600">Minimum required: {minimumRequired}</p>
+          ) : null}
 
-          {allDone ? (
+          {submitted || allDone ? (
             <p className="mt-2 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
               Assessment complete. All number tasks submitted.
             </p>
           ) : null}
-          <button
-            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={saving || !allDone}
-            onClick={() => {
-              void saveAssessment();
-            }}
-            type="button"
-          >
-            {saving ? "Saving..." : "Save Attempt"}
-          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -1664,13 +1596,6 @@ function NumbersCameraAssessment({
           >
             Open Free Signing Lab
           </Link>
-
-          <AssessmentSaveNotice
-            latestAttempt={latestAttempt}
-            saveError={saveError}
-            saveMessage={saveMessage}
-            saving={saving}
-          />
         </aside>
       </div>
     </div>
@@ -1679,36 +1604,37 @@ function NumbersCameraAssessment({
 
 function GestureCameraAssessment({
   assessmentId,
-  latestAttempt,
-  onSave,
   title,
   intro,
   targets,
-  minimumRequired
+  minimumRequired,
+  onSubmitResult
 }: {
   assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  onSave: AssessmentSubmitHandler;
   title: string;
   intro: string;
   targets: readonly { id: string; label: string }[];
   minimumRequired: number;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
-  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
+  const [recognizedTrail, setRecognizedTrail] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
   const activeStep = targets[activeStepIndex];
   const reachedMinimum = completedStepIds.length >= minimumRequired;
   const allDone = completedStepIds.length >= targets.length;
+  const currentDetectedGesture = (recognizedByStep[activeStep.id] ?? "").trim();
 
   useEffect(() => {
     return () => {
@@ -1752,14 +1678,54 @@ function GestureCameraAssessment({
     await startCamera();
   }
 
-  function markCurrentStepDone() {
-    const value = (recognizedInputs[activeStep.id] ?? "").trim();
-    if (!value) {
-      setError("Enter the recognized gesture before marking this step done.");
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
       return;
     }
-    if (!capturedSnapshots[activeStep.id]) {
-      setError("Capture a snapshot for this gesture before marking it done.");
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "words");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Hidden prediction failures should not break the assessment flow.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+    if (token === lastRecognizedToken) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+
+    setRecognizedByStep((previous) => ({
+      ...previous,
+      [activeStep.id]: token
+    }));
+    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+    setLastRecognizedToken(token);
+    setHiddenPrediction("No prediction yet.");
+  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeStep.id]);
+
+  function markCurrentStepDone() {
+    if (!currentDetectedGesture) {
+      setError("No recognized gesture detected yet. Keep your hand visible and try again.");
       return;
     }
     setError(null);
@@ -1780,84 +1746,40 @@ function GestureCameraAssessment({
     }
     setError(null);
     setSubmitted(true);
+    if (!reported) {
+      const total = targets.length;
+      const right = completedStepIds.length;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = targets
+        .filter((step) => !completedStepIds.includes(step.id))
+        .map((step) => `Practice gesture: ${step.label}`);
+      onSubmitResult?.({
+        assessmentId,
+        assessmentTitle: title,
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas,
+      });
+      setReported(true);
+    }
   }
 
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeStep.id]: ""
     }));
-  }
-
-  function captureCurrentSnapshot() {
-    const snapshot = captureVideoSnapshot(videoRef.current);
-    if (!snapshot) {
-      setError("Unable to capture a snapshot. Start the camera first.");
-      return;
-    }
-
-    setError(null);
-    setCapturedSnapshots((previous) => ({
-      ...previous,
-      [activeStep.id]: snapshot,
-    }));
-  }
-
-  async function saveAssessment() {
-    if (!submitted) {
-      setSaveError("Finish the gesture requirement before saving this assessment.");
-      return;
-    }
-
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-
-    const completedTargets = targets.filter((step) => completedStepIds.includes(step.id));
-    const correctCount = completedTargets.reduce((total, step) => {
-      const responseValue = recognizedInputs[step.id] ?? "";
-      return total + (normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label) ? 1 : 0);
-    }, 0);
-
-    try {
-      await onSave({
-        assessment_id: assessmentId,
-        assessment_title: title,
-        assessment_type: "camera_gesture",
-        score_percent: minimumRequired > 0 ? Math.min((correctCount / minimumRequired) * 100, 100) : 0,
-        score_correct: Math.min(correctCount, minimumRequired),
-        score_total: minimumRequired || 1,
-        answers: completedTargets.map((step) => {
-          const responseValue = recognizedInputs[step.id] ?? "";
-          return {
-            assessment_item_id: step.id,
-            prompt: `Sign the gesture ${step.label}.`,
-            response_text: responseValue || null,
-            expected_response: step.label,
-            is_correct:
-              normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label),
-          };
-        }),
-        snapshots: completedTargets.flatMap((step) =>
-          capturedSnapshots[step.id]
-            ? [
-                {
-                  assessment_item_id: step.id,
-                  label: step.label,
-                  image_data_url: capturedSnapshots[step.id],
-                },
-              ]
-            : []
-        ),
-      });
-      setSaveMessage(`${title} saved with ${completedTargets.length} completed gestures.`);
-    } catch (saveAttemptError) {
-      setSaveError(
-        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
-      );
-    } finally {
-      setSaving(false);
-    }
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
@@ -1865,7 +1787,7 @@ function GestureCameraAssessment({
       <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
       <p className="sr-only">{intro}</p>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -1919,36 +1841,15 @@ function GestureCameraAssessment({
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeStep.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeStep.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-              onClick={captureCurrentSnapshot}
-              type="button"
-            >
-              {capturedSnapshots[activeStep.id] ? "Retake Snapshot" : "Capture Snapshot"}
-            </button>
-          </div>
-          {capturedSnapshots[activeStep.id] ? (
-            <img
-              alt={`${activeStep.label} snapshot`}
-              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
-              src={capturedSnapshots[activeStep.id]}
-            />
-          ) : null}
           <button
             className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             onClick={clearCurrentInput}
@@ -1990,13 +1891,6 @@ function GestureCameraAssessment({
                 Finish / Submit
               </button>
             ) : null}
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-              onClick={clearCurrentInput}
-              type="button"
-            >
-              Clear Input
-            </button>
           </div>
 
           <p className="mt-3 text-xs text-slate-600">
@@ -2021,16 +1915,6 @@ function GestureCameraAssessment({
               Submitted. Great work completing the gesture requirement.
             </p>
           ) : null}
-          <button
-            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={saving || !submitted}
-            onClick={() => {
-              void saveAssessment();
-            }}
-            type="button"
-          >
-            {saving ? "Saving..." : "Save Attempt"}
-          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -2038,64 +1922,40 @@ function GestureCameraAssessment({
           >
             Open Free Signing Lab
           </Link>
-
-          <AssessmentSaveNotice
-            latestAttempt={latestAttempt}
-            saveError={saveError}
-            saveMessage={saveMessage}
-            saving={saving}
-          />
         </aside>
       </div>
     </div>
   );
 }
 
-function Module3AssessmentTwo({
-  assessmentId,
-  latestAttempt,
-  onSave,
-}: {
-  assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  onSave: AssessmentSubmitHandler;
-}) {
+function Module3AssessmentTwo() {
   return (
     <GestureCameraAssessment
-      assessmentId={assessmentId}
       intro="Use the camera interface and sign at least 7 gestures from this module."
-      latestAttempt={latestAttempt}
       minimumRequired={7}
-      onSave={onSave}
       targets={MODULE3_GESTURE_TARGETS}
       title="Assessment 2"
     />
   );
 }
 
-function Module7ColorAssessmentTwo({
-  assessmentId,
-  latestAttempt,
-  onSave,
-}: {
-  assessmentId: string;
-  latestAttempt?: AssessmentAttemptRecord | null;
-  onSave: AssessmentSubmitHandler;
-}) {
+function Module7ColorAssessmentTwo() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const predictionInFlightRef = useRef(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedInputs, setRecognizedInputs] = useState<Record<string, string>>({});
-  const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [recognizedTrail, setRecognizedTrail] = useState("");
+  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
+  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
+  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
 
   const activeColor = MODULE7_COLOR_SIGN_TARGETS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE7_COLOR_SIGN_TARGETS.length;
+  const currentDetectedGesture = (recognizedByStep[activeColor.id] ?? "").trim();
 
   useEffect(() => {
     return () => {
@@ -2139,14 +1999,55 @@ function Module7ColorAssessmentTwo({
     await startCamera();
   }
 
-  function submitCurrentStep() {
-    const value = (recognizedInputs[activeColor.id] ?? "").trim();
-    if (!value) {
-      setError("Please enter the recognized gesture before continuing.");
+  async function runHiddenPrediction() {
+    if (!running || predictionInFlightRef.current) {
       return;
     }
-    if (!capturedSnapshots[activeColor.id]) {
-      setError("Capture a snapshot for this color before continuing.");
+    predictionInFlightRef.current = true;
+    try {
+      const frame = await captureVideoFrameAsFile(videoRef.current);
+      if (!frame) {
+        return;
+      }
+      const result = await predictSignFromImage(frame, "words");
+      setHiddenPrediction(result.prediction);
+    } catch {
+      // Hidden prediction failures should not block user actions.
+    } finally {
+      predictionInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const token = hiddenPrediction.trim();
+    if (!isValidPredictionToken(token)) {
+      return;
+    }
+    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
+      setBlockedTokenAfterClear(null);
+    }
+    if (token === lastRecognizedToken) {
+      setHiddenPrediction("No prediction yet.");
+      return;
+    }
+
+    setRecognizedByStep((previous) => ({
+      ...previous,
+      [activeColor.id]: token
+    }));
+    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
+    setLastRecognizedToken(token);
+    setHiddenPrediction("No prediction yet.");
+  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeColor.id]);
+
+  function submitCurrentStep() {
+    const value = currentDetectedGesture;
+    if (!value) {
+      setError("Please wait for a recognized gesture before continuing.");
       return;
     }
 
@@ -2163,90 +2064,26 @@ function Module7ColorAssessmentTwo({
   }
 
   function clearCurrentInput() {
-    setRecognizedInputs((previous) => ({
+    const token = hiddenPrediction.trim();
+    if (isValidPredictionToken(token)) {
+      setBlockedTokenAfterClear(token);
+    } else {
+      setBlockedTokenAfterClear(null);
+    }
+    setRecognizedTrail("");
+    setRecognizedByStep((previous) => ({
       ...previous,
       [activeColor.id]: ""
     }));
-  }
-
-  function captureCurrentSnapshot() {
-    const snapshot = captureVideoSnapshot(videoRef.current);
-    if (!snapshot) {
-      setError("Unable to capture a snapshot. Start the camera first.");
-      return;
-    }
-
-    setError(null);
-    setCapturedSnapshots((previous) => ({
-      ...previous,
-      [activeColor.id]: snapshot,
-    }));
-  }
-
-  async function saveAssessment() {
-    if (!allDone) {
-      setSaveError("Complete every displayed color before saving this assessment.");
-      return;
-    }
-
-    setSaveError(null);
-    setSaveMessage(null);
-    setSaving(true);
-
-    const correctCount = MODULE7_COLOR_SIGN_TARGETS.reduce((total, step) => {
-      const responseValue = recognizedInputs[step.id] ?? "";
-      return total + (normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label) ? 1 : 0);
-    }, 0);
-
-    try {
-      await onSave({
-        assessment_id: assessmentId,
-        assessment_title: "Assessment 2",
-        assessment_type: "camera_color",
-        score_percent:
-          MODULE7_COLOR_SIGN_TARGETS.length > 0
-            ? (correctCount / MODULE7_COLOR_SIGN_TARGETS.length) * 100
-            : 0,
-        score_correct: correctCount,
-        score_total: MODULE7_COLOR_SIGN_TARGETS.length || 1,
-        answers: MODULE7_COLOR_SIGN_TARGETS.map((step) => {
-          const responseValue = recognizedInputs[step.id] ?? "";
-          return {
-            assessment_item_id: step.id,
-            prompt: `Sign the displayed color ${step.label}.`,
-            response_text: responseValue || null,
-            expected_response: step.label,
-            is_correct:
-              normalizeAssessmentValue(responseValue) === normalizeAssessmentValue(step.label),
-          };
-        }),
-        snapshots: MODULE7_COLOR_SIGN_TARGETS.flatMap((step) =>
-          capturedSnapshots[step.id]
-            ? [
-                {
-                  assessment_item_id: step.id,
-                  label: step.label,
-                  image_data_url: capturedSnapshots[step.id],
-                },
-              ]
-            : []
-        ),
-      });
-      setSaveMessage("Displayed color answers and snapshots saved.");
-    } catch (saveAttemptError) {
-      setSaveError(
-        saveAttemptError instanceof Error ? saveAttemptError.message : "Unable to save assessment."
-      );
-    } finally {
-      setSaving(false);
-    }
+    setHiddenPrediction("No prediction yet.");
+    setLastRecognizedToken(null);
   }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="text-xl font-semibold text-slate-900">Assessment 2</h3>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <video
             autoPlay
@@ -2282,6 +2119,16 @@ function Module7ColorAssessmentTwo({
                 </span>
               </span>
             </button>
+            <button
+              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!running}
+              onClick={() => {
+                void runHiddenPrediction();
+              }}
+              type="button"
+            >
+              Analyze Sign Now
+            </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
               {running ? "Camera active" : "Camera off"}
             </span>
@@ -2299,7 +2146,7 @@ function Module7ColorAssessmentTwo({
           </div>
 
           <p className="mt-3 text-sm text-slate-700">
-            Sign the color shown above, enter your recognized gesture, then click Next or Submit.
+            Sign the color shown above. The recognized output appears automatically below.
           </p>
 
           <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
@@ -2307,36 +2154,15 @@ function Module7ColorAssessmentTwo({
             <input
               autoComplete="off"
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) =>
-                setRecognizedInputs((previous) => ({
-                  ...previous,
-                  [activeColor.id]: event.target.value
-                }))
-              }
+              readOnly
               onDrop={(event) => event.preventDefault()}
               onPaste={(event) => event.preventDefault()}
-              placeholder="Type the recognized gesture here..."
+              placeholder="Recognized gesture/phrase appears here..."
               spellCheck={false}
               type="text"
-              value={recognizedInputs[activeColor.id] ?? ""}
+              value={recognizedTrail}
             />
           </label>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-              onClick={captureCurrentSnapshot}
-              type="button"
-            >
-              {capturedSnapshots[activeColor.id] ? "Retake Snapshot" : "Capture Snapshot"}
-            </button>
-          </div>
-          {capturedSnapshots[activeColor.id] ? (
-            <img
-              alt={`${activeColor.label} snapshot`}
-              className="mt-3 h-40 w-full rounded-lg border border-slate-200 object-cover"
-              src={capturedSnapshots[activeColor.id]}
-            />
-          ) : null}
           <button
             className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             onClick={clearCurrentInput}
@@ -2372,16 +2198,6 @@ function Module7ColorAssessmentTwo({
               Great work. You completed all displayed colors.
             </p>
           ) : null}
-          <button
-            className="mt-3 rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={saving || !allDone}
-            onClick={() => {
-              void saveAssessment();
-            }}
-            type="button"
-          >
-            {saving ? "Saving..." : "Save Attempt"}
-          </button>
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -2389,13 +2205,6 @@ function Module7ColorAssessmentTwo({
           >
             Open Free Signing Lab
           </Link>
-
-          <AssessmentSaveNotice
-            latestAttempt={latestAttempt}
-            saveError={saveError}
-            saveMessage={saveMessage}
-            saving={saving}
-          />
         </aside>
       </div>
     </div>
@@ -2408,13 +2217,11 @@ export default function ModuleDetailPage() {
 
   const [modules, setModules] = useState<ModuleItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [lessonActionError, setLessonActionError] = useState<string | null>(null);
-  const [lessonActionMessage, setLessonActionMessage] = useState<string | null>(null);
-  const [lessonSavingId, setLessonSavingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"module" | "assessment">("module");
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null);
+  const [isSelectionCollapsed, setIsSelectionCollapsed] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -2513,58 +2320,6 @@ export default function ModuleDetailPage() {
     }
     return selected.assessments.slice(0, 5);
   }, [isModule8, selected]);
-  const latestSelectedAssessmentAttempt = useMemo(() => {
-    if (!selected?.latest_assessment_attempt || !selectedAssessmentId) {
-      return null;
-    }
-    return selected.latest_assessment_attempt.assessment_id === selectedAssessmentId
-      ? selected.latest_assessment_attempt
-      : null;
-  }, [selected, selectedAssessmentId]);
-
-  function applyModuleUpdate(updatedModule: ModuleItem, latestAttempt?: AssessmentAttemptRecord) {
-    setModules((previous) => {
-      const nextModule = latestAttempt
-        ? { ...updatedModule, latest_assessment_attempt: latestAttempt }
-        : updatedModule;
-
-      if (previous.some((item) => item.id === updatedModule.id)) {
-        return previous.map((item) => (item.id === updatedModule.id ? nextModule : item));
-      }
-      return [...previous, nextModule];
-    });
-  }
-
-  async function handleLessonComplete(lessonId: string) {
-    setLessonActionError(null);
-    setLessonActionMessage(null);
-    setLessonSavingId(lessonId);
-
-    try {
-      const updatedModule = await updateModuleProgress(moduleId, {
-        completed_lesson_id: lessonId,
-      });
-      applyModuleUpdate(updatedModule);
-      setLessonActionMessage("Lesson progress saved.");
-    } catch (progressError) {
-      setLessonActionError(
-        progressError instanceof Error ? progressError.message : "Unable to save lesson progress."
-      );
-    } finally {
-      setLessonSavingId(null);
-    }
-  }
-
-  async function handleAssessmentSave(
-    payload: AssessmentAttemptPayload
-  ): Promise<AssessmentAttemptRecord> {
-    const attempt = await submitAssessmentAttempt(moduleId, payload);
-    const updatedModule = await updateModuleProgress(moduleId, {
-      assessment_score: payload.score_percent,
-    });
-    applyModuleUpdate(updatedModule, attempt);
-    return attempt;
-  }
 
   function openModuleTab() {
     setActiveTab("module");
@@ -2636,7 +2391,17 @@ export default function ModuleDetailPage() {
 
       {selected ? (
         <article className="panel">
-          <div className="grid gap-4 lg:grid-cols-[20rem_1fr]">
+          <div className="mb-3 flex justify-start">
+            <button
+              className="rounded border border-brandBlue bg-brandBlue px-3 py-1 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
+              onClick={() => setIsSelectionCollapsed((value) => !value)}
+              type="button"
+            >
+              {isSelectionCollapsed ? "Show Module/Assessment List" : "Hide Module/Assessment List"}
+            </button>
+          </div>
+          <div className={`grid gap-4 ${isSelectionCollapsed ? "lg:grid-cols-1" : "lg:grid-cols-[20rem_1fr]"}`}>
+            {!isSelectionCollapsed ? (
             <aside className="rounded-xl border border-brandBorder bg-brandMutedSurface p-3">
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -2670,27 +2435,20 @@ export default function ModuleDetailPage() {
               <div className="mt-2 space-y-2">
                 {activeTab === "module" ? (
                   selected.lessons.length > 0 ? (
-                  selected.lessons.map((lesson) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedLessonId === lesson.id
-                          ? "border-brandGreen bg-brandGreenLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={lesson.id}
-                      onClick={() => setSelectedLessonId(lesson.id)}
-                      type="button"
-                    >
-                      <div className="flex items-center justify-between gap-2">
+                    selected.lessons.map((lesson) => (
+                      <button
+                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
+                          selectedLessonId === lesson.id
+                            ? "border-brandGreen bg-brandGreenLight text-slate-900"
+                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                        }`}
+                        key={lesson.id}
+                        onClick={() => setSelectedLessonId(lesson.id)}
+                        type="button"
+                      >
                         <p className="font-semibold">{lesson.title}</p>
-                        {selected.completed_lessons.includes(lesson.id) ? (
-                          <span className="rounded-full bg-brandGreen px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
-                            Done
-                          </span>
-                        ) : null}
-                      </div>
-                    </button>
-                  ))
+                      </button>
+                    ))
                   ) : (
                     <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
                       No lessons found for this module.
@@ -2847,43 +2605,19 @@ export default function ModuleDetailPage() {
                 )}
               </div>
             </aside>
+            ) : null}
 
             <div className="rounded-xl border border-brandBorder bg-white p-4">
               {activeTab === "module" ? (
                 <>
-                  <p className="text-xs uppercase tracking-wider label-accent">{selected.title}</p>
-                  <p className="mt-1 text-sm text-slate-600">{selected.description}</p>
+                  <p className="text-sm font-extrabold uppercase tracking-wide text-slate-900">{selected.title}</p>
+                  <p className="mt-2 text-lg leading-8 text-slate-900">{selected.description}</p>
                   {selectedLesson ? (
                     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
                     <h3 className="text-xl font-semibold text-slate-900">{selectedLesson.title}</h3>
-                    <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700">
+                    <p className="mt-3 whitespace-pre-line text-base leading-8 text-slate-900">
                       {selectedLesson.content}
                     </p>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
-                      <button
-                        className="rounded bg-brandGreen px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandGreen/90 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={
-                          lessonSavingId === selectedLesson.id ||
-                          selected.completed_lessons.includes(selectedLesson.id)
-                        }
-                        onClick={() => {
-                          void handleLessonComplete(selectedLesson.id);
-                        }}
-                        type="button"
-                      >
-                        {selected.completed_lessons.includes(selectedLesson.id)
-                          ? "Lesson Completed"
-                          : lessonSavingId === selectedLesson.id
-                            ? "Saving..."
-                            : "Mark Lesson Complete"}
-                      </button>
-                      {lessonActionMessage ? (
-                        <p className="text-sm font-semibold text-brandGreen">{lessonActionMessage}</p>
-                      ) : null}
-                      {lessonActionError ? (
-                        <p className="text-sm text-red-600">{lessonActionError}</p>
-                      ) : null}
-                    </div>
 
                     {selected.slug === "fsl-alphabets" && selectedLesson.id === "m1-l1" ? (
                       <div className="mt-5">
@@ -2970,157 +2704,91 @@ export default function ModuleDetailPage() {
                   </ul>
                 </div>
               ) : isModule1 && selectedAssessmentId === "m1-assessment-1" ? (
-                <Module1AssessmentOne
-                  assessmentId="m1-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  onSave={handleAssessmentSave}
-                  questions={module1AssessmentQuestions}
-                />
+                <Module1AssessmentOne questions={module1AssessmentQuestions} />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-2" ? (
-                <Module1AssessmentTwo
-                  assessmentId="m1-assessment-2"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  onSave={handleAssessmentSave}
-                />
+                <Module1AssessmentTwo />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-3" ? (
-                <Module1AssessmentThree
-                  assessmentId="m1-assessment-3"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  onSave={handleAssessmentSave}
-                />
+                <Module1AssessmentThree />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m2-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  moduleLabel="Numbers"
-                  onSave={handleAssessmentSave}
-                  questions={module2AssessmentQuestions}
-                />
+                <Module2AssessmentOne moduleLabel="Numbers" questions={module2AssessmentQuestions} />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-2" ? (
                 <NumbersCameraAssessment
-                  assessmentId="m2-assessment-2"
                   intro="Use the camera interface and sign each number from 1 to 10."
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  onSave={handleAssessmentSave}
                   targets={MODULE2_SIGN_1_TO_10_STEPS}
                   title="Assessment 2"
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-3" ? (
                 <NumbersCameraAssessment
-                  assessmentId="m2-assessment-3"
-                  intro="Use the camera interface and sign the following numbers: 11, 15, 50, 100, 90, and 85."
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  onSave={handleAssessmentSave}
-                  targets={MODULE2_SIGN_SET_STEPS}
+                  intro="Use the camera interface and sign numbers from 11 to 20. Complete at least 5."
+                  minimumRequired={5}
+                  targets={MODULE2_SIGN_11_TO_20_STEPS}
                   title="Assessment 3"
+                />
+              ) : isModule2 && selectedAssessmentId === "m2-assessment-4" ? (
+                <NumbersCameraAssessment
+                  intro="Use the camera interface and sign numbers from 31 to 40. Complete at least 5."
+                  minimumRequired={5}
+                  targets={MODULE2_SIGN_31_TO_40_STEPS}
+                  title="Assessment 4"
+                />
+              ) : isModule2 && selectedAssessmentId === "m2-assessment-5" ? (
+                <NumbersCameraAssessment
+                  intro="Use the camera interface and sign numbers from 91 to 100. Complete at least 5."
+                  minimumRequired={5}
+                  targets={MODULE2_SIGN_91_TO_100_STEPS}
+                  title="Assessment 5"
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-1" ? (
                 <Module2AssessmentOne
-                  assessmentId="m3-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
                   moduleLabel="Greetings & Basic Expressions"
-                  onSave={handleAssessmentSave}
                   questions={module3AssessmentQuestions}
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-2" ? (
-                <Module3AssessmentTwo
-                  assessmentId="m3-assessment-2"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  onSave={handleAssessmentSave}
-                />
+                <Module3AssessmentTwo />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m4-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  moduleLabel="Family Members"
-                  onSave={handleAssessmentSave}
-                  questions={module4AssessmentQuestions}
-                />
+                <Module2AssessmentOne moduleLabel="Family Members" questions={module4AssessmentQuestions} />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-2" ? (
                 <GestureCameraAssessment
-                  assessmentId="m4-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
-                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
-                  onSave={handleAssessmentSave}
                   targets={MODULE4_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m5-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  moduleLabel="People Description"
-                  onSave={handleAssessmentSave}
-                  questions={module5AssessmentQuestions}
-                />
+                <Module2AssessmentOne moduleLabel="People Description" questions={module5AssessmentQuestions} />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-2" ? (
                 <GestureCameraAssessment
-                  assessmentId="m5-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
-                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
-                  onSave={handleAssessmentSave}
                   targets={MODULE5_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m6-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  moduleLabel="Days"
-                  onSave={handleAssessmentSave}
-                  questions={module6AssessmentQuestions}
-                />
+                <Module2AssessmentOne moduleLabel="Days" questions={module6AssessmentQuestions} />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-2" ? (
                 <GestureCameraAssessment
-                  assessmentId="m6-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
-                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
-                  onSave={handleAssessmentSave}
                   targets={MODULE6_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m7-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  moduleLabel="Colors & Descriptions"
-                  onSave={handleAssessmentSave}
-                  questions={module7AssessmentQuestions}
-                />
+                <Module2AssessmentOne moduleLabel="Colors & Descriptions" questions={module7AssessmentQuestions} />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-2" ? (
-                <Module7ColorAssessmentTwo
-                  assessmentId="m7-assessment-2"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  onSave={handleAssessmentSave}
-                />
+                <Module7ColorAssessmentTwo />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-3" ? (
                 <GestureCameraAssessment
-                  assessmentId="m7-assessment-3"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
-                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
-                  onSave={handleAssessmentSave}
                   targets={MODULE7_GESTURE_TARGETS}
                   title="Assessment 3"
                 />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m8-assessment-1"
-                  latestAttempt={latestSelectedAssessmentAttempt}
-                  moduleLabel="Basic Conversations"
-                  onSave={handleAssessmentSave}
-                  questions={module8AssessmentQuestions}
-                />
+                <Module2AssessmentOne moduleLabel="Basic Conversations" questions={module8AssessmentQuestions} />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-2" ? (
                 <GestureCameraAssessment
-                  assessmentId="m8-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
-                  latestAttempt={latestSelectedAssessmentAttempt}
                   minimumRequired={7}
-                  onSave={handleAssessmentSave}
                   targets={MODULE8_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
@@ -3139,3 +2807,67 @@ export default function ModuleDetailPage() {
   );
 }
 
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-1",
+      assessmentTitle: "Assessment 1",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = MODULE1_LABELING_ITEMS.length;
+    const right = correctCount;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = MODULE1_LABELING_ITEMS.filter((item) => {
+      const value = answers[item.id]?.trim().toUpperCase() ?? "";
+      return value !== item.answer;
+    }).map((item) => `Hand sign item ${item.answer}`);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-2",
+      assessmentTitle: "Assessment 2",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId,
+      assessmentTitle,
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
