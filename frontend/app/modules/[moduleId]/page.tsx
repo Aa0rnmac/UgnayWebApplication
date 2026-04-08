@@ -643,6 +643,28 @@ function Module1AssessmentOne({
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
 
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-1",
+      assessmentTitle: "Assessment 1",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas
+    });
+    setReported(true);
+  }
+
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="text-xl font-semibold text-slate-900">Assessment 1</h3>
@@ -733,6 +755,29 @@ function Module1AssessmentTwo({
     const value = answers[item.id]?.trim().toUpperCase() ?? "";
     return total + (value === item.answer ? 1 : 0);
   }, 0);
+
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = MODULE1_LABELING_ITEMS.length;
+    const right = correctCount;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = MODULE1_LABELING_ITEMS.filter((item) => {
+      const value = answers[item.id]?.trim().toUpperCase() ?? "";
+      return value !== item.answer;
+    }).map((item) => `Hand sign item ${item.answer}`);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-2",
+      assessmentTitle: "Assessment 2",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas
+    });
+    setReported(true);
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -1207,6 +1252,28 @@ function Module2AssessmentOne({
     }
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
+
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId,
+      assessmentTitle,
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas
+    });
+    setReported(true);
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -1928,18 +1995,28 @@ function GestureCameraAssessment({
   );
 }
 
-function Module3AssessmentTwo() {
+function Module3AssessmentTwo({
+  onSubmitResult
+}: {
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+}) {
   return (
     <GestureCameraAssessment
+      assessmentId="m3-assessment-2"
       intro="Use the camera interface and sign at least 7 gestures from this module."
       minimumRequired={7}
+      onSubmitResult={onSubmitResult}
       targets={MODULE3_GESTURE_TARGETS}
       title="Assessment 2"
     />
   );
 }
 
-function Module7ColorAssessmentTwo() {
+function Module7ColorAssessmentTwo({
+  onSubmitResult
+}: {
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const predictionInFlightRef = useRef(false);
@@ -1952,6 +2029,7 @@ function Module7ColorAssessmentTwo() {
   const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
   const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
 
   const activeColor = MODULE7_COLOR_SIGN_TARGETS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE7_COLOR_SIGN_TARGETS.length;
@@ -2052,14 +2130,36 @@ function Module7ColorAssessmentTwo() {
     }
 
     setError(null);
-    setCompletedStepIds((previous) =>
-      previous.includes(activeColor.id) ? previous : [...previous, activeColor.id]
-    );
+    const nextCompletedStepIds = completedStepIds.includes(activeColor.id)
+      ? completedStepIds
+      : [...completedStepIds, activeColor.id];
+    setCompletedStepIds(nextCompletedStepIds);
 
-    if (activeStepIndex < MODULE7_COLOR_SIGN_TARGETS.length - 1) {
+    const isLastStep = activeStepIndex >= MODULE7_COLOR_SIGN_TARGETS.length - 1;
+    if (!isLastStep) {
       setActiveStepIndex((index) =>
         Math.min(MODULE7_COLOR_SIGN_TARGETS.length - 1, index + 1)
       );
+      return;
+    }
+
+    if (!reported) {
+      const total = MODULE7_COLOR_SIGN_TARGETS.length;
+      const right = nextCompletedStepIds.length;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = MODULE7_COLOR_SIGN_TARGETS.filter(
+        (step) => !nextCompletedStepIds.includes(step.id)
+      ).map((step) => `Practice color: ${step.label}`);
+      onSubmitResult?.({
+        assessmentId: "m7-assessment-2",
+        assessmentTitle: "Assessment 2",
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas
+      });
+      setReported(true);
     }
   }
 
@@ -2222,6 +2322,7 @@ export default function ModuleDetailPage() {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null);
   const [isSelectionCollapsed, setIsSelectionCollapsed] = useState(false);
+  const [assessmentReportMessage, setAssessmentReportMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
@@ -2364,6 +2465,31 @@ export default function ModuleDetailPage() {
     }
     if (!selectedAssessmentId && selected?.assessments.length) {
       setSelectedAssessmentId(selected.assessments[0].id);
+    }
+  }
+
+  async function handleAssessmentResult(payload: AssessmentReportPayload) {
+    if (!selected) {
+      return;
+    }
+    try {
+      const updatedModule = await updateModuleProgress(selected.id, {
+        assessment_id: payload.assessmentId,
+        assessment_score: payload.scorePercent,
+        assessment_right: payload.right,
+        assessment_wrong: payload.wrong,
+        assessment_total: payload.total,
+        assessment_title: payload.assessmentTitle,
+        improvement_areas: payload.improvementAreas
+      });
+      setModules((previous) =>
+        previous.map((module) => (module.id === updatedModule.id ? updatedModule : module))
+      );
+      setAssessmentReportMessage(
+        `${payload.assessmentTitle} saved. Report is queued for teacher-side review.`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save assessment report.");
     }
   }
 
@@ -2704,91 +2830,141 @@ export default function ModuleDetailPage() {
                   </ul>
                 </div>
               ) : isModule1 && selectedAssessmentId === "m1-assessment-1" ? (
-                <Module1AssessmentOne questions={module1AssessmentQuestions} />
+                <Module1AssessmentOne onSubmitResult={handleAssessmentResult} questions={module1AssessmentQuestions} />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-2" ? (
-                <Module1AssessmentTwo />
+                <Module1AssessmentTwo onSubmitResult={handleAssessmentResult} />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-3" ? (
-                <Module1AssessmentThree />
+                <Module1AssessmentThree onSubmitResult={handleAssessmentResult} />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Numbers" questions={module2AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m2-assessment-1"
+                  moduleLabel="Numbers"
+                  onSubmitResult={handleAssessmentResult}
+                  questions={module2AssessmentQuestions}
+                />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-2" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-2"
                   intro="Use the camera interface and sign each number from 1 to 10."
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_1_TO_10_STEPS}
                   title="Assessment 2"
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-3" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-3"
                   intro="Use the camera interface and sign numbers from 11 to 20. Complete at least 5."
                   minimumRequired={5}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_11_TO_20_STEPS}
                   title="Assessment 3"
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-4" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-4"
                   intro="Use the camera interface and sign numbers from 31 to 40. Complete at least 5."
                   minimumRequired={5}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_31_TO_40_STEPS}
                   title="Assessment 4"
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-5" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-5"
                   intro="Use the camera interface and sign numbers from 91 to 100. Complete at least 5."
                   minimumRequired={5}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_91_TO_100_STEPS}
                   title="Assessment 5"
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-1" ? (
                 <Module2AssessmentOne
+                  assessmentId="m3-assessment-1"
                   moduleLabel="Greetings & Basic Expressions"
+                  onSubmitResult={handleAssessmentResult}
                   questions={module3AssessmentQuestions}
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-2" ? (
-                <Module3AssessmentTwo />
+                <Module3AssessmentTwo onSubmitResult={handleAssessmentResult} />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Family Members" questions={module4AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m4-assessment-1"
+                  moduleLabel="Family Members"
+                  onSubmitResult={handleAssessmentResult}
+                  questions={module4AssessmentQuestions}
+                />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m4-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE4_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="People Description" questions={module5AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m5-assessment-1"
+                  moduleLabel="People Description"
+                  onSubmitResult={handleAssessmentResult}
+                  questions={module5AssessmentQuestions}
+                />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m5-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE5_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Days" questions={module6AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m6-assessment-1"
+                  moduleLabel="Days"
+                  onSubmitResult={handleAssessmentResult}
+                  questions={module6AssessmentQuestions}
+                />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m6-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE6_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Colors & Descriptions" questions={module7AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m7-assessment-1"
+                  moduleLabel="Colors & Descriptions"
+                  onSubmitResult={handleAssessmentResult}
+                  questions={module7AssessmentQuestions}
+                />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-2" ? (
-                <Module7ColorAssessmentTwo />
+                <Module7ColorAssessmentTwo onSubmitResult={handleAssessmentResult} />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-3" ? (
                 <GestureCameraAssessment
+                  assessmentId="m7-assessment-3"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE7_GESTURE_TARGETS}
                   title="Assessment 3"
                 />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Basic Conversations" questions={module8AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m8-assessment-1"
+                  moduleLabel="Basic Conversations"
+                  onSubmitResult={handleAssessmentResult}
+                  questions={module8AssessmentQuestions}
+                />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m8-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE8_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
@@ -2802,72 +2978,10 @@ export default function ModuleDetailPage() {
         </article>
       ) : null}
 
+      {assessmentReportMessage ? (
+        <p className="text-sm text-brandGreen">{assessmentReportMessage}</p>
+      ) : null}
       {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
     </section>
   );
 }
-
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = questions.length;
-    const right = score;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = questions
-      .filter((question) => selectedChoices[question.id] !== question.answer)
-      .map((question) => question.question);
-    onSubmitResult?.({
-      assessmentId: "m1-assessment-1",
-      assessmentTitle: "Assessment 1",
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas,
-    });
-    setReported(true);
-  }
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = MODULE1_LABELING_ITEMS.length;
-    const right = correctCount;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = MODULE1_LABELING_ITEMS.filter((item) => {
-      const value = answers[item.id]?.trim().toUpperCase() ?? "";
-      return value !== item.answer;
-    }).map((item) => `Hand sign item ${item.answer}`);
-    onSubmitResult?.({
-      assessmentId: "m1-assessment-2",
-      assessmentTitle: "Assessment 2",
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas,
-    });
-    setReported(true);
-  }
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = questions.length;
-    const right = score;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = questions
-      .filter((question) => selectedChoices[question.id] !== question.answer)
-      .map((question) => question.question);
-    onSubmitResult?.({
-      assessmentId,
-      assessmentTitle,
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas,
-    });
-    setReported(true);
-  }

@@ -47,6 +47,51 @@ export type TeacherInviteIssueCredentialsResponse = {
   username: string;
 };
 
+export type TeacherStudentReportRow = {
+  student_id: number;
+  student_name: string;
+  student_email?: string | null;
+  total_assessments: number;
+  pending_reports: number;
+  generated_reports: number;
+  average_score_percent: number;
+  latest_activity_at?: string | null;
+};
+
+export type TeacherStudentReportTableResponse = {
+  students: TeacherStudentReportRow[];
+};
+
+export type TeacherModuleSummary = {
+  module_id: number;
+  module_title: string;
+  assessments_taken: number;
+  right_count: number;
+  wrong_count: number;
+  total_items: number;
+  score_percent: number;
+};
+
+export type TeacherImprovementAreaItem = {
+  area: string;
+  count: number;
+};
+
+export type TeacherGeneratedStudentReport = {
+  student_id: number;
+  student_name: string;
+  student_email?: string | null;
+  generated_at: string;
+  total_assessments: number;
+  pending_reports_before_generate: number;
+  total_right: number;
+  total_wrong: number;
+  total_items: number;
+  overall_score_percent: number;
+  modules: TeacherModuleSummary[];
+  top_improvement_areas: TeacherImprovementAreaItem[];
+};
+
 export type RegistrationPayload = {
   first_name: string;
   middle_name?: string;
@@ -418,6 +463,7 @@ export function updateModuleProgress(
   moduleId: number,
   payload: {
     completed_lesson_id?: string;
+    assessment_id?: string;
     assessment_score?: number;
     assessment_right?: number;
     assessment_wrong?: number;
@@ -434,6 +480,21 @@ export function updateModuleProgress(
       method: "POST",
       body: JSON.stringify(payload)
     },
+    token
+  );
+}
+
+export function getTeacherReportStudents(token?: string): Promise<TeacherStudentReportTableResponse> {
+  return request<TeacherStudentReportTableResponse>("/teacher/reports/students", undefined, token);
+}
+
+export function generateTeacherStudentReport(
+  studentId: number,
+  token?: string
+): Promise<TeacherGeneratedStudentReport> {
+  return request<TeacherGeneratedStudentReport>(
+    `/teacher/reports/students/${studentId}/generate`,
+    { method: "POST" },
     token
   );
 }
