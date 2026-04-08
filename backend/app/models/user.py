@@ -21,6 +21,9 @@ class User(Base):
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     profile_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="student", server_default="student"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

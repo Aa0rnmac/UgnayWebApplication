@@ -4,7 +4,23 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { detectOpenPalmFromImage, getModules, ModuleItem, predictSignFromImage } from "@/lib/api";
+import {
+  detectOpenPalmFromImage,
+  getModules,
+  ModuleItem,
+  predictSignFromImage,
+  updateModuleProgress,
+} from "@/lib/api";
+
+type AssessmentReportPayload = {
+  assessmentId: string;
+  assessmentTitle: string;
+  right: number;
+  wrong: number;
+  total: number;
+  scorePercent: number;
+  improvementAreas: string[];
+};
 
 const MODULE1_AI_SIGN_IMAGES = [
   { letter: "A", src: "/module-assets/m1/ai/a.png" },
@@ -602,16 +618,20 @@ function LessonVideoCard({ src, title }: { src: string; title: string }) {
 }
 
 function Module1AssessmentOne({
-  questions
+  questions,
+  onSubmitResult
 }: {
   questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
+  const [reported, setReported] = useState(false);
 
   useEffect(() => {
     setSelectedChoices({});
     setShowResult(false);
+    setReported(false);
   }, [questions]);
 
   const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
@@ -672,7 +692,10 @@ function Module1AssessmentOne({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => setShowResult(true)}
+          onClick={() => {
+            setShowResult(true);
+            submitAssessmentResult();
+          }}
           type="button"
         >
           Check Answers
@@ -691,13 +714,19 @@ function Module1AssessmentOne({
   );
 }
 
-function Module1AssessmentTwo() {
+function Module1AssessmentTwo({
+  onSubmitResult
+}: {
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+}) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
+  const [reported, setReported] = useState(false);
 
   useEffect(() => {
     setAnswers({});
     setShowResult(false);
+    setReported(false);
   }, []);
 
   const correctCount = MODULE1_LABELING_ITEMS.reduce((total, item) => {
@@ -750,7 +779,10 @@ function Module1AssessmentTwo() {
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => setShowResult(true)}
+          onClick={() => {
+            setShowResult(true);
+            submitAssessmentResult();
+          }}
           type="button"
         >
           Check Answers
@@ -765,7 +797,11 @@ function Module1AssessmentTwo() {
   );
 }
 
-function Module1AssessmentThree() {
+function Module1AssessmentThree({
+  onSubmitResult
+}: {
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+}) {
   const ALPHABET_PALM_COOLDOWN_MS = 900;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -784,6 +820,7 @@ function Module1AssessmentThree() {
   const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
   const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
 
   const activeStep = MODULE1_SIGNING_CHALLENGE_STEPS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE1_SIGNING_CHALLENGE_STEPS.length;
@@ -965,6 +1002,28 @@ function Module1AssessmentThree() {
       setActiveStepIndex((index) =>
         Math.min(MODULE1_SIGNING_CHALLENGE_STEPS.length - 1, index + 1)
       );
+      return;
+    }
+
+    if (!reported) {
+      const total = MODULE1_SIGNING_CHALLENGE_STEPS.length;
+      const right = completedStepIds.includes(activeStep.id)
+        ? completedStepIds.length
+        : completedStepIds.length + 1;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = MODULE1_SIGNING_CHALLENGE_STEPS.filter(
+        (step) => !(step.id === activeStep.id || completedStepIds.includes(step.id))
+      ).map((step) => step.prompt);
+      onSubmitResult?.({
+        assessmentId: "m1-assessment-3",
+        assessmentTitle: "Assessment 3",
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas,
+      });
+      setReported(true);
     }
   }
 
@@ -1119,17 +1178,25 @@ function Module1AssessmentThree() {
 
 function Module2AssessmentOne({
   questions,
-  moduleLabel
+  moduleLabel,
+  assessmentId,
+  assessmentTitle = "Assessment 1",
+  onSubmitResult
 }: {
   questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
   moduleLabel: string;
+  assessmentId: string;
+  assessmentTitle?: string;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
+  const [reported, setReported] = useState(false);
 
   useEffect(() => {
     setSelectedChoices({});
     setShowResult(false);
+    setReported(false);
   }, [questions]);
 
   const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
@@ -1190,7 +1257,10 @@ function Module2AssessmentOne({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => setShowResult(true)}
+          onClick={() => {
+            setShowResult(true);
+            submitAssessmentResult();
+          }}
           type="button"
         >
           Check Answers
@@ -1210,15 +1280,19 @@ function Module2AssessmentOne({
 }
 
 function NumbersCameraAssessment({
+  assessmentId,
   title,
   intro,
   targets,
-  minimumRequired = targets.length
+  minimumRequired = targets.length,
+  onSubmitResult
 }: {
+  assessmentId: string;
   title: string;
   intro: string;
   targets: readonly { id: string; number: number }[];
   minimumRequired?: number;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1233,6 +1307,7 @@ function NumbersCameraAssessment({
   const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
   const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
 
   const activeStep = targets[activeStepIndex];
   const reachedMinimum = completedStepIds.length >= minimumRequired;
@@ -1350,6 +1425,24 @@ function NumbersCameraAssessment({
     }
     setError(null);
     setSubmitted(true);
+    if (!reported) {
+      const total = targets.length;
+      const right = completedStepIds.length;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = targets
+        .filter((step) => !completedStepIds.includes(step.id))
+        .map((step) => `Practice number ${step.number}`);
+      onSubmitResult?.({
+        assessmentId,
+        assessmentTitle: title,
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas,
+      });
+      setReported(true);
+    }
   }
 
   function clearCurrentInput() {
@@ -1510,15 +1603,19 @@ function NumbersCameraAssessment({
 }
 
 function GestureCameraAssessment({
+  assessmentId,
   title,
   intro,
   targets,
-  minimumRequired
+  minimumRequired,
+  onSubmitResult
 }: {
+  assessmentId: string;
   title: string;
   intro: string;
   targets: readonly { id: string; label: string }[];
   minimumRequired: number;
+  onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1533,6 +1630,7 @@ function GestureCameraAssessment({
   const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
   const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
   const activeStep = targets[activeStepIndex];
   const reachedMinimum = completedStepIds.length >= minimumRequired;
   const allDone = completedStepIds.length >= targets.length;
@@ -1648,6 +1746,24 @@ function GestureCameraAssessment({
     }
     setError(null);
     setSubmitted(true);
+    if (!reported) {
+      const total = targets.length;
+      const right = completedStepIds.length;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = targets
+        .filter((step) => !completedStepIds.includes(step.id))
+        .map((step) => `Practice gesture: ${step.label}`);
+      onSubmitResult?.({
+        assessmentId,
+        assessmentTitle: title,
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas,
+      });
+      setReported(true);
+    }
   }
 
   function clearCurrentInput() {
@@ -2691,3 +2807,67 @@ export default function ModuleDetailPage() {
   );
 }
 
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-1",
+      assessmentTitle: "Assessment 1",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = MODULE1_LABELING_ITEMS.length;
+    const right = correctCount;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = MODULE1_LABELING_ITEMS.filter((item) => {
+      const value = answers[item.id]?.trim().toUpperCase() ?? "";
+      return value !== item.answer;
+    }).map((item) => `Hand sign item ${item.answer}`);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-2",
+      assessmentTitle: "Assessment 2",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId,
+      assessmentTitle,
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }

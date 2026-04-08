@@ -19,10 +19,15 @@ class UserModuleProgress(Base):
     progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_lessons: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     assessment_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assessment_right_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assessment_wrong_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assessment_total_items: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assessment_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    improvement_areas: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    report_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
     user = relationship("User", back_populates="progress_entries")
     module = relationship("Module", back_populates="progress_entries")
-

@@ -660,6 +660,41 @@ def ensure_schema_updates() -> None:
         "must_change_password",
         "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
     )
+    _add_column_if_missing(
+        "users",
+        "role",
+        "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_right_count",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_right_count INTEGER",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_wrong_count",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_wrong_count INTEGER",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_total_items",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_total_items INTEGER",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_label",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_label VARCHAR(255)",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "improvement_areas",
+        "ALTER TABLE user_module_progress ADD COLUMN improvement_areas JSON NOT NULL DEFAULT '[]'",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "report_sent_at",
+        "ALTER TABLE user_module_progress ADD COLUMN report_sent_at TIMESTAMP",
+    )
 
     # Registration workflow columns for teacher validation.
     _add_column_if_missing(

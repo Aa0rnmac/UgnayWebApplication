@@ -4,3 +4,6 @@ demo@1234
 
 ugnaylearninghub@gmail.com
 ugnayugnay123123
+
+
+since theres assesment for the students there will be score for right or wrong in this way it will tally up in each module summarize it then give a report for that that will sending to the teacher for their reference to review example student 1 finish up the module 1 the system will tally its score the  right and wrong by doing that it will generate a report where student need to improves so the teacher can focus on that thing that the student need to keep up

@@ -161,6 +161,7 @@ def validate_registration(
         address=registration.address,
         email=normalized_email,
         phone_number=registration.phone_number,
+        role="student",
         must_change_password=True,
     )
     db.add(user)

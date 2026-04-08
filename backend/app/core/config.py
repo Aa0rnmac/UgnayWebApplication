@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     password_reset_otp_minutes: int = 10
     password_reset_max_attempts: int = 5
     teacher_validation_key: str = "teacher123"
+    teacher_invite_signing_secret: str = "change-me-teacher-invite-secret"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""

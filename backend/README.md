@@ -15,6 +15,8 @@
 4. Configure SMTP for forgot-password OTP email:
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
    - TLS/SSL flags: `SMTP_USE_TLS`, `SMTP_USE_SSL`
+5. Configure teacher invite signing:
+   - `TEACHER_INVITE_SIGNING_SECRET` (required for QR verification and onboarding tokens)
 
 ## Run
 ```bash
@@ -30,6 +32,9 @@ On startup, tables are created and 3 modules are seeded if empty.
 - `POST /api/auth/login`
 - `POST /api/auth/forgot-password/request`
 - `POST /api/auth/forgot-password/verify`
+- `POST /api/auth/teacher-invite/verify-qr`
+- `POST /api/auth/teacher-invite/verify-passkey`
+- `POST /api/auth/teacher-invite/issue-credentials`
 - `GET /api/auth/me`
 - `GET /api/modules`
 - `GET /api/modules/{module_id}`
@@ -49,6 +54,17 @@ On startup, tables are created and 3 modules are seeded if empty.
 ## Student Demo Mode
 - Student-facing endpoints (`/api/modules`, `/api/progress/summary`, `/api/lab/predict`) work without login.
 - When no bearer token is provided, backend uses/creates `student_demo` automatically.
+
+## Teacher QR + Passkey Invite Generation
+Generate reusable teacher onboarding invite assets (QR + passkey + printable files):
+```bash
+python scripts/generate_teacher_invite.py --label "Main Campus"
+```
+
+Outputs:
+- `backend/artifacts/teacher_invites/<invite_code>/invite_qr.png`
+- `backend/artifacts/teacher_invites/<invite_code>/printable_card.png`
+- `backend/artifacts/teacher_invites/<invite_code>/printable_card.pdf`
 
 ## Alphabet Dataset Check
 - Dataset folder is resolved from `DATASETS_ROOT`.

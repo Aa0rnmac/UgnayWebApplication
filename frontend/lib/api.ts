@@ -11,6 +11,7 @@ function getStoredToken(): string | undefined {
 export type ApiUser = {
   id: number;
   username: string;
+  role?: "student" | "teacher";
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
@@ -29,6 +30,21 @@ export type AuthResponse = {
 
 export type ForgotPasswordRequestResponse = {
   message: string;
+};
+
+export type TeacherInviteVerifyQrResponse = {
+  invite_code: string;
+  message: string;
+};
+
+export type TeacherInviteVerifyPasskeyResponse = {
+  onboarding_token: string;
+  message: string;
+};
+
+export type TeacherInviteIssueCredentialsResponse = {
+  message: string;
+  username: string;
 };
 
 export type RegistrationPayload = {
@@ -307,6 +323,33 @@ export function verifyForgotPasswordOtp(
   });
 }
 
+export function verifyTeacherInviteQr(qrPayload: string): Promise<TeacherInviteVerifyQrResponse> {
+  return request<TeacherInviteVerifyQrResponse>("/auth/teacher-invite/verify-qr", {
+    method: "POST",
+    body: JSON.stringify({ qr_payload: qrPayload })
+  });
+}
+
+export function verifyTeacherInvitePasskey(
+  inviteCode: string,
+  passkey: string
+): Promise<TeacherInviteVerifyPasskeyResponse> {
+  return request<TeacherInviteVerifyPasskeyResponse>("/auth/teacher-invite/verify-passkey", {
+    method: "POST",
+    body: JSON.stringify({ invite_code: inviteCode, passkey })
+  });
+}
+
+export function issueTeacherCredentials(
+  onboardingToken: string,
+  email: string
+): Promise<TeacherInviteIssueCredentialsResponse> {
+  return request<TeacherInviteIssueCredentialsResponse>("/auth/teacher-invite/issue-credentials", {
+    method: "POST",
+    body: JSON.stringify({ onboarding_token: onboardingToken, email })
+  });
+}
+
 export function getCurrentUser(token: string): Promise<ApiUser> {
   return request<ApiUser>("/auth/me", undefined, token);
 }
@@ -376,6 +419,11 @@ export function updateModuleProgress(
   payload: {
     completed_lesson_id?: string;
     assessment_score?: number;
+    assessment_right?: number;
+    assessment_wrong?: number;
+    assessment_total?: number;
+    assessment_title?: string;
+    improvement_areas?: string[];
     mark_completed?: boolean;
   },
   token?: string
