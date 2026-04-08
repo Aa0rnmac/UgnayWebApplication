@@ -12,6 +12,21 @@ from app.schemas.progress import ProgressUpdateRequest
 
 router = APIRouter(prefix="/modules", tags=["modules"])
 
+MODULE_ACTIVITY_TOTALS_BY_SLUG: dict[str, int] = {
+    "fsl-alphabets": 3,
+    "numbers": 5,
+    "common-words": 2,
+    "family-members": 2,
+    "people-description": 2,
+    "days": 2,
+    "colors-descriptions": 3,
+    "basic-conversations": 2,
+}
+
+
+def _module_total_activities(module: Module) -> int:
+    return max(1, MODULE_ACTIVITY_TOTALS_BY_SLUG.get(module.slug, len(module.assessments)))
+
 
 def _queue_assessment_report(
     db: Session,
@@ -135,6 +150,7 @@ def update_module_progress(
             status="in_progress",
             progress_percent=0,
             completed_lessons=[],
+            completed_assessments=[],
         )
         db.add(progress)
         db.flush()
@@ -144,9 +160,33 @@ def update_module_progress(
         completed_lessons.append(payload.completed_lesson_id)
     progress.completed_lessons = completed_lessons
 
-    total_lessons = max(1, len(module.lessons))
-    learned = min(len(completed_lessons), total_lessons)
-    progress.progress_percent = int((learned / total_lessons) * 100)
+    existing_assessment_rows = (
+        db.query(AssessmentReport.assessment_id)
+        .filter(
+            AssessmentReport.user_id == current_user.id,
+            AssessmentReport.module_id == module_id,
+        )
+        .distinct()
+        .all()
+    )
+    existing_assessment_ids = [
+        value.strip()
+        for (value,) in existing_assessment_rows
+        if isinstance(value, str) and value.strip()
+    ]
+
+    completed_assessments = list(progress.completed_assessments or [])
+    for recorded_id in existing_assessment_ids:
+        if recorded_id not in completed_assessments:
+            completed_assessments.append(recorded_id)
+    assessment_id = (payload.assessment_id or "").strip()
+    if assessment_id and assessment_id not in completed_assessments:
+        completed_assessments.append(assessment_id)
+    progress.completed_assessments = completed_assessments
+
+    total_activities = _module_total_activities(module)
+    completed_activities = min(len(completed_assessments), total_activities)
+    progress.progress_percent = int((completed_activities / total_activities) * 100)
 
     if payload.assessment_score is not None:
         progress.assessment_score = payload.assessment_score

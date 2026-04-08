@@ -687,6 +687,11 @@ def ensure_schema_updates() -> None:
     )
     _add_column_if_missing(
         "user_module_progress",
+        "completed_assessments",
+        "ALTER TABLE user_module_progress ADD COLUMN completed_assessments JSON NOT NULL DEFAULT '[]'",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
         "improvement_areas",
         "ALTER TABLE user_module_progress ADD COLUMN improvement_areas JSON NOT NULL DEFAULT '[]'",
     )

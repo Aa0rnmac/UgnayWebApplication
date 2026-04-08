@@ -22,6 +22,43 @@ type AssessmentReportPayload = {
   improvementAreas: string[];
 };
 
+function loadSessionValue<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) {
+      return fallback;
+    }
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function useSessionState<T>(key: string, initial: T) {
+  const initialRef = useRef(initial);
+  const [value, setValue] = useState<T>(() => loadSessionValue(key, initialRef.current));
+
+  useEffect(() => {
+    setValue(loadSessionValue(key, initialRef.current));
+  }, [key]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Ignore storage errors to keep UI functional.
+    }
+  }, [key, value]);
+
+  return [value, setValue] as const;
+}
+
 const MODULE1_AI_SIGN_IMAGES = [
   { letter: "A", src: "/module-assets/m1/ai/a.png" },
   { letter: "B", src: "/module-assets/m1/ai/b.png" },
@@ -624,15 +661,18 @@ function Module1AssessmentOne({
   questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
   onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
-  const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
-  const [showResult, setShowResult] = useState(false);
-  const [reported, setReported] = useState(false);
-
-  useEffect(() => {
-    setSelectedChoices({});
-    setShowResult(false);
-    setReported(false);
-  }, [questions]);
+  const [selectedChoices, setSelectedChoices] = useSessionState<Record<string, string>>(
+    "module-detail:m1-assessment-1:selectedChoices",
+    {}
+  );
+  const [showResult, setShowResult] = useSessionState<boolean>(
+    "module-detail:m1-assessment-1:showResult",
+    false
+  );
+  const [reported, setReported] = useSessionState<boolean>(
+    "module-detail:m1-assessment-1:reported",
+    false
+  );
 
   const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
   const score = questions.reduce((total, question) => {
@@ -741,15 +781,18 @@ function Module1AssessmentTwo({
 }: {
   onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [showResult, setShowResult] = useState(false);
-  const [reported, setReported] = useState(false);
-
-  useEffect(() => {
-    setAnswers({});
-    setShowResult(false);
-    setReported(false);
-  }, []);
+  const [answers, setAnswers] = useSessionState<Record<string, string>>(
+    "module-detail:m1-assessment-2:answers",
+    {}
+  );
+  const [showResult, setShowResult] = useSessionState<boolean>(
+    "module-detail:m1-assessment-2:showResult",
+    false
+  );
+  const [reported, setReported] = useSessionState<boolean>(
+    "module-detail:m1-assessment-2:reported",
+    false
+  );
 
   const correctCount = MODULE1_LABELING_ITEMS.reduce((total, item) => {
     const value = answers[item.id]?.trim().toUpperCase() ?? "";
@@ -1234,15 +1277,18 @@ function Module2AssessmentOne({
   assessmentTitle?: string;
   onSubmitResult?: (payload: AssessmentReportPayload) => void;
 }) {
-  const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
-  const [showResult, setShowResult] = useState(false);
-  const [reported, setReported] = useState(false);
-
-  useEffect(() => {
-    setSelectedChoices({});
-    setShowResult(false);
-    setReported(false);
-  }, [questions]);
+  const [selectedChoices, setSelectedChoices] = useSessionState<Record<string, string>>(
+    `module-detail:${assessmentId}:selectedChoices`,
+    {}
+  );
+  const [showResult, setShowResult] = useSessionState<boolean>(
+    `module-detail:${assessmentId}:showResult`,
+    false
+  );
+  const [reported, setReported] = useSessionState<boolean>(
+    `module-detail:${assessmentId}:reported`,
+    false
+  );
 
   const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
   const score = questions.reduce((total, question) => {
@@ -2314,14 +2360,27 @@ function Module7ColorAssessmentTwo({
 export default function ModuleDetailPage() {
   const params = useParams<{ moduleId: string }>();
   const moduleId = Number(params.moduleId);
+  const moduleScopeKey = `module-detail:${Number.isNaN(moduleId) ? "unknown" : moduleId}`;
 
   const [modules, setModules] = useState<ModuleItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"module" | "assessment">("module");
-  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
-  const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null);
-  const [isSelectionCollapsed, setIsSelectionCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useSessionState<"module" | "assessment">(
+    `${moduleScopeKey}:activeTab`,
+    "module"
+  );
+  const [selectedLessonId, setSelectedLessonId] = useSessionState<string | null>(
+    `${moduleScopeKey}:selectedLessonId`,
+    null
+  );
+  const [selectedAssessmentId, setSelectedAssessmentId] = useSessionState<string | null>(
+    `${moduleScopeKey}:selectedAssessmentId`,
+    null
+  );
+  const [isSelectionCollapsed, setIsSelectionCollapsed] = useSessionState<boolean>(
+    `${moduleScopeKey}:isSelectionCollapsed`,
+    false
+  );
   const [assessmentReportMessage, setAssessmentReportMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2350,10 +2409,38 @@ export default function ModuleDetailPage() {
       return;
     }
 
-    setActiveTab("module");
-    setSelectedLessonId(selected.lessons[0]?.id ?? null);
-    setSelectedAssessmentId(selected.assessments[0]?.id ?? null);
-  }, [selected]);
+    const lessonExists = selectedLessonId
+      ? selected.lessons.some((lesson) => lesson.id === selectedLessonId)
+      : false;
+    if (!lessonExists) {
+      setSelectedLessonId(selected.lessons[0]?.id ?? null);
+    }
+
+    const assessmentExists = selectedAssessmentId
+      ? selected.assessments.some((assessment) => assessment.id === selectedAssessmentId)
+      : false;
+    if (!assessmentExists) {
+      if (selected.slug === "fsl-alphabets") {
+        setSelectedAssessmentId("m1-assessment-1");
+      } else if (selected.slug === "numbers") {
+        setSelectedAssessmentId("m2-assessment-1");
+      } else if (selected.slug === "common-words") {
+        setSelectedAssessmentId("m3-assessment-1");
+      } else if (selected.slug === "family-members") {
+        setSelectedAssessmentId("m4-assessment-1");
+      } else if (selected.slug === "people-description") {
+        setSelectedAssessmentId("m5-assessment-1");
+      } else if (selected.slug === "days") {
+        setSelectedAssessmentId("m6-assessment-1");
+      } else if (selected.slug === "colors-descriptions") {
+        setSelectedAssessmentId("m7-assessment-1");
+      } else if (selected.slug === "basic-conversations") {
+        setSelectedAssessmentId("m8-assessment-1");
+      } else {
+        setSelectedAssessmentId(selected.assessments[0]?.id ?? null);
+      }
+    }
+  }, [selected, selectedLessonId, selectedAssessmentId, setSelectedLessonId, setSelectedAssessmentId]);
 
   const selectedLesson = useMemo(
     () => selected?.lessons.find((lesson) => lesson.id === selectedLessonId) ?? null,
