@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
+import threading
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,7 +49,7 @@ def warm_lab_models() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    warm_lab_models()
+    threading.Thread(target=warm_lab_models, name="lab-model-warmup", daemon=True).start()
     yield
 
 
