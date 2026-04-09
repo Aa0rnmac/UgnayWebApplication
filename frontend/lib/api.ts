@@ -482,6 +482,21 @@ export type TeacherModuleBreakdownRow = {
   incorrect_answers: number;
 };
 
+export type TeacherAllBreakdownRow = {
+  student_id: number;
+  student_name: string;
+  batch_id: number | null;
+  batch_name: string;
+  average_score_percent: number | null;
+  attempt_count: number;
+  latest_attempt_at: string | null;
+};
+
+export type TeacherAllBreakdown = {
+  mode: "all";
+  rows: TeacherAllBreakdownRow[];
+};
+
 export type TeacherBatchBreakdown = {
   mode: "batch";
   batch_id: number;
@@ -516,6 +531,7 @@ export type TeacherBatchModuleBreakdown = {
 };
 
 export type TeacherReportBreakdownResponse =
+  | TeacherAllBreakdown
   | TeacherBatchBreakdown
   | TeacherModuleBreakdown
   | TeacherBatchModuleBreakdown;

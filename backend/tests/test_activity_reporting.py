@@ -580,9 +580,39 @@ def test_activity_attempts_feed_teacher_review_and_summary(
         }
     ]
 
-    invalid_missing_filters_response = client.get(
+    all_breakdown_response = client.get(
         "/api/teacher/reports/breakdown",
         headers=teacher_headers,
     )
-    assert invalid_missing_filters_response.status_code == 422
-    assert invalid_missing_filters_response.json()["detail"] == "Select at least one of batch_id or module_id."
+    assert all_breakdown_response.status_code == 200
+    all_breakdown = all_breakdown_response.json()
+    assert all_breakdown["mode"] == "all"
+    assert all_breakdown["rows"] == [
+        {
+            "student_id": student_one.id,
+            "student_name": "Student T One",
+            "batch_id": approved_student_one["batch"]["id"],
+            "batch_name": approved_student_one["batch"]["name"],
+            "average_score_percent": 40.0,
+            "attempt_count": 3,
+            "latest_attempt_at": all_breakdown["rows"][0]["latest_attempt_at"],
+        },
+        {
+            "student_id": student_two.id,
+            "student_name": "Student T Two",
+            "batch_id": approved_student_two["batch"]["id"],
+            "batch_name": approved_student_two["batch"]["name"],
+            "average_score_percent": 80.0,
+            "attempt_count": 2,
+            "latest_attempt_at": all_breakdown["rows"][1]["latest_attempt_at"],
+        },
+        {
+            "student_id": approved_student_empty["student"]["id"],
+            "student_name": "Student T Empty",
+            "batch_id": approved_student_empty["batch"]["id"],
+            "batch_name": approved_student_empty["batch"]["name"],
+            "average_score_percent": None,
+            "attempt_count": 0,
+            "latest_attempt_at": None,
+        },
+    ]

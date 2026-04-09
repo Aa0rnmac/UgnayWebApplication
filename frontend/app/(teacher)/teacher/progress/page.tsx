@@ -290,14 +290,19 @@ function DetailDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-[220]">
       <button
         aria-label="Close details"
         className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]"
         onClick={onClose}
         type="button"
       />
-      <aside className="absolute inset-0 md:left-auto md:w-[560px]">
+      <aside
+        aria-label={title}
+        aria-modal="true"
+        className="absolute inset-0 md:left-auto md:w-[560px]"
+        role="dialog"
+      >
         <div className="flex h-full flex-col border-l border-black/10 bg-[#f7f4ef] shadow-2xl">
           <div className="flex items-start justify-between gap-4 border-b border-black/10 px-5 py-5">
             <div>
@@ -342,7 +347,6 @@ export default function TeacherProgressPage() {
   const moduleId = selectedModuleId ? Number(selectedModuleId) : null;
   const hasBatchFilter = batchId !== null;
   const hasModuleFilter = moduleId !== null;
-  const hasExactOneFilter = hasBatchFilter !== hasModuleFilter;
 
   const selectedBatchName =
     batches.find((batch) => batch.id === batchId)?.name ??
@@ -428,13 +432,6 @@ export default function TeacherProgressPage() {
   }, []);
 
   useEffect(() => {
-    if (!hasExactOneFilter) {
-      setBreakdown(null);
-      setBreakdownError(null);
-      setBreakdownLoading(false);
-      return;
-    }
-
     let isActive = true;
 
     void (async () => {
@@ -468,7 +465,7 @@ export default function TeacherProgressPage() {
     return () => {
       isActive = false;
     };
-  }, [batchId, hasExactOneFilter, moduleId, showArchivedBatches]);
+  }, [batchId, moduleId, showArchivedBatches]);
 
   useEffect(() => {
     if (!activePanel) {
@@ -494,7 +491,7 @@ export default function TeacherProgressPage() {
   const globalError = staticError ?? summaryError;
   const breakdownLabel =
     !hasBatchFilter && !hasModuleFilter
-      ? "Select at least one filter to view a detailed breakdown."
+      ? `Enrolled Batch: ${showArchivedBatches ? "All visible batches" : "All active batches"} | Live Module: All live modules`
       : hasBatchFilter && hasModuleFilter
         ? `Enrolled Batch: ${selectedBatchName ?? "Selected batch"} | Live Module: ${selectedModuleName ?? "Selected module"}`
         : hasBatchFilter
@@ -698,11 +695,11 @@ export default function TeacherProgressPage() {
                 </p>
                 <p className="teacher-card-meta mt-2 text-xs">{breakdownLabel}</p>
               </div>
-              {hasExactOneFilter && breakdown ? (
+              {breakdown ? (
                 <p className="teacher-card-meta text-xs">
-                  {breakdown.mode === "batch"
-                    ? `${breakdown.rows.length} student row(s)`
-                    : `${breakdown.rows.length} batch row(s)`}
+                  {breakdown.mode === "module"
+                    ? `${breakdown.rows.length} batch row(s)`
+                    : `${breakdown.rows.length} student row(s)`}
                 </p>
               ) : null}
             </div>
@@ -714,10 +711,63 @@ export default function TeacherProgressPage() {
             <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-5 text-sm text-red-700">
               Error: {breakdownError}
             </div>
-          ) : !hasBatchFilter && !hasModuleFilter ? (
-            <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-              Select at least one filter to view a detailed breakdown.
-            </div>
+          ) : breakdown?.mode === "all" ? (
+            breakdown.rows.length ? (
+              <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/10">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-black/10">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-brandBlue">
+                          Student Name
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-accentWarm">
+                          Enrolled Batch
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.24em] text-brandGreen">
+                          Average Score
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
+                          Attempts
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-brandBlue">
+                          Latest Attempt
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10">
+                      {breakdown.rows.map((row) => (
+                        <tr key={row.student_id}>
+                          <td className="px-4 py-3">
+                            <p className="teacher-card-title font-semibold">{row.student_name}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="teacher-card-copy">{row.batch_name}</p>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <p className="teacher-card-title font-semibold">
+                              {formatPercent(row.average_score_percent, 2)}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <p className="teacher-card-copy">{row.attempt_count}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="teacher-card-copy">
+                              {formatDateTime(row.latest_attempt_at)}
+                            </p>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                No active students are available for the current table view yet.
+              </div>
+            )
           ) : breakdown?.mode === "batch" ? (
             breakdown.rows.length ? (
               <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/10">
@@ -905,7 +955,7 @@ export default function TeacherProgressPage() {
             )
           ) : (
             <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-              Select at least one filter to view a detailed breakdown.
+              No breakdown data is available for the current filters.
             </div>
           )}
         </div>

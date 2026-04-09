@@ -16,6 +16,8 @@ from app.models.user import User
 from app.schemas.teacher_report import (
     TeacherActivityAttemptItemOut,
     TeacherActivityAttemptOut,
+    TeacherAllBreakdownResponse,
+    TeacherAllBreakdownRowOut,
     TeacherAssessmentReportOut,
     TeacherAssessmentReportsResponse,
     TeacherAttentionStudentOut,
@@ -431,9 +433,55 @@ def get_teacher_report_breakdown(
     _: User = Depends(get_current_teacher),
 ) -> TeacherReportBreakdownResponse:
     if batch_id is None and module_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Select at least one of batch_id or module_id.",
+        enrollment_by_user = _approved_enrollments_by_user(
+            db,
+            include_archived_batches=include_archived_batches,
+        )
+        attempts = _filtered_attempts(
+            db,
+            include_archived_batches=include_archived_batches,
+        )
+        attempts_by_student: dict[int, list[ActivityAttempt]] = defaultdict(list)
+        for attempt in attempts:
+            attempts_by_student[attempt.user_id].append(attempt)
+
+        rows: list[TeacherAllBreakdownRowOut] = []
+        for student_id, enrollment in enrollment_by_user.items():
+            student_attempts = attempts_by_student.get(student_id, [])
+            latest_attempt = (
+                max(student_attempts, key=lambda item: (item.submitted_at, item.id))
+                if student_attempts
+                else None
+            )
+            rows.append(
+                TeacherAllBreakdownRowOut(
+                    student_id=student_id,
+                    student_name=_display_name(enrollment.user),
+                    batch_id=enrollment.batch_id,
+                    batch_name=enrollment.batch.name if enrollment.batch else "Unassigned batch",
+                    average_score_percent=(
+                        round(mean(attempt.score_percent for attempt in student_attempts), 2)
+                        if student_attempts
+                        else None
+                    ),
+                    attempt_count=len(student_attempts),
+                    latest_attempt_at=latest_attempt.submitted_at if latest_attempt else None,
+                )
+            )
+
+        rows.sort(
+            key=lambda item: (
+                item.attempt_count == 0,
+                item.average_score_percent if item.average_score_percent is not None else float("inf"),
+                -(item.latest_attempt_at.timestamp() if item.latest_attempt_at else 0),
+                item.student_name.lower(),
+                item.student_id,
+            )
+        )
+
+        return TeacherAllBreakdownResponse(
+            mode="all",
+            rows=rows,
         )
 
     enrollment_by_user = _approved_enrollments_by_user(db)

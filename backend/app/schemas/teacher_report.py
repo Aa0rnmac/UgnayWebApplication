@@ -177,6 +177,16 @@ class TeacherModuleBreakdownRowOut(BaseModel):
     incorrect_answers: int
 
 
+class TeacherAllBreakdownRowOut(BaseModel):
+    student_id: int
+    student_name: str
+    batch_id: int | None = None
+    batch_name: str
+    average_score_percent: float | None = None
+    attempt_count: int
+    latest_attempt_at: datetime | None = None
+
+
 class TeacherBatchBreakdownResponse(BaseModel):
     mode: Literal["batch"]
     batch_id: int
@@ -210,6 +220,14 @@ class TeacherBatchModuleBreakdownResponse(BaseModel):
     rows: list[TeacherBatchModuleBreakdownRowOut] = Field(default_factory=list)
 
 
+class TeacherAllBreakdownResponse(BaseModel):
+    mode: Literal["all"]
+    rows: list[TeacherAllBreakdownRowOut] = Field(default_factory=list)
+
+
 TeacherReportBreakdownResponse = (
-    TeacherBatchBreakdownResponse | TeacherModuleBreakdownResponse | TeacherBatchModuleBreakdownResponse
+    TeacherAllBreakdownResponse
+    | TeacherBatchBreakdownResponse
+    | TeacherModuleBreakdownResponse
+    | TeacherBatchModuleBreakdownResponse
 )
