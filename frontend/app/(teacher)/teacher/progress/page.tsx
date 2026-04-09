@@ -110,8 +110,7 @@ export default function TeacherProgressPage() {
           Spot weak items, attention students, and concern attempts from saved activity data.
         </h2>
         <p className="teacher-panel-copy mt-3 max-w-3xl text-sm leading-relaxed">
-          This view is now driven by the new teacher summary backend. Filter by batch or module to
-          see which activity items need review and which students may need extra teaching support.
+          Filter by batch or module to see which activity items need review and which students may need extra teaching support.
         </p>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
