@@ -1,8 +1,8 @@
 """split enrollment rejection reason from internal notes
 
-Revision ID: 20260409_0003
-Revises: 20260409_0002
-Create Date: 2026-04-09 20:45:00.000000
+Revision ID: 20260410_0004
+Revises: 20260409_0003
+Create Date: 2026-04-10 09:30:00.000000
 
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "20260409_0003"
-down_revision = "20260409_0002"
+revision = "20260410_0004"
+down_revision = "20260409_0003"
 branch_labels = None
 depends_on = None
 
