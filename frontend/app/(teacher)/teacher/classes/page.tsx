@@ -852,6 +852,14 @@ export default function TeacherClassesPage() {
                       Applicant details: {enrollment.rejection_reason_detail.trim()}
                     </p>
                   ) : null}
+                  <button
+                    className="teacher-card-ghost-button mt-4 rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:opacity-60"
+                    disabled={proofId === enrollment.id}
+                    onClick={() => void handleViewProof(enrollment.id)}
+                    type="button"
+                  >
+                    {proofId === enrollment.id ? "Opening..." : "View Proof"}
+                  </button>
                 </article>
               ))
             ) : (
