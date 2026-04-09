@@ -20,7 +20,10 @@ from app.models.teacher_invite import TeacherInvite
 from app.models.user import User
 from app.schemas.auth import (
     AuthResponse,
+    ForgotPasswordConfirmOtpRequest,
+    ForgotPasswordConfirmOtpResponse,
     ForgotPasswordRequest,
+    ForgotPasswordResetRequest,
     ForgotPasswordVerifyRequest,
     PasswordChangeRequest,
     TeacherInviteIssueCredentialsRequest,
@@ -83,6 +86,18 @@ def find_user_by_identity(db: Session, identity: str) -> User | None:
     return (
         db.query(User)
         .filter(User.email == trimmed.lower(), User.archived_at.is_(None))
+        .first()
+    )
+
+
+def _get_active_password_reset_otp(db: Session, user_id: int) -> PasswordResetOtp | None:
+    return (
+        db.query(PasswordResetOtp)
+        .filter(
+            PasswordResetOtp.user_id == user_id,
+            PasswordResetOtp.consumed_at.is_(None),
+        )
+        .order_by(PasswordResetOtp.created_at.desc())
         .first()
     )
 
@@ -341,6 +356,106 @@ def request_password_reset_otp(
     return {"message": "OTP sent. Check your email inbox for the reset code."}
 
 
+@router.post("/forgot-password/confirm-otp", response_model=ForgotPasswordConfirmOtpResponse)
+def confirm_password_reset_otp(
+    payload: ForgotPasswordConfirmOtpRequest, db: Session = Depends(get_db)
+) -> ForgotPasswordConfirmOtpResponse:
+    user = find_user_by_identity(db, payload.username_or_email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP request.")
+
+    now = utc_now()
+    otp_record = _get_active_password_reset_otp(db, user.id)
+    if not otp_record or (as_utc(otp_record.expires_at) and as_utc(otp_record.expires_at) < now):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OTP is missing or expired. Request a new code.",
+        )
+
+    if otp_record.attempt_count >= settings.password_reset_max_attempts:
+        otp_record.consumed_at = now
+        db.add(otp_record)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="OTP attempts exceeded. Please request a new code.",
+        )
+
+    if not verify_password(payload.otp_code, otp_record.otp_hash):
+        otp_record.attempt_count += 1
+        if otp_record.attempt_count >= settings.password_reset_max_attempts:
+            otp_record.consumed_at = now
+        db.add(otp_record)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP code.")
+
+    reset_token = secrets.token_urlsafe(32)
+    otp_record.verified_at = now
+    otp_record.reset_token_hash = hash_password(reset_token)
+    db.add(otp_record)
+    db.commit()
+
+    return ForgotPasswordConfirmOtpResponse(
+        message="OTP verified. You can now set a new password.",
+        reset_token=reset_token,
+    )
+
+
+@router.post("/forgot-password/reset", response_model=AuthResponse)
+def reset_password_with_verified_otp(
+    payload: ForgotPasswordResetRequest, db: Session = Depends(get_db)
+) -> AuthResponse:
+    now = utc_now()
+    candidates = (
+        db.query(PasswordResetOtp)
+        .filter(
+            PasswordResetOtp.verified_at.is_not(None),
+            PasswordResetOtp.reset_token_hash.is_not(None),
+            PasswordResetOtp.consumed_at.is_(None),
+        )
+        .order_by(PasswordResetOtp.verified_at.desc(), PasswordResetOtp.id.desc())
+        .all()
+    )
+
+    otp_record = next(
+        (
+            record
+            for record in candidates
+            if record.reset_token_hash and verify_password(payload.reset_token, record.reset_token_hash)
+        ),
+        None,
+    )
+    if not otp_record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password reset session is invalid or expired. Verify OTP again.",
+        )
+
+    if as_utc(otp_record.expires_at) and as_utc(otp_record.expires_at) < now:
+        otp_record.consumed_at = now
+        db.add(otp_record)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password reset session is expired. Request a new OTP code.",
+        )
+
+    user = db.query(User).filter(User.id == otp_record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP request.")
+
+    otp_record.consumed_at = now
+    user.password_hash = hash_password(payload.new_password)
+    user.must_change_password = False
+    db.add(otp_record)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_user_session(db, user.id)
+    return AuthResponse(token=token, user=UserOut.model_validate(user))
+
+
 @router.post("/forgot-password/verify", response_model=AuthResponse)
 def verify_password_reset_otp(
     payload: ForgotPasswordVerifyRequest, db: Session = Depends(get_db)
@@ -350,15 +465,7 @@ def verify_password_reset_otp(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP request.")
 
     now = utc_now()
-    otp_record = (
-        db.query(PasswordResetOtp)
-        .filter(
-            PasswordResetOtp.user_id == user.id,
-            PasswordResetOtp.consumed_at.is_(None),
-        )
-        .order_by(PasswordResetOtp.created_at.desc())
-        .first()
-    )
+    otp_record = _get_active_password_reset_otp(db, user.id)
     if not otp_record or (as_utc(otp_record.expires_at) and as_utc(otp_record.expires_at) < now):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

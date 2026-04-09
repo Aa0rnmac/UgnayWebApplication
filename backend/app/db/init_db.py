@@ -1402,6 +1402,16 @@ def ensure_schema_updates() -> None:
         "archived_at",
         "ALTER TABLE users ADD COLUMN archived_at TIMESTAMP",
     )
+    _add_column_if_missing(
+        "password_reset_otps",
+        "verified_at",
+        "ALTER TABLE password_reset_otps ADD COLUMN verified_at TIMESTAMP",
+    )
+    _add_column_if_missing(
+        "password_reset_otps",
+        "reset_token_hash",
+        "ALTER TABLE password_reset_otps ADD COLUMN reset_token_hash VARCHAR(255)",
+    )
     _create_table_if_missing(
         "archived_student_accounts",
         """

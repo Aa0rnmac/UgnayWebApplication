@@ -54,6 +54,8 @@ export default function ProfilePage() {
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const profileImageUrl = useMemo(() => {
     if (!user?.profile_image_path) {
@@ -179,6 +181,8 @@ export default function ProfilePage() {
       const response = await changeMyPassword(currentPassword, newPassword);
       setCurrentPassword("");
       setNewPassword("");
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
       setPasswordMessage(response.message);
       setUser((prev) => (prev ? { ...prev, must_change_password: false } : prev));
       setShowPasswordDialog(false);
@@ -463,28 +467,46 @@ export default function ProfilePage() {
             <div className="mt-4 grid gap-3">
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Current Password
-                <input
-                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                  onChange={(event) => setCurrentPassword(event.target.value)}
-                  required
-                  type="password"
-                  value={currentPassword}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) => setCurrentPassword(event.target.value)}
+                    required
+                    type={showCurrentPassword ? "text" : "password"}
+                    value={currentPassword}
+                  />
+                  <button
+                    className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                    onClick={() => setShowCurrentPassword((value) => !value)}
+                    type="button"
+                  >
+                    {showCurrentPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
               </label>
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 New Password
-                <input
-                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                  autoComplete="new-password"
-                  minLength={8}
-                  onChange={(event) => {
-                    setNewPassword(event.target.value);
-                    setError(null);
-                  }}
-                  required
-                  type="password"
-                  value={newPassword}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    autoComplete="new-password"
+                    minLength={8}
+                    onChange={(event) => {
+                      setNewPassword(event.target.value);
+                      setError(null);
+                    }}
+                    required
+                    type={showNewPassword ? "text" : "password"}
+                    value={newPassword}
+                  />
+                  <button
+                    className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                    onClick={() => setShowNewPassword((value) => !value)}
+                    type="button"
+                  >
+                    {showNewPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
                 <p className="text-xs text-muted">
                   At least 8 chars, 1 uppercase, 1 number, and 1 symbol.
                 </p>
@@ -498,6 +520,8 @@ export default function ProfilePage() {
                   setShowPasswordDialog(false);
                   setCurrentPassword("");
                   setNewPassword("");
+                  setShowCurrentPassword(false);
+                  setShowNewPassword(false);
                 }}
                 type="button"
               >

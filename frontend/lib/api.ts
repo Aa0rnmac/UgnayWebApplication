@@ -80,6 +80,11 @@ export type ForgotPasswordRequestResponse = {
   message: string;
 };
 
+export type ForgotPasswordConfirmOtpResponse = {
+  message: string;
+  reset_token: string;
+};
+
 export type TeacherInviteVerifyQrResponse = {
   invite_code: string;
   label: string | null;
@@ -779,6 +784,32 @@ export function changeMyPassword(
     method: "POST",
     body: JSON.stringify({
       current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
+export function confirmForgotPasswordOtp(
+  usernameOrEmail: string,
+  otpCode: string
+): Promise<ForgotPasswordConfirmOtpResponse> {
+  return request<ForgotPasswordConfirmOtpResponse>("/auth/forgot-password/confirm-otp", {
+    method: "POST",
+    body: JSON.stringify({
+      username_or_email: usernameOrEmail,
+      otp_code: otpCode,
+    }),
+  });
+}
+
+export function resetForgotPassword(
+  resetToken: string,
+  newPassword: string
+): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/forgot-password/reset", {
+    method: "POST",
+    body: JSON.stringify({
+      reset_token: resetToken,
       new_password: newPassword,
     }),
   });

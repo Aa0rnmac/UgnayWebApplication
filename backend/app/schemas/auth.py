@@ -144,6 +144,54 @@ class ForgotPasswordVerifyRequest(BaseModel):
         return value
 
 
+class ForgotPasswordConfirmOtpRequest(BaseModel):
+    username_or_email: str = Field(min_length=1, max_length=255)
+    otp_code: str = Field(min_length=6, max_length=6)
+
+    @field_validator("username_or_email")
+    @classmethod
+    def validate_identity(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Username or email is required.")
+        return trimmed
+
+    @field_validator("otp_code")
+    @classmethod
+    def validate_otp_code(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not re.fullmatch(r"\d{6}", trimmed):
+            raise ValueError("OTP code must be a 6-digit number.")
+        return trimmed
+
+
+class ForgotPasswordConfirmOtpResponse(BaseModel):
+    message: str
+    reset_token: str
+
+
+class ForgotPasswordResetRequest(BaseModel):
+    reset_token: str = Field(min_length=1, max_length=255)
+    new_password: str = Field(min_length=8, max_length=120)
+
+    @field_validator("reset_token")
+    @classmethod
+    def validate_reset_token(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Reset token is required.")
+        return trimmed
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if not PASSWORD_PATTERN.match(value):
+            raise ValueError(
+                "New password must be at least 8 characters and include 1 uppercase letter, 1 number, and 1 symbol."
+            )
+        return value
+
+
 class AuthResponse(BaseModel):
     token: str
     user: UserOut

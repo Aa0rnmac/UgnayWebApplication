@@ -5,20 +5,23 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
+  confirmForgotPasswordOtp,
   issueTeacherCredentials,
   login,
+  resetForgotPassword,
   requestForgotPasswordOtp,
-  verifyForgotPasswordOtp,
   verifyTeacherInvitePasskey,
   verifyTeacherInviteQr,
 } from "@/lib/api";
 import { isStrongPassword } from "@/lib/validation";
 
 type TeacherStep = "scan" | "passkey" | "email" | "done";
+type ForgotPasswordStep = "request" | "otp" | "reset";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +30,10 @@ export default function LoginPage() {
   const [otpCode, setOtpCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [otpRequested, setOtpRequested] = useState(false);
+  const [forgotStep, setForgotStep] = useState<ForgotPasswordStep>("request");
+  const [forgotResetToken, setForgotResetToken] = useState("");
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotMessage, setForgotMessage] = useState<string | null>(null);
@@ -41,6 +47,7 @@ export default function LoginPage() {
   const [qrCaptureScanning, setQrCaptureScanning] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [passkey, setPasskey] = useState("");
+  const [showTeacherPasskey, setShowTeacherPasskey] = useState(false);
   const [onboardingToken, setOnboardingToken] = useState("");
   const [teacherEmail, setTeacherEmail] = useState("");
   const [issuedUsername, setIssuedUsername] = useState("");
@@ -73,6 +80,7 @@ export default function LoginPage() {
     setQrCaptureScanning(false);
     setInviteCode("");
     setPasskey("");
+    setShowTeacherPasskey(false);
     setOnboardingToken("");
     setTeacherEmail("");
     setIssuedUsername("");
@@ -209,7 +217,7 @@ export default function LoginPage() {
 
     try {
       const response = await requestForgotPasswordOtp(forgotIdentity.trim());
-      setOtpRequested(true);
+      setForgotStep("otp");
       setForgotMessage(response.message);
     } catch (requestError) {
       const message =
@@ -220,7 +228,7 @@ export default function LoginPage() {
     }
   }
 
-  async function onVerifyOtpAndReset(event: FormEvent<HTMLFormElement>) {
+  async function onConfirmOtp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setForgotSubmitting(true);
     setForgotError(null);
@@ -231,6 +239,26 @@ export default function LoginPage() {
       setForgotError("OTP code must be exactly 6 digits.");
       return;
     }
+
+    try {
+      const response = await confirmForgotPasswordOtp(forgotIdentity.trim(), otpCode.trim());
+      setForgotResetToken(response.reset_token);
+      setForgotStep("reset");
+      setForgotMessage(response.message);
+    } catch (verifyError) {
+      const message =
+        verifyError instanceof Error ? verifyError.message : "Failed to verify OTP code.";
+      setForgotError(message);
+    } finally {
+      setForgotSubmitting(false);
+    }
+  }
+
+  async function onResetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setForgotSubmitting(true);
+    setForgotError(null);
+    setForgotMessage(null);
 
     if (!isStrongPassword(newPassword)) {
       setForgotSubmitting(false);
@@ -247,21 +275,30 @@ export default function LoginPage() {
     }
 
     try {
-      const response = await verifyForgotPasswordOtp(
-        forgotIdentity.trim(),
-        otpCode.trim(),
-        newPassword
-      );
+      const response = await resetForgotPassword(forgotResetToken, newPassword);
       window.localStorage.setItem("auth_token", response.token);
       window.localStorage.setItem("auth_username", response.user.username);
       window.location.href = response.user.role === "teacher" ? "/teacher" : "/dashboard";
     } catch (verifyError) {
       const message =
-        verifyError instanceof Error ? verifyError.message : "Failed to verify OTP code.";
+        verifyError instanceof Error ? verifyError.message : "Failed to reset password.";
       setForgotError(message);
     } finally {
       setForgotSubmitting(false);
     }
+  }
+
+  function resetForgotPasswordFlow() {
+    setForgotStep("request");
+    setForgotIdentity("");
+    setOtpCode("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setForgotResetToken("");
+    setShowForgotNewPassword(false);
+    setShowForgotConfirmPassword(false);
+    setForgotError(null);
+    setForgotMessage(null);
   }
 
   async function onTeacherPasskeySubmit(event: FormEvent<HTMLFormElement>) {
@@ -321,13 +358,22 @@ export default function LoginPage() {
 
         <label className="block text-sm font-semibold text-slate-800">
           Password
-          <input
-            className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            type="password"
-            value={password}
-          />
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type={showLoginPassword ? "text" : "password"}
+              value={password}
+            />
+            <button
+              className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+              onClick={() => setShowLoginPassword((value) => !value)}
+              type="button"
+            >
+              {showLoginPassword ? "Hide" : "Show"}
+            </button>
+          </div>
         </label>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -350,8 +396,12 @@ export default function LoginPage() {
             className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
             onClick={() => {
               setForgotOpen((open) => !open);
-              setForgotError(null);
-              setForgotMessage(null);
+              if (forgotOpen) {
+                resetForgotPasswordFlow();
+              } else {
+                setForgotError(null);
+                setForgotMessage(null);
+              }
             }}
             type="button"
           >
@@ -374,15 +424,29 @@ export default function LoginPage() {
         <div className="panel panel-lively space-y-4">
           <h3 className="text-xl font-semibold text-slate-900">Forgot Password</h3>
           <p className="text-sm text-slate-700">
-            Enter your username or email to receive a 6-digit OTP code. After verification, your
-            password will be reset and you will be logged in automatically.
+            Enter your username or email to receive a 6-digit OTP code. Verify the OTP first, then
+            create your new password.
           </p>
 
-          <form className="space-y-3" onSubmit={otpRequested ? onVerifyOtpAndReset : onRequestOtp}>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandBlue">
+            Step {forgotStep === "request" ? "1" : forgotStep === "otp" ? "2" : "3"} of 3
+          </p>
+
+          <form
+            className="space-y-3"
+            onSubmit={
+              forgotStep === "request"
+                ? onRequestOtp
+                : forgotStep === "otp"
+                  ? onConfirmOtp
+                  : onResetPassword
+            }
+          >
             <label className="block text-sm font-semibold text-slate-800">
               Username or Email
               <input
                 className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                disabled={forgotStep !== "request"}
                 onChange={(event) => setForgotIdentity(event.target.value)}
                 required
                 type="text"
@@ -390,41 +454,61 @@ export default function LoginPage() {
               />
             </label>
 
-            {otpRequested ? (
+            {forgotStep === "otp" ? (
+              <label className="block text-sm font-semibold text-slate-800">
+                OTP Code
+                <input
+                  className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                  inputMode="numeric"
+                  maxLength={6}
+                  onChange={(event) => setOtpCode(event.target.value)}
+                  required
+                  type="text"
+                  value={otpCode}
+                />
+              </label>
+            ) : null}
+
+            {forgotStep === "reset" ? (
               <>
                 <label className="block text-sm font-semibold text-slate-800">
-                  OTP Code
-                  <input
-                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                    inputMode="numeric"
-                    maxLength={6}
-                    onChange={(event) => setOtpCode(event.target.value)}
-                    required
-                    type="text"
-                    value={otpCode}
-                  />
-                </label>
-
-                <label className="block text-sm font-semibold text-slate-800">
                   New Password
-                  <input
-                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                    onChange={(event) => setNewPassword(event.target.value)}
-                    required
-                    type="password"
-                    value={newPassword}
-                  />
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                      onChange={(event) => setNewPassword(event.target.value)}
+                      required
+                      type={showForgotNewPassword ? "text" : "password"}
+                      value={newPassword}
+                    />
+                    <button
+                      className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                      onClick={() => setShowForgotNewPassword((value) => !value)}
+                      type="button"
+                    >
+                      {showForgotNewPassword ? "Hide" : "Show"}
+                    </button>
+                  </div>
                 </label>
 
                 <label className="block text-sm font-semibold text-slate-800">
                   Confirm New Password
-                  <input
-                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    required
-                    type="password"
-                    value={confirmPassword}
-                  />
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      required
+                      type={showForgotConfirmPassword ? "text" : "password"}
+                      value={confirmPassword}
+                    />
+                    <button
+                      className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                      onClick={() => setShowForgotConfirmPassword((value) => !value)}
+                      type="button"
+                    >
+                      {showForgotConfirmPassword ? "Hide" : "Show"}
+                    </button>
+                  </div>
                 </label>
               </>
             ) : null}
@@ -436,23 +520,34 @@ export default function LoginPage() {
                 type="submit"
               >
                 {forgotSubmitting
-                  ? otpRequested
-                    ? "Verifying..."
-                    : "Sending OTP..."
-                  : otpRequested
-                    ? "Verify OTP and Continue"
-                    : "Send OTP Code"}
+                  ? forgotStep === "request"
+                    ? "Sending OTP..."
+                    : forgotStep === "otp"
+                      ? "Verifying OTP..."
+                      : "Resetting Password..."
+                  : forgotStep === "request"
+                    ? "Send OTP Code"
+                    : forgotStep === "otp"
+                      ? "Verify OTP"
+                      : "Reset Password and Continue"}
               </button>
 
-              {otpRequested ? (
+              {forgotStep !== "request" ? (
                 <button
                   className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
                   disabled={forgotSubmitting}
                   onClick={() => {
-                    setOtpRequested(false);
-                    setOtpCode("");
-                    setNewPassword("");
-                    setConfirmPassword("");
+                    if (forgotStep === "reset") {
+                      setForgotStep("otp");
+                      setForgotResetToken("");
+                      setNewPassword("");
+                      setConfirmPassword("");
+                      setShowForgotNewPassword(false);
+                      setShowForgotConfirmPassword(false);
+                    } else {
+                      setForgotStep("request");
+                      setOtpCode("");
+                    }
                     setForgotError(null);
                     setForgotMessage(null);
                   }}
@@ -555,13 +650,22 @@ export default function LoginPage() {
               <form className="mt-4 space-y-3" onSubmit={onTeacherPasskeySubmit}>
                 <label className="block text-sm font-semibold text-slate-800">
                   Passkey
-                  <input
-                    className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                    onChange={(event) => setPasskey(event.target.value)}
-                    required
-                    type="password"
-                    value={passkey}
-                  />
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                      onChange={(event) => setPasskey(event.target.value)}
+                      required
+                      type={showTeacherPasskey ? "text" : "password"}
+                      value={passkey}
+                    />
+                    <button
+                      className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                      onClick={() => setShowTeacherPasskey((value) => !value)}
+                      type="button"
+                    >
+                      {showTeacherPasskey ? "Hide" : "Show"}
+                    </button>
+                  </div>
                 </label>
 
                 <div className="flex flex-wrap gap-2">
