@@ -4,7 +4,11 @@ import Link from "next/link";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
 import { submitRegistration } from "@/lib/api";
-import { isValidEmail, isValidPhilippinePhone } from "@/lib/validation";
+import {
+  isValidEmail,
+  isValidPhilippinePhone,
+  normalizePhilippinePhone
+} from "@/lib/validation";
 
 type FormState = {
   firstName: string;
@@ -14,7 +18,6 @@ type FormState = {
   address: string;
   email: string;
   phoneNumber: string;
-  requestedBatchName: string;
   referenceNumber: string;
   referenceImage: File | null;
 };
@@ -27,7 +30,6 @@ const INITIAL_FORM: FormState = {
   address: "",
   email: "",
   phoneNumber: "",
-  requestedBatchName: "",
   referenceNumber: "",
   referenceImage: null
 };
@@ -66,7 +68,7 @@ export default function RegisterPage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const email = form.email.trim();
-    const phone = form.phoneNumber.trim();
+    const phone = normalizePhilippinePhone(form.phoneNumber);
 
     if (!isValidEmail(email)) {
       setError(
@@ -75,7 +77,7 @@ export default function RegisterPage() {
       return;
     }
     if (!isValidPhilippinePhone(phone)) {
-      setError("Phone number must be exactly 11 digits (example: 09XXXXXXXXX).");
+      setError("Phone number must start with 09 and contain exactly 11 digits (example: 09123456789).");
       return;
     }
     if (!form.referenceImage) {
@@ -98,11 +100,12 @@ export default function RegisterPage() {
         email,
         phone_number: phone,
         reference_number: form.referenceNumber.trim(),
-        requested_batch_name: form.requestedBatchName.trim() || undefined,
         reference_image: referenceImage
       });
 
-      setSuccess(`${response.message} Reference #${response.registration.reference_number}`);
+      setSuccess(
+        `${response.message}\nReference #${response.registration.reference_number}\nStatus: pending teacher review`
+      );
       setForm(INITIAL_FORM);
       setFileInputKey((value) => value + 1);
     } catch (submitError) {
@@ -120,7 +123,8 @@ export default function RegisterPage() {
         <h2 className="text-2xl font-semibold title-gradient">Student Registration</h2>
         <p className="mt-2 text-sm text-muted">
           Fill in your personal information, contact details, and reference number. All fields are
-          required except middle name, and payment reference image upload is required.
+          required except middle name, and payment reference image upload is required. A teacher
+          will review and validate the registration before login credentials are issued.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Link
@@ -128,12 +132,6 @@ export default function RegisterPage() {
             href="/"
           >
             Back to Login
-          </Link>
-          <Link
-            className="inline-flex rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/register/teacher"
-          >
-            Teacher Registration
           </Link>
         </div>
       </div>
@@ -186,14 +184,17 @@ export default function RegisterPage() {
             Phone Number
             <input
               className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              onChange={(event) => updateField("phoneNumber", event.target.value)}
-              pattern="^\\d{11}$"
+              autoComplete="tel-national"
+              inputMode="numeric"
+              maxLength={11}
+              onChange={(event) => updateField("phoneNumber", normalizePhilippinePhone(event.target.value))}
+              pattern="09[0-9]{9}"
               placeholder="09XXXXXXXXX"
               required
               type="tel"
               value={form.phoneNumber}
             />
-            <p className="text-xs text-muted">Format: `09XXXXXXXXX` (11 digits only)</p>
+            <p className="text-xs text-muted">Format: `09XXXXXXXXX` (must start with 09 and be 11 digits)</p>
           </label>
         </div>
 
@@ -232,20 +233,6 @@ export default function RegisterPage() {
             />
           </label>
         </div>
-
-        <label className="space-y-1 text-sm font-semibold text-slate-800">
-          Requested Batch / Section
-          <input
-            className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-            onChange={(event) => updateField("requestedBatchName", event.target.value)}
-            placeholder="Example: Section A"
-            type="text"
-            value={form.requestedBatchName}
-          />
-          <p className="text-xs text-muted">
-            Optional. Teachers can still adjust your batch during approval.
-          </p>
-        </label>
 
         <div className="rounded-xl border border-brandBorder bg-brandBlueLight/40 p-3">
           <p className="text-sm font-semibold text-slate-800">Upload Proof of Payment</p>
@@ -307,7 +294,7 @@ export default function RegisterPage() {
         </div>
 
         {success ? (
-          <p className="rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
+          <p className="whitespace-pre-line rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
             {success}
           </p>
         ) : null}

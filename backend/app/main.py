@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -16,11 +17,38 @@ from app.api.routes import (
     teacher_reports,
 )
 from app.db.init_db import init_db
+from app.services.alphabet_model import get_alphabet_model_service
+from app.services.numbers_model import get_numbers_model_service
+from app.services.words_model import get_words_model_service
+
+
+logger = logging.getLogger(__name__)
+
+
+def warm_lab_models() -> None:
+    checks = (
+        ("alphabet", get_alphabet_model_service),
+        ("numbers", get_numbers_model_service),
+        ("words", get_words_model_service),
+    )
+    for label, service_getter in checks:
+        try:
+            status = service_getter().status()
+            logger.info(
+                "Lab model warm-up: %s ready=%s model_found=%s path=%s",
+                label,
+                status.get("ready"),
+                status.get("model_found"),
+                status.get("model_path"),
+            )
+        except Exception:
+            logger.exception("Lab model warm-up failed for %s.", label)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    warm_lab_models()
     yield
 
 

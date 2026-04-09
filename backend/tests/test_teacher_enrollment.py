@@ -4,7 +4,7 @@ from app.db.session import SessionLocal
 from app.models.user import User
 
 
-def _submit_registration(client, *, email: str, reference_number: str):
+def _submit_registration(client, *, email: str, reference_number: str, phone_number: str = "09123456789"):
     response = client.post(
         "/api/registrations",
         data={
@@ -14,7 +14,7 @@ def _submit_registration(client, *, email: str, reference_number: str):
             "birth_date": "2012-05-01",
             "address": "Manila",
             "email": email,
-            "phone_number": "09123456789",
+            "phone_number": phone_number,
             "reference_number": reference_number,
         },
         files={"reference_image": ("proof.png", b"proof-image-bytes", "image/png")},
@@ -101,3 +101,14 @@ def test_teacher_can_reject_pending_enrollment(client, teacher_headers_factory):
     with SessionLocal() as db:
         student_user = db.query(User).filter(User.email == "student.reject@example.com").first()
         assert student_user is None
+
+
+def test_registration_normalizes_phone_number(client):
+    registration = _submit_registration(
+        client,
+        email="student.phone@example.com",
+        reference_number="REF-1003",
+        phone_number="0912 345 6789",
+    )
+
+    assert registration["phone_number"] == "09123456789"

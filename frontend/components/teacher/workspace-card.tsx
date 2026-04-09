@@ -5,6 +5,7 @@ const CARD_THEMES = [
     shell: "bg-[#f41328]",
     border: "border-[#f2f2f2]",
     media: "from-[#ece51e] to-[#f7f3a3]",
+    mediaCopy: "text-slate-950",
     copy: "text-white",
     muted: "text-white/80",
     button: "border-white/80 text-white hover:bg-white/10",
@@ -13,6 +14,7 @@ const CARD_THEMES = [
     shell: "bg-[#49b649]",
     border: "border-[#f2f2f2]",
     media: "from-[#f2f2f2] to-[#dae5ef]",
+    mediaCopy: "text-slate-950",
     copy: "text-white",
     muted: "text-white/80",
     button: "border-white/80 text-white hover:bg-white/10",
@@ -21,6 +23,7 @@ const CARD_THEMES = [
     shell: "bg-[#ece51e]",
     border: "border-[#f2f2f2]",
     media: "from-[#d7ddf3] to-[#4655a6]",
+    mediaCopy: "text-slate-950",
     copy: "text-black",
     muted: "text-black/75",
     button: "border-black/50 text-black hover:bg-black/10",
@@ -29,6 +32,7 @@ const CARD_THEMES = [
     shell: "bg-[#4655a6]",
     border: "border-[#f2f2f2]",
     media: "from-[#f2f2f2] to-[#ece51e]",
+    mediaCopy: "text-slate-950",
     copy: "text-white",
     muted: "text-white/80",
     button: "border-white/80 text-white hover:bg-white/10",
@@ -65,7 +69,9 @@ export function TeacherWorkspaceCard({
       className={`relative flex h-full flex-col overflow-hidden rounded-[28px] border-2 p-4 shadow-soft transition hover:-translate-y-1 ${theme.shell} ${theme.border}`}
     >
       <div className={`h-40 rounded-[22px] border-2 ${theme.border} bg-gradient-to-br ${theme.media}`}>
-        <div className={`flex h-full items-center justify-center text-4xl font-black tracking-[0.2em] ${theme.copy}`}>
+        <div
+          className={`flex h-full items-center justify-center text-4xl font-black tracking-[0.2em] ${theme.mediaCopy}`}
+        >
           {badge}
         </div>
       </div>

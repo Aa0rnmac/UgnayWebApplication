@@ -34,6 +34,13 @@ from app.services.words_model import get_words_model_service
 router = APIRouter(prefix="/lab", tags=["lab"])
 
 
+def _missing_model_detail(label: str, model_path: str, training_script: str) -> str:
+    return (
+        f"{label} recognition is unavailable because no trained model artifact was found at "
+        f"{model_path}. Run {training_script} to generate the artifact, then retry the lab."
+    )
+
+
 @router.get("/alphabet-dataset", response_model=AlphabetDatasetStatusResponse)
 def alphabet_dataset_status() -> AlphabetDatasetStatusResponse:
     payload = get_alphabet_dataset_status()
@@ -143,7 +150,13 @@ async def predict_sign_from_image(
         mode_label = "Alphabet" if mode == "alphabet" else "Numbers"
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"{mode_label} model is not trained yet. Run training script first.",
+            detail=_missing_model_detail(
+                mode_label,
+                str(model_status["model_path"]),
+                "scripts/train_alphabet_model.py"
+                if mode == "alphabet"
+                else "scripts/train_numbers_model.py",
+            ),
         )
 
     prediction = service.predict_best_of_candidates(candidates)
@@ -198,7 +211,11 @@ async def predict_words_sequence(
     if not model_status["ready"]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Words model is not trained yet. Run scripts/train_words_model.py first.",
+            detail=_missing_model_detail(
+                "Words",
+                str(model_status["model_path"]),
+                "scripts/train_words_model.py",
+            ),
         )
 
     allowed_labels = resolve_word_group_labels(word_group, existing_only=True)
@@ -260,9 +277,10 @@ async def predict_numbers_sequence(
         if not motion_status["ready"]:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=(
-                    "Numbers motion model is not trained yet. "
-                    "Run scripts/train_numbers_motion_model.py first."
+                detail=_missing_model_detail(
+                    f"Numbers {selected_group}",
+                    str(motion_status["model_path"]),
+                    "scripts/train_numbers_motion_model.py",
                 ),
             )
 
@@ -285,7 +303,11 @@ async def predict_numbers_sequence(
     if not numbers_status["ready"]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Numbers model is not trained yet. Run scripts/train_numbers_model.py first.",
+            detail=_missing_model_detail(
+                "Numbers 0-10",
+                str(numbers_status["model_path"]),
+                "scripts/train_numbers_model.py",
+            ),
         )
 
     ten_service = get_numbers_ten_motion_model_service()

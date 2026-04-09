@@ -1,53 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 import { TeacherWorkspaceCard } from "@/components/teacher/workspace-card";
-import { TeacherModuleItem, getTeacherModuleCatalog } from "@/lib/api";
-
-function formatLessonCount(count: number) {
-  return `${count} lesson${count === 1 ? "" : "s"}`;
-}
-
-function getModuleEyebrow(module: TeacherModuleItem) {
-  if (module.is_placeholder) {
-    return "Coming Soon";
-  }
-  return formatLessonCount(module.lessons.length);
-}
-
-function getModuleCta(module: TeacherModuleItem) {
-  return module.is_placeholder ? "Preview Placeholder" : "Open Lesson View";
-}
+import { TeacherModuleCatalogData, getTeacherModuleCatalogData } from "@/lib/teacher-data";
 
 export default function TeacherModulesPage() {
-  const [modules, setModules] = useState<TeacherModuleItem[]>([]);
+  const [data, setData] = useState<TeacherModuleCatalogData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-
-    getTeacherModuleCatalog()
-      .then(setModules)
-      .catch((requestError: Error) => setError(requestError.message))
-      .finally(() => setLoading(false));
+    getTeacherModuleCatalogData()
+      .then(setData)
+      .catch((requestError: Error) => setError(requestError.message));
   }, []);
-
-  const liveModules = useMemo(
-    () => modules.filter((module) => !module.is_placeholder),
-    [modules]
-  );
-  const placeholderModules = useMemo(
-    () => modules.filter((module) => module.is_placeholder),
-    [modules]
-  );
-  const liveLessonCount = useMemo(
-    () =>
-      liveModules.reduce((total, module) => total + module.lessons.length, 0),
-    [liveModules]
-  );
 
   return (
     <section className="space-y-6">
@@ -55,70 +22,86 @@ export default function TeacherModulesPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
           Teacher Modules
         </p>
-        <h2 className="mt-3 text-4xl font-black tracking-tight text-brandWhite">
-          Open every module from one teacher-safe lesson workspace.
+        <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
+          Review live modules, draft slots, and practice guides from the real backend catalog.
         </h2>
-        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
-          This view now pulls live module data for teachers while intentionally hiding
-          assessments, student scores, and activity controls. Phase 1 focuses only on lesson
-          access and placeholder visibility for the full 12-module lane.
+        <p className="teacher-panel-copy mt-3 max-w-3xl text-sm leading-relaxed">
+          Teachers now see the real module catalog, including live modules students can access and
+          draft slots reserved for teacher review. Use this page to prep lessons, inspect built-in
+          activities, and spot unpublished curriculum work before rollout.
         </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Link
+            className="rounded-full bg-brandBlue px-4 py-2 text-xs font-semibold text-white"
+            href="/teacher/lab"
+          >
+            Open Shared Lab Prep
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="panel">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accent">
-            Live Modules
+            Teacher-Visible Modules
           </p>
-          <p className="mt-3 text-4xl font-black text-brandWhite">{liveModules.length}</p>
-          <p className="mt-2 text-sm text-slate-300">
-            Published modules with lesson content ready for teacher viewing.
+          <p className="teacher-panel-value mt-3 text-4xl font-black">{data?.modules.length ?? 0}</p>
+          <p className="teacher-panel-copy mt-2 text-sm">
+            Live plus draft module entries visible to teachers.
           </p>
         </div>
 
         <div className="panel">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandGreen">
-            Placeholder Cards
+            Lessons Ready
           </p>
-          <p className="mt-3 text-4xl font-black text-brandWhite">
-            {placeholderModules.length}
-          </p>
-          <p className="mt-2 text-sm text-slate-300">
-            Future module slots already visible in the teacher workspace.
+          <p className="teacher-panel-value mt-3 text-4xl font-black">{data?.totalLessons ?? 0}</p>
+          <p className="teacher-panel-copy mt-2 text-sm">
+            Lesson entries teachers can open right now.
           </p>
         </div>
 
         <div className="panel">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accentWarm">
-            Lessons Ready
+            Built-In Activities
           </p>
-          <p className="mt-3 text-4xl font-black text-brandWhite">{liveLessonCount}</p>
-          <p className="mt-2 text-sm text-slate-300">
-            Total published lesson entries currently available across the live modules.
+          <p className="teacher-panel-value mt-3 text-4xl font-black">{data?.totalActivities ?? 0}</p>
+          <p className="teacher-panel-copy mt-2 text-sm">
+            Backend-defined activities teachers can review before or after student practice.
           </p>
         </div>
       </div>
 
-      {loading ? (
+      {!data ? (
         <div className="panel">
-          <p className="text-sm text-slate-300">Loading teacher module catalog...</p>
+          <p className="teacher-panel-copy text-sm">Loading teacher module catalog...</p>
         </div>
       ) : null}
 
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {modules.map((module, index) => (
-          <TeacherWorkspaceCard
-            key={`${module.id}-${module.order_index}`}
-            badge={`M${String(module.order_index).padStart(2, "0")}`}
-            ctaLabel={getModuleCta(module)}
-            description={module.description}
-            eyebrow={getModuleEyebrow(module)}
-            href={`/teacher/modules/${module.id}`}
-            themeIndex={index}
-            title={module.title}
-          />
-        ))}
-      </div>
+      {data ? (
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {data.modules.map((module, index) => {
+            const practiceGuide = data.practiceGuides.find((guide) => guide.moduleId === module.id);
+
+            return (
+              <TeacherWorkspaceCard
+                key={`${module.id}-${module.order_index}`}
+                badge={`M${String(module.order_index).padStart(2, "0")}`}
+                ctaLabel="Open Lesson View"
+                description={
+                  practiceGuide
+                    ? `${module.description} Prep focus: ${practiceGuide.prepFocus}`
+                    : module.description
+                }
+                eyebrow={`${module.is_published ? "Live" : "Draft"} | ${module.lessons.length} lesson${module.lessons.length === 1 ? "" : "s"} | ${module.activities.length} activit${module.activities.length === 1 ? "y" : "ies"}`}
+                href={`/teacher/modules/${module.id}`}
+                themeIndex={index}
+                title={module.title}
+              />
+            );
+          })}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="panel">

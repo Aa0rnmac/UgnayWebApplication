@@ -5,8 +5,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
-PHONE_PATTERN = re.compile(r"^\d{11}$")
+PHONE_PATTERN = re.compile(r"^09\d{9}$")
 PASSWORD_PATTERN = re.compile(r"^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
+
+
+def _normalize_phone(value: str) -> str:
+    return re.sub(r"\D+", "", value)
 
 
 class UserCreate(BaseModel):
@@ -73,12 +77,14 @@ class UserProfileUpdate(BaseModel):
     def validate_phone(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        trimmed = value.strip()
-        if not trimmed:
+        normalized = _normalize_phone(value)
+        if not normalized:
             return None
-        if not PHONE_PATTERN.match(trimmed):
-            raise ValueError("Phone number must be exactly 11 digits (example: 09XXXXXXXXX).")
-        return trimmed
+        if not PHONE_PATTERN.match(normalized):
+            raise ValueError(
+                "Phone number must start with 09 and contain exactly 11 digits (example: 09123456789)."
+            )
+        return normalized
 
 
 class PasswordChangeRequest(BaseModel):

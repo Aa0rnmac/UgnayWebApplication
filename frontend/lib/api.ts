@@ -8,10 +8,24 @@ function getStoredToken(): string | undefined {
   return token && token.trim() ? token : undefined;
 }
 
+function buildQuery(
+  params: Record<string, string | number | boolean | null | undefined>
+): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    search.set(key, String(value));
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
 export type ApiUser = {
   id: number;
   username: string;
-  role?: "student" | "teacher";
+  role?: "student" | "teacher" | "admin";
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
@@ -34,11 +48,16 @@ export type ForgotPasswordRequestResponse = {
 
 export type TeacherInviteVerifyQrResponse = {
   invite_code: string;
+  label: string | null;
+  expires_at: string | null;
+  remaining_uses: number | null;
   message: string;
 };
 
 export type TeacherInviteVerifyPasskeyResponse = {
   onboarding_token: string;
+  expires_at: string | null;
+  remaining_uses: number | null;
   message: string;
 };
 
@@ -70,6 +89,14 @@ export type RegistrationRecord = {
   phone_number: string;
   reference_number: string;
   reference_image_path: string | null;
+  status: string;
+  validated_at: string | null;
+  validated_by: string | null;
+  linked_user_id: number | null;
+  issued_username: string | null;
+  enrollment_id: number | null;
+  payment_review_status: string | null;
+  notes: string | null;
   created_at: string;
 };
 
@@ -118,6 +145,17 @@ export type Assessment = {
   answer: string;
 };
 
+export type ModuleActivity = {
+  id: number;
+  activity_key: string;
+  title: string;
+  activity_type: string;
+  order_index: number;
+  instructions: string | null;
+  definition: Record<string, unknown>;
+  is_published: boolean;
+};
+
 export type ModuleItem = {
   id: number;
   slug: string;
@@ -126,10 +164,275 @@ export type ModuleItem = {
   order_index: number;
   lessons: Lesson[];
   assessments: Assessment[];
+  activities: ModuleActivity[];
   is_locked: boolean;
-  status: "in_progress" | "completed";
+  is_published: boolean;
+  status: "not_started" | "in_progress" | "completed";
   progress_percent: number;
   assessment_score: number | null;
+};
+
+export type TeacherAssessmentReport = {
+  id: number;
+  student_id: number;
+  module_id: number;
+  module_title: string;
+  assessment_id: string;
+  assessment_title: string;
+  right_count: number;
+  wrong_count: number;
+  total_items: number;
+  score_percent: number;
+  improvement_areas: string[];
+  status: string;
+  created_at: string;
+};
+
+export type TeacherStudentReportRow = {
+  student_id: number;
+  student_name: string;
+  student_email: string | null;
+  total_assessments: number;
+  pending_reports: number;
+  generated_reports: number;
+  average_score_percent: number;
+  latest_activity_at: string | null;
+};
+
+export type TeacherModuleSummary = {
+  module_id: number;
+  module_title: string;
+  assessments_taken: number;
+  right_count: number;
+  wrong_count: number;
+  total_items: number;
+  score_percent: number;
+};
+
+export type TeacherImprovementAreaItem = {
+  area: string;
+  count: number;
+};
+
+export type TeacherGeneratedStudentReport = {
+  student_id: number;
+  student_name: string;
+  student_email: string | null;
+  generated_at: string;
+  total_assessments: number;
+  pending_reports_before_generate: number;
+  total_right: number;
+  total_wrong: number;
+  total_items: number;
+  overall_score_percent: number;
+  modules: TeacherModuleSummary[];
+  top_improvement_areas: TeacherImprovementAreaItem[];
+};
+
+export type TeacherBatch = {
+  id: number;
+  code: string;
+  name: string;
+  status: string;
+  start_date: string | null;
+  end_date: string | null;
+  capacity: number | null;
+  notes: string | null;
+  student_count: number;
+  created_at: string | null;
+};
+
+export type TeacherUserSummary = {
+  id: number;
+  username: string;
+  full_name: string;
+  email: string | null;
+};
+
+export type TeacherStudentModuleProgress = {
+  module_id: number;
+  module_title: string;
+  status: string;
+  progress_percent: number;
+  assessment_score: number | null;
+  updated_at: string;
+};
+
+export type TeacherStudent = {
+  id: number;
+  username: string;
+  full_name: string;
+  email: string | null;
+  phone_number: string | null;
+  address: string | null;
+  birth_date: string | null;
+  role: string;
+  enrollment_status: string | null;
+  batch: TeacherBatch | null;
+  module_progress: TeacherStudentModuleProgress[];
+};
+
+export type TeacherEnrollment = {
+  id: number;
+  status: string;
+  payment_review_status: string;
+  review_notes: string | null;
+  reviewed_at: string | null;
+  approved_at: string | null;
+  rejected_at: string | null;
+  created_at: string;
+  updated_at: string;
+  registration: RegistrationRecord;
+  batch: TeacherBatch | null;
+  student: TeacherUserSummary | null;
+};
+
+export type TeacherEnrollmentApprovePayload = {
+  batch_id?: number | null;
+  batch_code?: string | null;
+  batch_name?: string | null;
+  issued_username?: string | null;
+  temporary_password?: string | null;
+  notes?: string | null;
+  send_email?: boolean;
+};
+
+export type TeacherEnrollmentRejectPayload = {
+  notes: string;
+};
+
+export type TeacherBatchCreatePayload = {
+  code: string;
+  name: string;
+  status?: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  capacity?: number | null;
+  notes?: string | null;
+};
+
+export type TeacherActivityAttemptItem = {
+  id: number;
+  item_key: string;
+  prompt: string | null;
+  expected_answer: string | null;
+  student_answer: string | null;
+  is_correct: boolean | null;
+  confidence: number | null;
+  ai_metadata: Record<string, unknown>;
+};
+
+export type TeacherActivityAttempt = {
+  id: number;
+  student_id: number;
+  student_name: string;
+  module_id: number;
+  module_title: string;
+  activity_id: number;
+  activity_key: string;
+  activity_title: string;
+  activity_type: string;
+  right_count: number;
+  wrong_count: number;
+  total_items: number;
+  score_percent: number;
+  improvement_areas: string[];
+  ai_metadata: Record<string, unknown>;
+  submitted_at: string;
+  items: TeacherActivityAttemptItem[];
+};
+
+export type TeacherWeakItem = {
+  module_id: number;
+  module_title: string;
+  activity_key: string;
+  activity_title: string;
+  item_key: string;
+  prompt: string | null;
+  expected_answer: string | null;
+  wrong_count: number;
+  attempt_count: number;
+  wrong_rate_percent: number;
+};
+
+export type TeacherAttentionStudent = {
+  student_id: number;
+  student_name: string;
+  student_email: string | null;
+  batch_id: number | null;
+  batch_name: string | null;
+  attempt_count: number;
+  average_score_percent: number;
+  low_score_count: number;
+  latest_attempt_at: string;
+};
+
+export type TeacherConcernAttempt = {
+  attempt_id: number;
+  student_id: number;
+  student_name: string;
+  batch_id: number | null;
+  batch_name: string | null;
+  module_id: number;
+  module_title: string;
+  activity_key: string;
+  activity_title: string;
+  score_percent: number;
+  low_confidence_item_count: number;
+  submitted_at: string;
+};
+
+export type TeacherReportSummary = {
+  batch_id: number | null;
+  module_id: number | null;
+  total_students: number;
+  total_attempts: number;
+  average_score_percent: number;
+  weak_items: TeacherWeakItem[];
+  students_needing_attention: TeacherAttentionStudent[];
+  recent_concern_attempts: TeacherConcernAttempt[];
+};
+
+export type ActivityAttemptItemPayload = {
+  item_key: string;
+  prompt?: string | null;
+  expected_answer?: string | null;
+  student_answer?: string | null;
+  is_correct?: boolean | null;
+  confidence?: number | null;
+  ai_metadata?: Record<string, unknown>;
+};
+
+export type ActivityAttemptPayload = {
+  right_count: number;
+  wrong_count: number;
+  total_items: number;
+  score_percent: number;
+  improvement_areas?: string[];
+  ai_metadata?: Record<string, unknown>;
+  source?: string;
+  notes?: string | null;
+  items?: ActivityAttemptItemPayload[];
+  completed_lesson_id?: string | null;
+  mark_module_completed?: boolean;
+};
+
+export type ActivityAttemptResponse = {
+  id: number;
+  module_id: number;
+  module_activity_id: number;
+  activity_key: string;
+  activity_title: string;
+  activity_type: string;
+  right_count: number;
+  wrong_count: number;
+  total_items: number;
+  score_percent: number;
+  improvement_areas: string[];
+  ai_metadata: Record<string, unknown>;
+  source: string;
+  items: TeacherActivityAttemptItem[];
+  progress: ModuleItem;
 };
 
 export type LabPrediction = {
@@ -249,11 +552,20 @@ export type WordsModelStatus = {
   ready: boolean;
 };
 
-async function request<T>(path: string, options?: RequestInit, token?: string): Promise<T> {
+type TeacherAssessmentReportsResponse = {
+  reports: TeacherAssessmentReport[];
+};
+
+type TeacherStudentReportTableResponse = {
+  students: TeacherStudentReportRow[];
+};
+
+async function performRequest(path: string, options?: RequestInit, token?: string): Promise<Response> {
   const headers = new Headers(options?.headers);
-  if (!(options?.body instanceof FormData)) {
+  if (!(options?.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+
   const authToken = token ?? getStoredToken();
   if (authToken) {
     headers.set("Authorization", `Bearer ${authToken}`);
@@ -264,7 +576,7 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
     response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers,
-      cache: "no-store"
+      cache: "no-store",
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown network error";
@@ -277,25 +589,43 @@ async function request<T>(path: string, options?: RequestInit, token?: string): 
     const fallback = "Request failed";
     let detail = fallback;
     try {
-      const data = await response.json();
+      const data = (await response.json()) as { detail?: string; message?: string };
       detail = data.detail ?? data.message ?? fallback;
-    } catch {}
+    } catch {
+      try {
+        detail = (await response.text()) || fallback;
+      } catch {}
+    }
     throw new Error(detail);
   }
+
+  return response;
+}
+
+async function request<T>(path: string, options?: RequestInit, token?: string): Promise<T> {
+  const response = await performRequest(path, options, token);
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
+}
+
+async function requestBlob(path: string, options?: RequestInit, token?: string): Promise<Blob> {
+  const response = await performRequest(path, options, token);
+  return response.blob();
 }
 
 export function register(username: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>("/auth/register", {
     method: "POST",
-    body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password }),
   });
 }
 
 export function login(username: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password }),
   });
 }
 
@@ -304,7 +634,7 @@ export function requestForgotPasswordOtp(
 ): Promise<ForgotPasswordRequestResponse> {
   return request<ForgotPasswordRequestResponse>("/auth/forgot-password/request", {
     method: "POST",
-    body: JSON.stringify({ username_or_email: usernameOrEmail })
+    body: JSON.stringify({ username_or_email: usernameOrEmail }),
   });
 }
 
@@ -318,15 +648,15 @@ export function verifyForgotPasswordOtp(
     body: JSON.stringify({
       username_or_email: usernameOrEmail,
       otp_code: otpCode,
-      new_password: newPassword
-    })
+      new_password: newPassword,
+    }),
   });
 }
 
 export function verifyTeacherInviteQr(qrPayload: string): Promise<TeacherInviteVerifyQrResponse> {
   return request<TeacherInviteVerifyQrResponse>("/auth/teacher-invite/verify-qr", {
     method: "POST",
-    body: JSON.stringify({ qr_payload: qrPayload })
+    body: JSON.stringify({ qr_payload: qrPayload }),
   });
 }
 
@@ -336,7 +666,7 @@ export function verifyTeacherInvitePasskey(
 ): Promise<TeacherInviteVerifyPasskeyResponse> {
   return request<TeacherInviteVerifyPasskeyResponse>("/auth/teacher-invite/verify-passkey", {
     method: "POST",
-    body: JSON.stringify({ invite_code: inviteCode, passkey })
+    body: JSON.stringify({ invite_code: inviteCode, passkey }),
   });
 }
 
@@ -346,7 +676,7 @@ export function issueTeacherCredentials(
 ): Promise<TeacherInviteIssueCredentialsResponse> {
   return request<TeacherInviteIssueCredentialsResponse>("/auth/teacher-invite/issue-credentials", {
     method: "POST",
-    body: JSON.stringify({ onboarding_token: onboardingToken, email })
+    body: JSON.stringify({ onboarding_token: onboardingToken, email }),
   });
 }
 
@@ -357,7 +687,7 @@ export function getCurrentUser(token: string): Promise<ApiUser> {
 export function updateMyProfile(payload: ProfileUpdatePayload): Promise<ApiUser> {
   return request<ApiUser>("/auth/me/profile", {
     method: "PATCH",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }
 
@@ -369,8 +699,8 @@ export function changeMyPassword(
     method: "POST",
     body: JSON.stringify({
       current_password: currentPassword,
-      new_password: newPassword
-    })
+      new_password: newPassword,
+    }),
   });
 }
 
@@ -379,7 +709,7 @@ export function uploadMyProfilePhoto(file: File): Promise<ApiUser> {
   data.append("profile_photo", file);
   return request<ApiUser>("/auth/me/profile-photo", {
     method: "POST",
-    body: data
+    body: data,
   });
 }
 
@@ -402,7 +732,7 @@ export async function submitRegistration(
 
   return request<RegistrationSubmitResponse>("/registrations", {
     method: "POST",
-    body: data
+    body: data,
   });
 }
 
@@ -412,6 +742,174 @@ export function getProgressSummary(token?: string): Promise<ProgressSummary> {
 
 export function getModules(token?: string): Promise<ModuleItem[]> {
   return request<ModuleItem[]>("/modules", undefined, token);
+}
+
+export function getModule(moduleId: number, token?: string): Promise<ModuleItem> {
+  return request<ModuleItem>(`/modules/${moduleId}`, undefined, token);
+}
+
+export function submitActivityAttempt(
+  moduleId: number,
+  activityKey: string | number,
+  payload: ActivityAttemptPayload,
+  token?: string
+): Promise<ActivityAttemptResponse> {
+  return request<ActivityAttemptResponse>(
+    `/modules/${moduleId}/activities/${activityKey}/attempts`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export async function getTeacherAssessmentReports(
+  token?: string
+): Promise<TeacherAssessmentReport[]> {
+  const data = await request<TeacherAssessmentReportsResponse>(
+    "/teacher/reports",
+    undefined,
+    token
+  );
+  return data.reports;
+}
+
+export async function getTeacherStudentReportRows(
+  token?: string
+): Promise<TeacherStudentReportRow[]> {
+  const data = await request<TeacherStudentReportTableResponse>(
+    "/teacher/reports/students",
+    undefined,
+    token
+  );
+  return data.students;
+}
+
+export function generateTeacherStudentReport(
+  studentId: number,
+  token?: string
+): Promise<TeacherGeneratedStudentReport> {
+  return request<TeacherGeneratedStudentReport>(
+    `/teacher/reports/students/${studentId}/generate`,
+    {
+      method: "POST",
+    },
+    token
+  );
+}
+
+export function getTeacherReportSummary(
+  filters?: { batchId?: number | null; moduleId?: number | null },
+  token?: string
+): Promise<TeacherReportSummary> {
+  const query = buildQuery({
+    batch_id: filters?.batchId,
+    module_id: filters?.moduleId,
+  });
+  return request<TeacherReportSummary>(`/teacher/reports/summary${query}`, undefined, token);
+}
+
+export function getTeacherEnrollments(
+  filters?: { status?: string | null; batchId?: number | null },
+  token?: string
+): Promise<TeacherEnrollment[]> {
+  const query = buildQuery({
+    status: filters?.status,
+    batch_id: filters?.batchId,
+  });
+  return request<TeacherEnrollment[]>(`/teacher/enrollments${query}`, undefined, token);
+}
+
+export function getTeacherEnrollment(
+  enrollmentId: number,
+  token?: string
+): Promise<TeacherEnrollment> {
+  return request<TeacherEnrollment>(`/teacher/enrollments/${enrollmentId}`, undefined, token);
+}
+
+export function getTeacherEnrollmentPaymentProof(
+  enrollmentId: number,
+  token?: string
+): Promise<Blob> {
+  return requestBlob(`/teacher/enrollments/${enrollmentId}/payment-proof`, undefined, token);
+}
+
+export function approveTeacherEnrollment(
+  enrollmentId: number,
+  payload: TeacherEnrollmentApprovePayload,
+  token?: string
+): Promise<TeacherEnrollment> {
+  return request<TeacherEnrollment>(
+    `/teacher/enrollments/${enrollmentId}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function rejectTeacherEnrollment(
+  enrollmentId: number,
+  payload: TeacherEnrollmentRejectPayload,
+  token?: string
+): Promise<TeacherEnrollment> {
+  return request<TeacherEnrollment>(
+    `/teacher/enrollments/${enrollmentId}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function getTeacherBatches(token?: string): Promise<TeacherBatch[]> {
+  return request<TeacherBatch[]>("/teacher/batches", undefined, token);
+}
+
+export function createTeacherBatch(
+  payload: TeacherBatchCreatePayload,
+  token?: string
+): Promise<TeacherBatch> {
+  return request<TeacherBatch>(
+    "/teacher/batches",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function getTeacherBatchStudents(
+  batchId: number,
+  token?: string
+): Promise<TeacherUserSummary[]> {
+  return request<TeacherUserSummary[]>(`/teacher/batches/${batchId}/students`, undefined, token);
+}
+
+export function getTeacherStudent(studentId: number, token?: string): Promise<TeacherStudent> {
+  return request<TeacherStudent>(`/teacher/students/${studentId}`, undefined, token);
+}
+
+export function getTeacherStudentActivityAttempts(
+  studentId: number,
+  token?: string
+): Promise<TeacherActivityAttempt[]> {
+  return request<TeacherActivityAttempt[]>(
+    `/teacher/students/${studentId}/activity-attempts`,
+    undefined,
+    token
+  );
+}
+
+export function getTeacherActivityAttempt(
+  attemptId: number,
+  token?: string
+): Promise<TeacherActivityAttempt> {
+  return request<TeacherActivityAttempt>(`/teacher/activity-attempts/${attemptId}`, undefined, token);
 }
 
 export function updateModuleProgress(
@@ -432,7 +930,7 @@ export function updateModuleProgress(
     `/modules/${moduleId}/progress`,
     {
       method: "POST",
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     },
     token
   );
@@ -446,7 +944,7 @@ export function predictSign(
     "/lab/predict",
     {
       method: "POST",
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     },
     token
   );
@@ -465,7 +963,7 @@ export function predictSignFromImage(
     "/lab/predict-image",
     {
       method: "POST",
-      body: data
+      body: data,
     },
     token
   );
@@ -479,7 +977,7 @@ export function detectOpenPalmFromImage(file: File, token?: string): Promise<Ope
     "/lab/detect-open-palm",
     {
       method: "POST",
-      body: data
+      body: data,
     },
     token
   );
@@ -500,7 +998,7 @@ export function predictWordsFromFrames(
     "/lab/predict-words-sequence",
     {
       method: "POST",
-      body: data
+      body: data,
     },
     token
   );
@@ -521,7 +1019,7 @@ export function predictNumbersFromFrames(
     "/lab/predict-numbers-sequence",
     {
       method: "POST",
-      body: data
+      body: data,
     },
     token
   );

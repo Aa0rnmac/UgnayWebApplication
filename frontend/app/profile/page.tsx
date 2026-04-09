@@ -12,7 +12,8 @@ import {
 import {
   isStrongPassword,
   isValidEmail,
-  isValidPhilippinePhone
+  isValidPhilippinePhone,
+  normalizePhilippinePhone
 } from "@/lib/validation";
 import { getUploadBase } from "@/lib/api-base";
 
@@ -94,7 +95,7 @@ export default function ProfilePage() {
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const email = form.email.trim();
-    const phone = form.phoneNumber.trim();
+    const phone = normalizePhilippinePhone(form.phoneNumber);
 
     if (email && !isValidEmail(email)) {
       setError(
@@ -103,7 +104,7 @@ export default function ProfilePage() {
       return;
     }
     if (phone && !isValidPhilippinePhone(phone)) {
-      setError("Phone number must be exactly 11 digits (example: 09XXXXXXXXX).");
+      setError("Phone number must start with 09 and contain exactly 11 digits (example: 09123456789).");
       return;
     }
 
@@ -282,13 +283,16 @@ export default function ProfilePage() {
                 Phone Number
                 <input
                   className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                  onChange={(event) => updateField("phoneNumber", event.target.value)}
-                  pattern="^\\d{11}$"
+                  autoComplete="tel-national"
+                  inputMode="numeric"
+                  maxLength={11}
+                  onChange={(event) => updateField("phoneNumber", normalizePhilippinePhone(event.target.value))}
+                  pattern="09[0-9]{9}"
                   placeholder="09XXXXXXXXX"
                   type="text"
                   value={form.phoneNumber}
                 />
-                <p className="text-xs text-muted">Format: `09XXXXXXXXX` (11 digits only)</p>
+                <p className="text-xs text-muted">Format: `09XXXXXXXXX` (must start with 09 and be 11 digits)</p>
               </label>
             </div>
 

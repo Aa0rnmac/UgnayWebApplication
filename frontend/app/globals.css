@@ -74,6 +74,59 @@ body {
   color: #6b6b7a;
 }
 
+.teacher-panel-heading {
+  color: rgb(28 28 46 / 1);
+}
+
+.teacher-panel-copy {
+  color: rgb(92 92 115 / 1);
+}
+
+.teacher-panel-value {
+  color: rgb(28 28 46 / 1);
+}
+
+.teacher-card-title {
+  color: rgb(28 28 46 / 1);
+}
+
+.teacher-card-copy {
+  color: rgb(68 68 92 / 1);
+}
+
+.teacher-card-meta {
+  color: rgb(92 92 115 / 1);
+}
+
+.teacher-card-kicker {
+  color: rgb(107 107 122 / 1);
+}
+
+.teacher-card-control {
+  @apply rounded-xl border px-3 py-2 text-sm outline-none transition;
+  border-color: rgba(28, 28, 46, 0.12);
+  background: rgba(255, 255, 255, 0.86);
+  color: rgb(28 28 46 / 1);
+}
+
+.teacher-card-control::placeholder {
+  color: rgb(107 107 122 / 1);
+  opacity: 1;
+}
+
+.teacher-card-control:focus {
+  border-color: rgba(46, 68, 168, 0.5);
+}
+
+.teacher-card-ghost-button {
+  border-color: rgba(28, 28, 46, 0.14);
+  color: rgb(28 28 46 / 1);
+}
+
+.teacher-card-ghost-button:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
 .text-slate-900 {
   color: rgb(28 28 46 / var(--tw-text-opacity, 1));
 }
