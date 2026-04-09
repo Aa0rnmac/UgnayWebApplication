@@ -49,7 +49,9 @@ def _display_name(user: User) -> str:
 def _approved_enrollments_by_user(db: Session) -> dict[int, Enrollment]:
     rows = (
         db.query(Enrollment)
+        .join(User, User.id == Enrollment.user_id)
         .filter(Enrollment.status == "approved")
+        .filter(User.archived_at.is_(None))
         .order_by(Enrollment.approved_at.desc(), Enrollment.id.desc())
         .all()
     )
@@ -76,6 +78,7 @@ def _filtered_attempts(
         )
         .join(User, User.id == ActivityAttempt.user_id)
         .filter(User.role == "student")
+        .filter(User.archived_at.is_(None))
         .order_by(ActivityAttempt.submitted_at.desc(), ActivityAttempt.id.desc())
     )
     if module_id is not None:
@@ -165,6 +168,7 @@ def list_teacher_student_report_rows(
     rows = (
         db.query(AssessmentReport, User)
         .join(User, User.id == AssessmentReport.user_id)
+        .filter(User.archived_at.is_(None))
         .order_by(AssessmentReport.created_at.desc(), AssessmentReport.id.desc())
         .all()
     )
@@ -215,7 +219,11 @@ def generate_teacher_student_report(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
 ) -> TeacherGeneratedStudentReport:
-    student = db.query(User).filter(User.id == student_id, User.role == "student").first()
+    student = (
+        db.query(User)
+        .filter(User.id == student_id, User.role == "student", User.archived_at.is_(None))
+        .first()
+    )
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
 
@@ -320,7 +328,11 @@ def list_student_activity_attempts(
 ) -> list[TeacherActivityAttemptOut]:
     attempts = _filtered_attempts(db, student_id=student_id)
     if not attempts:
-        student = db.query(User).filter(User.id == student_id, User.role == "student").first()
+        student = (
+            db.query(User)
+            .filter(User.id == student_id, User.role == "student", User.archived_at.is_(None))
+            .first()
+        )
         if not student:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
     return [_activity_attempt_out(attempt) for attempt in attempts]

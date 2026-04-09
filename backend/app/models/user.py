@@ -21,6 +21,7 @@ class User(Base):
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     profile_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     role: Mapped[str] = mapped_column(
         String(20), nullable=False, default="student", server_default="student"
     )

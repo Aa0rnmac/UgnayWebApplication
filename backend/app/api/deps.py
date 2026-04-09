@@ -62,6 +62,13 @@ def get_current_user(
     user = db.query(User).filter(User.id == session.user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
+    if user.archived_at is not None:
+        db.delete(session)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account is no longer active.",
+        )
     return _normalize_user_role(user, db)
 
 

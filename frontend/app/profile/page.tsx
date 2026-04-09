@@ -7,6 +7,7 @@ import {
   changeMyPassword,
   getCurrentUser,
   resolveUploadsBase,
+  unenrollMyAccount,
   updateMyProfile,
   uploadMyProfilePhoto
 } from "@/lib/api";
@@ -44,6 +45,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [unenrolling, setUnenrolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
@@ -186,6 +188,37 @@ export default function ProfilePage() {
       setError(message);
     } finally {
       setPasswordSaving(false);
+    }
+  }
+
+  async function handleUnenroll() {
+    if (user?.role !== "student") {
+      return;
+    }
+    if (
+      !window.confirm(
+        "This will unenroll your student account, move it to archive, and log you out. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    setUnenrolling(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await unenrollMyAccount();
+      window.localStorage.removeItem("auth_token");
+      window.localStorage.removeItem("auth_username");
+      window.alert(response.message);
+      window.location.href = "/";
+    } catch (unenrollError) {
+      const message =
+        unenrollError instanceof Error ? unenrollError.message : "Failed to unenroll account.";
+      setError(message);
+    } finally {
+      setUnenrolling(false);
     }
   }
 
@@ -363,6 +396,18 @@ export default function ProfilePage() {
               >
                 Change Password
               </button>
+              {user.role === "student" ? (
+                <button
+                  className="ml-auto rounded-lg border border-brandRed bg-white px-4 py-2 text-sm font-semibold text-brandRed transition hover:bg-brandRedLight disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={unenrolling}
+                  onClick={() => {
+                    void handleUnenroll();
+                  }}
+                  type="button"
+                >
+                  {unenrolling ? "Unenrolling..." : "Unenroll Account"}
+                </button>
+              ) : null}
             </div>
           </form>
         </>

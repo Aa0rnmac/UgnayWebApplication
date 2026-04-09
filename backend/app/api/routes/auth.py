@@ -13,6 +13,8 @@ from app.core.datetime_utils import as_utc, utc_now
 from app.core.security import create_session_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.password_reset_otp import PasswordResetOtp
+from app.models.archived_student_account import ArchivedStudentAccount
+from app.models.enrollment import Enrollment
 from app.models.session import UserSession
 from app.models.teacher_invite import TeacherInvite
 from app.models.user import User
@@ -30,6 +32,7 @@ from app.schemas.auth import (
     TeacherInviteVerifyQrResponse,
     UserCreate,
     UserLogin,
+    UserSelfArchiveResponse,
     UserOut,
     UserProfileUpdate,
 )
@@ -69,11 +72,19 @@ def find_user_by_identity(db: Session, identity: str) -> User | None:
     if not trimmed:
         return None
 
-    by_username = db.query(User).filter(User.username == trimmed).first()
+    by_username = (
+        db.query(User)
+        .filter(User.username == trimmed, User.archived_at.is_(None))
+        .first()
+    )
     if by_username:
         return by_username
 
-    return db.query(User).filter(User.email == trimmed.lower()).first()
+    return (
+        db.query(User)
+        .filter(User.email == trimmed.lower(), User.archived_at.is_(None))
+        .first()
+    )
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -92,7 +103,10 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthResponse:
     identity = payload.username.strip()
     user = (
         db.query(User)
-        .filter(or_(User.username == identity, User.email == identity.lower()))
+        .filter(
+            or_(User.username == identity, User.email == identity.lower()),
+            User.archived_at.is_(None),
+        )
         .first()
     )
     if not user or not verify_password(payload.password, user.password_hash):
@@ -445,6 +459,112 @@ def change_password(
     db.add(current_user)
     db.commit()
     return {"message": "Password updated successfully."}
+
+
+def _append_archive_note(existing: str | None, note: str) -> str:
+    normalized_existing = (existing or "").strip()
+    if not normalized_existing:
+        return note
+    if note in normalized_existing:
+        return normalized_existing
+    return f"{normalized_existing}\n{note}"
+
+
+@router.post("/me/unenroll", response_model=UserSelfArchiveResponse)
+def unenroll_my_account(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserSelfArchiveResponse:
+    if current_user.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only student accounts can be unenrolled from this screen.",
+        )
+    if current_user.archived_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account is already archived.",
+        )
+
+    now = utc_now()
+    timestamp_token = now.strftime("%Y%m%d%H%M%S")
+    archive_note = f"Student account archived by self-service unenroll on {now.isoformat()}."
+
+    linked_enrollments = (
+        db.query(Enrollment)
+        .filter(Enrollment.user_id == current_user.id)
+        .order_by(Enrollment.id.desc())
+        .all()
+    )
+    primary_enrollment = linked_enrollments[0] if linked_enrollments else None
+
+    existing_archive = (
+        db.query(ArchivedStudentAccount)
+        .filter(ArchivedStudentAccount.original_user_id == current_user.id)
+        .first()
+    )
+    if existing_archive:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account has already been moved to the archive.",
+        )
+
+    db.add(
+        ArchivedStudentAccount(
+            original_user_id=current_user.id,
+            original_username=current_user.username,
+            original_email=current_user.email,
+            first_name=current_user.first_name,
+            middle_name=current_user.middle_name,
+            last_name=current_user.last_name,
+            phone_number=current_user.phone_number,
+            address=current_user.address,
+            birth_date=current_user.birth_date,
+            profile_image_path=current_user.profile_image_path,
+            role=current_user.role,
+            enrollment_id=primary_enrollment.id if primary_enrollment else None,
+            registration_id=primary_enrollment.registration_id if primary_enrollment else None,
+            batch_id=primary_enrollment.batch_id if primary_enrollment else None,
+            archive_reason="student_unenrolled",
+            archived_at=now,
+        )
+    )
+
+    for enrollment in linked_enrollments:
+        enrollment.status = "archived"
+        enrollment.user_id = None
+        enrollment.review_notes = _append_archive_note(enrollment.review_notes, archive_note)
+        db.add(enrollment)
+
+        registration = enrollment.registration
+        if registration is not None:
+            registration.status = "archived"
+            registration.linked_user_id = None
+            registration.notes = _append_archive_note(registration.notes, archive_note)
+            db.add(registration)
+
+    current_user.archived_at = now
+    current_user.username = f"archived-student-{current_user.id}-{timestamp_token}"
+    current_user.email = f"archived-student-{current_user.id}-{timestamp_token}@archive.local"
+    current_user.phone_number = None
+    current_user.address = None
+    current_user.birth_date = None
+    current_user.profile_image_path = None
+    current_user.password_hash = hash_password(f"Archived{uuid4().hex}!")
+    current_user.must_change_password = False
+    db.add(current_user)
+
+    db.query(UserSession).filter(UserSession.user_id == current_user.id).delete(
+        synchronize_session=False
+    )
+    db.query(PasswordResetOtp).filter(PasswordResetOtp.user_id == current_user.id).delete(
+        synchronize_session=False
+    )
+
+    db.commit()
+    return UserSelfArchiveResponse(
+        message="Your student account has been unenrolled and moved to the archive."
+    )
 
 
 @router.post("/me/profile-photo", response_model=UserOut)

@@ -1010,6 +1010,7 @@ MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG: dict[str, list[dict]] = {
 REQUIRED_TABLES = {
     "activity_attempt_items",
     "activity_attempts",
+    "archived_student_accounts",
     "assessment_reports",
     "batches",
     "enrollments",
@@ -1022,6 +1023,32 @@ REQUIRED_TABLES = {
     "user_sessions",
     "users",
 }
+
+
+def _table_exists(table_name: str) -> bool:
+    inspector = inspect(engine)
+    return table_name in set(inspector.get_table_names())
+
+
+def _column_exists(table_name: str, column_name: str) -> bool:
+    if not _table_exists(table_name):
+        return False
+    inspector = inspect(engine)
+    return column_name in {column["name"] for column in inspector.get_columns(table_name)}
+
+
+def _add_column_if_missing(table_name: str, column_name: str, ddl: str) -> None:
+    if _column_exists(table_name, column_name):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(ddl))
+
+
+def _create_table_if_missing(table_name: str, ddl: str) -> None:
+    if _table_exists(table_name):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(ddl))
 
 
 def seed_modules(db: Session) -> None:
@@ -1345,6 +1372,8 @@ def validate_seed_data() -> None:
 
 
 def ensure_schema_updates() -> None:
+    published_slugs = {item["slug"] for item in SEED_MODULES if item.get("is_published", True)}
+
     # Users table profile/account lifecycle columns.
     _add_column_if_missing("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR(120)")
     _add_column_if_missing("users", "middle_name", "ALTER TABLE users ADD COLUMN middle_name VARCHAR(120)")
@@ -1367,6 +1396,36 @@ def ensure_schema_updates() -> None:
         "users",
         "role",
         "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'",
+    )
+    _add_column_if_missing(
+        "users",
+        "archived_at",
+        "ALTER TABLE users ADD COLUMN archived_at TIMESTAMP",
+    )
+    _create_table_if_missing(
+        "archived_student_accounts",
+        """
+        CREATE TABLE archived_student_accounts (
+            id INTEGER PRIMARY KEY,
+            original_user_id INTEGER NOT NULL UNIQUE,
+            original_username VARCHAR(120) NOT NULL,
+            original_email VARCHAR(255),
+            first_name VARCHAR(120),
+            middle_name VARCHAR(120),
+            last_name VARCHAR(120),
+            phone_number VARCHAR(40),
+            address TEXT,
+            birth_date DATE,
+            profile_image_path VARCHAR(500),
+            role VARCHAR(20) NOT NULL DEFAULT 'student',
+            enrollment_id INTEGER,
+            registration_id INTEGER,
+            batch_id INTEGER,
+            archive_reason VARCHAR(120),
+            archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(original_user_id) REFERENCES users(id)
+        )
+        """,
     )
     _add_column_if_missing(
         "user_module_progress",
@@ -1434,6 +1493,7 @@ def init_db() -> None:
 
     if settings.should_auto_bootstrap_schema:
         Base.metadata.create_all(bind=engine)
+        ensure_schema_updates()
     else:
         _verify_required_tables()
 

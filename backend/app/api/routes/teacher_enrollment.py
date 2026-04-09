@@ -105,7 +105,14 @@ def _enrollment_out(enrollment: Enrollment) -> TeacherEnrollmentOut:
     batch = enrollment.batch
     student = enrollment.user
     student_count = (
-        sum(1 for item in batch.enrollments if item.status == "approved" and item.user_id is not None)
+        sum(
+            1
+            for item in batch.enrollments
+            if item.status == "approved"
+            and item.user_id is not None
+            and item.user is not None
+            and item.user.archived_at is None
+        )
         if batch
         else 0
     )
@@ -321,7 +328,10 @@ def list_teacher_batches(
             student_count=sum(
                 1
                 for enrollment in batch.enrollments
-                if enrollment.status == "approved" and enrollment.user_id is not None
+                if enrollment.status == "approved"
+                and enrollment.user_id is not None
+                and enrollment.user is not None
+                and enrollment.user.archived_at is None
             ),
         )
         for batch in batches
@@ -371,7 +381,9 @@ def list_batch_students(
     students = [
         enrollment.user
         for enrollment in batch.enrollments
-        if enrollment.status == "approved" and enrollment.user is not None
+        if enrollment.status == "approved"
+        and enrollment.user is not None
+        and enrollment.user.archived_at is None
     ]
     students.sort(key=lambda item: (_full_name(item), item.username))
     return [_student_summary(student) for student in students if student is not None]
@@ -383,7 +395,11 @@ def get_teacher_student(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
 ) -> TeacherStudentOut:
-    student = db.query(User).filter(User.id == student_id, User.role == "student").first()
+    student = (
+        db.query(User)
+        .filter(User.id == student_id, User.role == "student", User.archived_at.is_(None))
+        .first()
+    )
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
 
@@ -434,7 +450,11 @@ def list_teacher_student_activity_attempts(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
 ) -> list[TeacherActivityAttemptOut]:
-    student = db.query(User).filter(User.id == student_id, User.role == "student").first()
+    student = (
+        db.query(User)
+        .filter(User.id == student_id, User.role == "student", User.archived_at.is_(None))
+        .first()
+    )
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
     return [_activity_attempt_out(attempt) for attempt in _student_attempts_query(db, student_id).all()]

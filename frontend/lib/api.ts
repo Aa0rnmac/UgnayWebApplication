@@ -784,6 +784,12 @@ export function changeMyPassword(
   });
 }
 
+export function unenrollMyAccount(): Promise<{ message: string }> {
+  return request<{ message: string }>("/auth/me/unenroll", {
+    method: "POST",
+  });
+}
+
 export function uploadMyProfilePhoto(file: File): Promise<ApiUser> {
   const data = new FormData();
   data.append("profile_photo", file);
