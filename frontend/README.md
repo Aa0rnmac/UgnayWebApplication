@@ -16,6 +16,11 @@ npm install
 npm run dev
 ```
 
+If the Next.js cache gets into a bad state, use:
+```bash
+npm run dev:clean
+```
+
 ## Pages
 - `/` dashboard/home with progress summary
 - `/modules` module sidebar + lesson content + assessment controls + locking

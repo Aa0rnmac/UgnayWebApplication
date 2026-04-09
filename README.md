@@ -36,6 +36,7 @@ What it does:
 3. Install dependencies and run:
    - `npm install`
    - `npm run dev`
+   - If the Next.js cache is acting up, use `npm run dev:clean`
 
 ## VS Code One-Click Run
 1. Open `Run and Debug` in VS Code.
