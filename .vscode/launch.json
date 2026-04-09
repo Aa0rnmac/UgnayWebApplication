@@ -7,14 +7,21 @@
       "request": "launch",
       "python": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}/backend",
-      "program": "${workspaceFolder}/backend/scripts/run_dev_server.py",
+      "module": "uvicorn",
       "envFile": "${workspaceFolder}/backend/.env",
       "args": [
-        "--reload"
+        "app.main:app",
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
       ],
       "jinja": true,
       "justMyCode": false,
-      "console": "integratedTerminal"
+      "subProcess": true,
+      "console": "integratedTerminal",
+      "preLaunchTask": "Backend: Prepare run"
     },
     {
       "name": "Frontend: Next.js Dev",
@@ -29,12 +36,20 @@
       "request": "launch",
       "python": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}/backend",
-      "program": "${workspaceFolder}/backend/scripts/run_dev_server.py",
+      "module": "uvicorn",
       "envFile": "${workspaceFolder}/backend/.env",
-      "args": [],
+      "args": [
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
       "jinja": true,
       "justMyCode": false,
-      "console": "integratedTerminal"
+      "subProcess": true,
+      "console": "integratedTerminal",
+      "preLaunchTask": "Backend: Prepare run"
     }
   ],
   "compounds": [
