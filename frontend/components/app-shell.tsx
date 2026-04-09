@@ -127,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AppNav role={role} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-[57px] z-[120] overflow-visible border-b border-brandBorder bg-white/95 px-4 py-3 backdrop-blur-md md:top-0 md:px-8">
+        <header className="sticky top-[var(--teacher-shell-mobile-nav-offset)] z-[120] overflow-visible border-b border-brandBorder bg-white/95 px-4 py-3 backdrop-blur-md md:top-0 md:px-8">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 overflow-visible">
             <div className="flex items-center gap-3">
               <button

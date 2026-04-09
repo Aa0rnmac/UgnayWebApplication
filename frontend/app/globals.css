@@ -11,6 +11,12 @@
   --brand-blue: rgba(46, 68, 168, 0.08);
   --surface-tint: #ffffff;
   --surface-border: #e2e2ea;
+  --teacher-shell-mobile-nav-offset: 57px;
+  --teacher-shell-header-height: 4rem;
+  --teacher-shell-sticky-gap: 1rem;
+  --teacher-shell-sticky-top: calc(
+    var(--teacher-shell-header-height) + var(--teacher-shell-sticky-gap)
+  );
 }
 
 * {
@@ -125,6 +131,15 @@ body {
 
 .teacher-card-ghost-button:hover {
   background: rgba(255, 255, 255, 0.55);
+}
+
+@media (min-width: 768px) {
+  .teacher-sticky-panel {
+    position: sticky;
+    top: var(--teacher-shell-sticky-top);
+    height: fit-content;
+    z-index: 10;
+  }
 }
 
 .text-slate-900 {
