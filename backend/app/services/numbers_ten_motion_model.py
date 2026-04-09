@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 
 from app.core.config import settings
+from app.services.model_paths import resolve_model_artifact_path
 from app.services.word_motion_features import (
     extract_sequence_from_frame_bytes,
     sequence_to_feature_vector,
@@ -26,15 +26,7 @@ class NumbersTenMotionModelService:
         self._loaded = False
         self._model: Any | None = None
         self._classes: list[str] = []
-        self._model_path = self._resolve_model_path(settings.numbers_ten_model_path)
-
-    @staticmethod
-    def _resolve_model_path(path_value: str) -> Path:
-        path = Path(path_value)
-        if path.is_absolute():
-            return path
-        backend_root = Path(__file__).resolve().parents[2]
-        return (backend_root / path).resolve()
+        self._model_path = resolve_model_artifact_path(settings.numbers_ten_model_path)
 
     def _load_if_needed(self) -> None:
         if self._loaded:

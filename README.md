@@ -4,6 +4,25 @@ Monorepo scaffold for:
 - `backend/` FastAPI + PostgreSQL
 - `frontend/` Next.js + TypeScript + Tailwind
 
+## New Machine Setup
+Use the bootstrap script to prepare machine-specific files and install dependencies:
+- `.\setup-machine.cmd`
+- or `powershell -ExecutionPolicy Bypass -File .\setup-machine.ps1`
+
+Helpful options:
+- `-BackendOnly`
+- `-FrontendOnly`
+- `-ForceEnvCopy`
+- `-SkipInstalls`
+- `-DryRun`
+
+What it does:
+- creates `backend/.env` from `backend/.env.example` if missing
+- creates `frontend/.env.local` from `frontend/.env.local.example` if missing
+- creates `backend/.venv` if missing
+- installs `backend/requirements.txt`
+- runs `npm install` in `frontend/`
+
 ## Backend quick start
 1. Open terminal in `backend`.
 2. Create `.env` from `.env.example`.
@@ -20,6 +39,7 @@ Monorepo scaffold for:
 3. Install dependencies and run:
    - `npm install`
    - `npm run dev`
+   - If the Next.js cache is acting up, use `npm run dev:clean`
 
 ## VS Code One-Click Run
 1. Open `Run and Debug` in VS Code.

@@ -241,8 +241,7 @@ export default function TeacherClassesPage() {
               Approve learners, assign batches, and open live student rosters.
             </h2>
             <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
-              This screen is now backed by the real enrollment and batch backend. Review payment
-              proofs, approve or reject registrants, create batches, and open the roster for each group.
+              Review payment proofs, approve or reject registrants, create batches, and open the roster for each group.
             </p>
           </div>
           <Link
