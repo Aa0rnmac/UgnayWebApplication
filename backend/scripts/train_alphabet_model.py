@@ -107,8 +107,8 @@ def main() -> None:
         raise RuntimeError(f"Collated dataset folder not found at {status['kaggle_collated_path']}")
 
     collated_dir = Path(status["kaggle_collated_path"])
-    model_out = settings.resolve_artifact_path(args.model_out)
-    report_out = settings.resolve_artifact_path(args.report_out)
+    model_out = (ROOT / args.model_out).resolve()
+    report_out = (ROOT / args.report_out).resolve()
     model_out.parent.mkdir(parents=True, exist_ok=True)
     report_out.parent.mkdir(parents=True, exist_ok=True)
 

@@ -5,16 +5,29 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
-const NAV_ITEMS = [
+const STUDENT_NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", short: "D" },
   { href: "/modules", label: "Modules", short: "M" },
   { href: "/lab", label: "Free Signing Gesture", short: "F" }
 ] as const;
 
-export function AppNav() {
+const TEACHER_NAV_ITEMS = [
+  { href: "/teacher", label: "Workspace", short: "W" },
+  { href: "/teacher/modules", label: "Modules", short: "M" },
+  { href: "/teacher/lab", label: "Lab", short: "L" },
+  { href: "/teacher/progress", label: "Reports", short: "R" },
+  { href: "/teacher/classes", label: "Enrollments", short: "E" }
+] as const;
+
+export function AppNav({ role }: { role: "student" | "teacher" }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const navItems = role === "teacher" ? TEACHER_NAV_ITEMS : STUDENT_NAV_ITEMS;
+  const dailyGoal =
+    role === "teacher"
+      ? "Approve new learners, review the watchlist, and use the lab to support practical coaching."
+      : "Practice at least one module and one gesture set.";
 
   return (
     <>
@@ -93,7 +106,7 @@ export function AppNav() {
           </div>
 
           <nav className="flex-1 space-y-2 p-3">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link
@@ -119,7 +132,7 @@ export function AppNav() {
           {!collapsed ? (
             <div className="mx-3 mb-3 rounded-xl border border-brandYellow/35 bg-brandYellowLight p-3">
               <p className="text-[11px] uppercase tracking-wide text-[#9a7800]">Daily Goal</p>
-              <p className="mt-1 text-xs font-semibold text-slate-800">Practice at least one module and one gesture set.</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800">{dailyGoal}</p>
             </div>
           ) : null}
         </div>

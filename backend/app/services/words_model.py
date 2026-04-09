@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+import cv2
 import joblib
 import numpy as np
-
-try:
-    import cv2
-except ImportError:  # pragma: no cover - depends on local ML setup
-    cv2 = None
 
 from app.core.config import settings
 from app.services.word_motion_features import (
@@ -27,44 +24,37 @@ class WordsPrediction:
 
 class WordsModelService:
     def __init__(self) -> None:
+        self._loaded = False
         self._model: Any | None = None
         self._classes: list[str] = []
-        self._model_path = settings.resolve_artifact_path(settings.words_model_path)
-        self._artifact_mtime_ns: int | None = None
+        self._model_path = self._resolve_model_path(settings.words_model_path)
 
-    def _reset_loaded_state(self) -> None:
-        self._model = None
-        self._classes = []
+    @staticmethod
+    def _resolve_model_path(path_value: str) -> Path:
+        path = Path(path_value)
+        if path.is_absolute():
+            return path
+        backend_root = Path(__file__).resolve().parents[2]
+        return (backend_root / path).resolve()
 
     def _load_if_needed(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+
         if not self._model_path.exists():
-            self._reset_loaded_state()
-            self._artifact_mtime_ns = None
             return
 
-        current_mtime_ns = self._model_path.stat().st_mtime_ns
-        if (
-            self._artifact_mtime_ns == current_mtime_ns
-            and self._model is not None
-            and bool(self._classes)
-        ):
-            return
-
-        self._reset_loaded_state()
         artifact = joblib.load(self._model_path)
         model = artifact.get("model")
-        classes = artifact.get("classes") or list(getattr(model, "classes_", []))
+        classes = artifact.get("classes", [])
         if model is None or not classes:
-            self._artifact_mtime_ns = current_mtime_ns
             return
         self._model = model
-        self._classes = [str(item) for item in classes]
-        self._artifact_mtime_ns = current_mtime_ns
+        self._classes = list(classes)
 
     @staticmethod
     def _decode_frame(payload: bytes) -> np.ndarray | None:
-        if cv2 is None:
-            raise RuntimeError("Words mode requires optional OpenCV dependencies.")
         if not payload:
             return None
         return cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)

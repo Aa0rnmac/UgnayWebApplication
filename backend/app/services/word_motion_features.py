@@ -2,29 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
+import mediapipe as mp
 import numpy as np
-from typing import Any
-
-try:
-    import cv2
-except ImportError:  # pragma: no cover - depends on local ML setup
-    cv2 = None
-
-try:
-    import mediapipe as mp
-except ImportError:  # pragma: no cover - depends on local ML setup
-    mp = None
 
 from app.core.config import settings
 
 LANDMARK_DIM = 21 * 3
-
-
-def _ensure_motion_dependencies() -> None:
-    if cv2 is None or mp is None:
-        raise RuntimeError(
-            "Motion-based lab recognition requires optional OpenCV and MediaPipe dependencies."
-        )
 
 
 def normalize_landmarks(landmarks: np.ndarray) -> np.ndarray | None:
@@ -85,9 +69,8 @@ def _hand_crop_bbox(
 
 
 def _extract_feature_from_frame(
-    frame_bgr: np.ndarray, hands: Any
+    frame_bgr: np.ndarray, hands: mp.solutions.hands.Hands
 ) -> np.ndarray | None:
-    _ensure_motion_dependencies()
     if frame_bgr is None or frame_bgr.size == 0:
         return None
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -134,7 +117,6 @@ def extract_sequence_from_video(
     min_valid_frames: int,
     max_sampled_frames: int = 45,
 ) -> np.ndarray | None:
-    _ensure_motion_dependencies()
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
         return None
@@ -186,7 +168,6 @@ def extract_sequence_from_frame_bytes(
     target_frames: int,
     min_valid_frames: int,
 ) -> np.ndarray | None:
-    _ensure_motion_dependencies()
     extracted: list[np.ndarray] = []
     with mp.solutions.hands.Hands(
         static_image_mode=False,

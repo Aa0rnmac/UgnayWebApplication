@@ -5,9 +5,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
+import { useAuth } from "@/components/auth-context";
 import { AppNav } from "@/components/nav";
 import { SiteFooter } from "@/components/site-footer";
-import { getCurrentUser } from "@/lib/api";
 
 function isPublicRoute(pathname: string): boolean {
   return pathname === "/" || pathname.startsWith("/register");
@@ -16,69 +16,35 @@ function isPublicRoute(pathname: string): boolean {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [ready, setReady] = useState(false);
-  const [username, setUsername] = useState("Student");
-  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+  const { displayName, id, loading, logout, profileImagePath, role } = useAuth();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const publicRoute = useMemo(() => isPublicRoute(pathname), [pathname]);
+  const homeHref = role === "teacher" ? "/teacher" : "/dashboard";
+  const profileImageUrl = useMemo(() => {
+    if (!profileImagePath) {
+      return null;
+    }
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
+    const uploadBase = apiBase.replace(/\/api\/?$/, "");
+    return `${uploadBase}/${profileImagePath}`;
+  }, [profileImagePath]);
 
   useEffect(() => {
-    let active = true;
-    setReady(false);
-
-    const token = window.localStorage.getItem("auth_token");
-
+    if (loading) {
+      return;
+    }
     if (publicRoute) {
-      if (pathname === "/" && token) {
-        router.replace("/dashboard");
-        return;
+      if (pathname === "/" && id !== 0) {
+        router.replace(homeHref);
       }
-      setReady(true);
-      return () => {
-        active = false;
-      };
+      return;
     }
-
-    if (!token) {
+    if (id === 0) {
       router.replace("/");
-      return () => {
-        active = false;
-      };
     }
-
-    void getCurrentUser(token)
-      .then((user) => {
-        if (!active) {
-          return;
-        }
-        const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-        const resolvedName = fullName || (user.username?.trim() ? user.username : "Student");
-        setUsername(resolvedName);
-        if (user.profile_image_path) {
-          const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
-          const uploadBase = apiBase.replace(/\/api\/?$/, "");
-          setProfileImageUrl(`${uploadBase}/${user.profile_image_path}`);
-        } else {
-          setProfileImageUrl(null);
-        }
-        window.localStorage.setItem("auth_username", resolvedName);
-        setReady(true);
-      })
-      .catch(() => {
-        if (!active) {
-          return;
-        }
-        window.localStorage.removeItem("auth_token");
-        window.localStorage.removeItem("auth_username");
-        router.replace("/");
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [pathname, publicRoute, router]);
+  }, [homeHref, id, loading, pathname, publicRoute, router]);
 
   useEffect(() => {
     setUserMenuOpen(false);
@@ -113,7 +79,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [userMenuOpen]);
 
-  if (!ready) {
+  if (loading || (publicRoute && pathname === "/" && id !== 0) || (!publicRoute && id === 0)) {
     return <div className="min-h-screen bg-grid" />;
   }
 
@@ -148,7 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-grid md:flex">
-      <AppNav />
+      <AppNav role={role} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="relative z-[120] overflow-visible border-b border-brandBorder bg-white/95 px-4 py-3 backdrop-blur-md md:px-8">
@@ -161,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     router.back();
                     return;
                   }
-                  router.push("/dashboard");
+                  router.push(homeHref);
                 }}
                 type="button"
               >
@@ -169,7 +135,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
 
               <div className="text-sm font-semibold text-slate-700">
-                Welcome, <span className="text-brandBlue">{username}</span>
+                Welcome, <span className="text-brandBlue">{displayName}</span>
               </div>
             </div>
 
@@ -189,7 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   />
                 ) : (
                   <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-brandBlue text-sm font-bold text-white">
-                    {username.charAt(0).toUpperCase()}
+                    {displayName.charAt(0).toUpperCase()}
                   </span>
                 )}
               </button>
@@ -206,9 +172,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <button
                     className="mt-1 w-full rounded-lg bg-brandRed px-3 py-2 text-left text-sm font-semibold text-white transition hover:bg-brandRed/90"
                     onClick={() => {
-                      window.localStorage.removeItem("auth_token");
-                      window.localStorage.removeItem("auth_username");
-                      window.location.href = "/";
+                      void logout().finally(() => {
+                        router.replace("/");
+                      });
                     }}
                     type="button"
                   >

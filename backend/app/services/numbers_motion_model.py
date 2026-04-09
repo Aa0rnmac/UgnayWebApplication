@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import joblib
@@ -23,13 +24,21 @@ class NumbersMotionPrediction:
 
 class NumbersMotionModelService:
     def __init__(self) -> None:
+        self._loaded = False
         self._model: Any | None = None
         self._classes: list[str] = []
         self._feature_dim: int | None = None
         self._sequence_frames = settings.numbers_motion_sequence_frames
         self._min_sequence_frames = settings.numbers_motion_min_sequence_frames
-        self._model_path = settings.resolve_artifact_path(settings.numbers_motion_model_path)
-        self._artifact_mtime_ns: int | None = None
+        self._model_path = self._resolve_model_path(settings.numbers_motion_model_path)
+
+    @staticmethod
+    def _resolve_model_path(path_value: str) -> Path:
+        path = Path(path_value)
+        if path.is_absolute():
+            return path
+        backend_root = Path(__file__).resolve().parents[2]
+        return (backend_root / path).resolve()
 
     @staticmethod
     def _infer_sequence_frames(feature_dim: int | None) -> int | None:
@@ -56,37 +65,21 @@ class NumbersMotionModelService:
             return parsed if parsed > 0 else None
         return None
 
-    def _reset_loaded_state(self) -> None:
-        self._model = None
-        self._classes = []
-        self._feature_dim = None
-        self._sequence_frames = settings.numbers_motion_sequence_frames
-        self._min_sequence_frames = settings.numbers_motion_min_sequence_frames
-
     def _load_if_needed(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+
         if not self._model_path.exists():
-            self._reset_loaded_state()
-            self._artifact_mtime_ns = None
             return
 
-        current_mtime_ns = self._model_path.stat().st_mtime_ns
-        if (
-            self._artifact_mtime_ns == current_mtime_ns
-            and self._model is not None
-            and bool(self._classes)
-        ):
-            return
-
-        self._reset_loaded_state()
         artifact = joblib.load(self._model_path)
         model = artifact.get("model")
-        classes = artifact.get("classes") or list(getattr(model, "classes_", []))
+        classes = artifact.get("classes", [])
         if model is None or not classes:
-            self._artifact_mtime_ns = current_mtime_ns
             return
         self._model = model
         self._classes = [str(item) for item in classes]
-        self._artifact_mtime_ns = current_mtime_ns
 
         self._feature_dim = self._positive_int(artifact.get("feature_dim"))
         if self._feature_dim is None:

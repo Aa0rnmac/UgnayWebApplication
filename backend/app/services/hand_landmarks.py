@@ -1,26 +1,10 @@
 from __future__ import annotations
 
+import cv2
+import mediapipe as mp
 import numpy as np
-from typing import Any
-
-try:
-    import cv2
-except ImportError:  # pragma: no cover - depends on local ML setup
-    cv2 = None
-
-try:
-    import mediapipe as mp
-except ImportError:  # pragma: no cover - depends on local ML setup
-    mp = None
 
 from app.core.config import settings
-
-
-def _ensure_lab_dependencies() -> None:
-    if cv2 is None or mp is None:
-        raise RuntimeError(
-            "Lab image recognition requires optional OpenCV and MediaPipe dependencies."
-        )
 
 
 def _normalize_landmarks(landmarks: np.ndarray) -> np.ndarray | None:
@@ -36,7 +20,7 @@ def _normalize_landmarks(landmarks: np.ndarray) -> np.ndarray | None:
 
 
 def _extract_from_bgr_image(
-    image_bgr: np.ndarray, hands: Any
+    image_bgr: np.ndarray, hands: mp.solutions.hands.Hands
 ) -> np.ndarray | None:
     if image_bgr is None or image_bgr.size == 0:
         return None
@@ -69,7 +53,6 @@ def _extract_raw_landmarks_from_bgr_image(
 
 
 def _decode_image(image_bytes: bytes) -> np.ndarray | None:
-    _ensure_lab_dependencies()
     data = np.frombuffer(image_bytes, dtype=np.uint8)
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
 
@@ -91,7 +74,6 @@ def _build_image_variants(image_bgr: np.ndarray) -> list[np.ndarray]:
 
 
 def extract_landmark_feature_candidates(image_bytes: bytes) -> list[np.ndarray]:
-    _ensure_lab_dependencies()
     image_bgr = _decode_image(image_bytes)
     if image_bgr is None:
         return []

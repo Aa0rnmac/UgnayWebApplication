@@ -23,26 +23,12 @@ type AuthUser = {
   profileImagePath: string | null;
 };
 
-type TeacherRegistrationPayload = {
-  username: string;
-  password: string;
-  passkey: string;
-  first_name: string;
-  middle_name?: string;
-  last_name: string;
-  email: string;
-  phone_number?: string;
-  address?: string;
-  birth_date?: string;
-};
-
 type SessionState = AuthUser & {
   loading: boolean;
 };
 
 type AuthState = SessionState & {
   login: (username: string, password: string) => Promise<AuthUser>;
-  registerTeacher: (payload: TeacherRegistrationPayload) => Promise<AuthUser>;
   logout: () => Promise<void>;
 };
 
@@ -50,19 +36,6 @@ type LoginResponse = {
   token?: string;
   detail?: string;
   user?: RawSessionUser;
-};
-
-const GUEST_USER: AuthUser = {
-  id: 0,
-  username: "Guest",
-  role: "student",
-  displayName: "Guest",
-  profileImagePath: null,
-};
-
-const GUEST_STATE: SessionState = {
-  ...GUEST_USER,
-  loading: false,
 };
 
 function toAuthUser(user?: RawSessionUser): AuthUser {
@@ -84,12 +57,28 @@ function isGuestUser(user: AuthUser): boolean {
 }
 
 const AuthContext = createContext<AuthState>({
-  ...GUEST_USER,
+  id: 0,
+  username: "Guest",
+  role: "student",
+  displayName: "Guest",
+  profileImagePath: null,
   loading: true,
   login: async () => GUEST_USER,
-  registerTeacher: async () => GUEST_USER,
   logout: async () => {},
 });
+
+const GUEST_USER: AuthUser = {
+  id: 0,
+  username: "Guest",
+  role: "student",
+  displayName: "Guest",
+  profileImagePath: null,
+};
+
+const GUEST_STATE: SessionState = {
+  ...GUEST_USER,
+  loading: false,
+};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<SessionState>({ ...GUEST_USER, loading: true });
@@ -181,28 +170,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return persistAuthenticatedUser(data.token, data.user);
   }
 
-  async function registerTeacher(payload: TeacherRegistrationPayload): Promise<AuthUser> {
-    const response = await fetch("/api/auth/register-teacher", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = (await response.json().catch(() => ({}))) as LoginResponse;
-
-    if (!response.ok) {
-      throw new Error(data.detail ?? "Unable to create teacher account.");
-    }
-
-    if (!data.token) {
-      throw new Error("Registration succeeded but no session token was returned.");
-    }
-
-    return persistAuthenticatedUser(data.token, data.user);
-  }
-
   async function logout() {
     try {
       await fetch("/api/auth/logout", {
@@ -218,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ ...state, login, registerTeacher, logout }}>
+    <AuthContext.Provider value={{ ...state, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

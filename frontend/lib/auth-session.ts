@@ -34,19 +34,6 @@ export type SessionUser = {
   role: SessionRole;
 };
 
-export type TeacherRegistrationRequest = {
-  username: string;
-  password: string;
-  passkey: string;
-  first_name: string;
-  middle_name?: string;
-  last_name: string;
-  email: string;
-  phone_number?: string;
-  address?: string;
-  birth_date?: string;
-};
-
 export function guestSessionUser(): SessionUser {
   return {
     id: 0,
@@ -91,19 +78,6 @@ export async function loginAgainstBackend(
   | { ok: false; status: number; detail: string }
 > {
   return requestAuthFromBackend("/auth/login", { username, password }, "Unable to sign in.");
-}
-
-export async function registerTeacherAgainstBackend(
-  payload: TeacherRegistrationRequest
-): Promise<
-  | { ok: true; token: string; user: SessionUser }
-  | { ok: false; status: number; detail: string }
-> {
-  return requestAuthFromBackend(
-    "/auth/register/teacher",
-    payload,
-    "Unable to create teacher account."
-  );
 }
 
 async function requestAuthFromBackend(

@@ -10,6 +10,7 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $repoRoot "backend"
 $frontendDir = Join-Path $repoRoot "frontend"
 $backendPython = Join-Path $backendDir ".venv\Scripts\python.exe"
+$backendAlembicConfig = Join-Path $backendDir "alembic.ini"
 $backendEnv = Join-Path $backendDir ".env"
 $frontendEnv = Join-Path $frontendDir ".env.local"
 $frontendNodeModules = Join-Path $frontendDir "node_modules"
@@ -212,6 +213,7 @@ if ($backendShouldRestart -or $frontendShouldRestart) {
 if ($backendWillStart) {
     Require-Path -Label "Missing backend env" -Path $backendEnv
     Require-Path -Label "Missing backend virtual environment" -Path $backendPython
+    Require-Path -Label "Missing Alembic config" -Path $backendAlembicConfig
 
     if (Test-Path -LiteralPath $backendPython) {
         $backendLaunchConfig = Get-BackendLaunchConfig -PythonPath $backendPython -VenvDir $backendVenvDir -BackendDir $backendDir
@@ -268,6 +270,9 @@ if ($backendLaunchConfig -and $backendLaunchConfig.UsesFallback) {
 }
 
 $backendSteps += 'Write-Host ''Backend startup uses DATABASE_URL from backend\.env.'' -ForegroundColor Yellow'
+$backendSteps += 'Write-Host ''Applying backend database migrations (alembic upgrade head)...'' -ForegroundColor Yellow'
+$backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' -m alembic upgrade head'
+$backendSteps += 'if ($LASTEXITCODE -ne 0) { throw ''Backend migration failed. Fix the Alembic/database error above, then retry.'' }'
 $backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000'
 
 $frontendSteps = @(

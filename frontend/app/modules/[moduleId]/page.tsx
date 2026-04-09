@@ -643,6 +643,28 @@ function Module1AssessmentOne({
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
 
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-1",
+      assessmentTitle: "Assessment 1",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
+
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="text-xl font-semibold text-slate-900">Assessment 1</h3>
@@ -733,6 +755,29 @@ function Module1AssessmentTwo({
     const value = answers[item.id]?.trim().toUpperCase() ?? "";
     return total + (value === item.answer ? 1 : 0);
   }, 0);
+
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = MODULE1_LABELING_ITEMS.length;
+    const right = correctCount;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = MODULE1_LABELING_ITEMS.filter((item) => {
+      const value = answers[item.id]?.trim().toUpperCase() ?? "";
+      return value !== item.answer;
+    }).map((item) => `Hand sign item ${item.answer}`);
+    onSubmitResult?.({
+      assessmentId: "m1-assessment-2",
+      assessmentTitle: "Assessment 2",
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -1207,6 +1252,28 @@ function Module2AssessmentOne({
     }
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
+
+  function submitAssessmentResult() {
+    if (reported) {
+      return;
+    }
+    const total = questions.length;
+    const right = score;
+    const wrong = Math.max(0, total - right);
+    const improvementAreas = questions
+      .filter((question) => selectedChoices[question.id] !== question.answer)
+      .map((question) => question.question);
+    onSubmitResult?.({
+      assessmentId,
+      assessmentTitle,
+      right,
+      wrong,
+      total,
+      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+      improvementAreas,
+    });
+    setReported(true);
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -1931,6 +1998,7 @@ function GestureCameraAssessment({
 function Module3AssessmentTwo() {
   return (
     <GestureCameraAssessment
+      assessmentId="m3-assessment-2"
       intro="Use the camera interface and sign at least 7 gestures from this module."
       minimumRequired={7}
       targets={MODULE3_GESTURE_TARGETS}
@@ -2710,15 +2778,21 @@ export default function ModuleDetailPage() {
               ) : isModule1 && selectedAssessmentId === "m1-assessment-3" ? (
                 <Module1AssessmentThree />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Numbers" questions={module2AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m2-assessment-1"
+                  moduleLabel="Numbers"
+                  questions={module2AssessmentQuestions}
+                />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-2" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-2"
                   intro="Use the camera interface and sign each number from 1 to 10."
                   targets={MODULE2_SIGN_1_TO_10_STEPS}
                   title="Assessment 2"
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-3" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-3"
                   intro="Use the camera interface and sign numbers from 11 to 20. Complete at least 5."
                   minimumRequired={5}
                   targets={MODULE2_SIGN_11_TO_20_STEPS}
@@ -2726,6 +2800,7 @@ export default function ModuleDetailPage() {
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-4" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-4"
                   intro="Use the camera interface and sign numbers from 31 to 40. Complete at least 5."
                   minimumRequired={5}
                   targets={MODULE2_SIGN_31_TO_40_STEPS}
@@ -2733,6 +2808,7 @@ export default function ModuleDetailPage() {
                 />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-5" ? (
                 <NumbersCameraAssessment
+                  assessmentId="m2-assessment-5"
                   intro="Use the camera interface and sign numbers from 91 to 100. Complete at least 5."
                   minimumRequired={5}
                   targets={MODULE2_SIGN_91_TO_100_STEPS}
@@ -2740,53 +2816,79 @@ export default function ModuleDetailPage() {
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-1" ? (
                 <Module2AssessmentOne
+                  assessmentId="m3-assessment-1"
                   moduleLabel="Greetings & Basic Expressions"
                   questions={module3AssessmentQuestions}
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-2" ? (
                 <Module3AssessmentTwo />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Family Members" questions={module4AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m4-assessment-1"
+                  moduleLabel="Family Members"
+                  questions={module4AssessmentQuestions}
+                />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m4-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
                   targets={MODULE4_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="People Description" questions={module5AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m5-assessment-1"
+                  moduleLabel="People Description"
+                  questions={module5AssessmentQuestions}
+                />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m5-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
                   targets={MODULE5_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Days" questions={module6AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m6-assessment-1"
+                  moduleLabel="Days"
+                  questions={module6AssessmentQuestions}
+                />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m6-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
                   targets={MODULE6_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Colors & Descriptions" questions={module7AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m7-assessment-1"
+                  moduleLabel="Colors & Descriptions"
+                  questions={module7AssessmentQuestions}
+                />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-2" ? (
                 <Module7ColorAssessmentTwo />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-3" ? (
                 <GestureCameraAssessment
+                  assessmentId="m7-assessment-3"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
                   targets={MODULE7_GESTURE_TARGETS}
                   title="Assessment 3"
                 />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-1" ? (
-                <Module2AssessmentOne moduleLabel="Basic Conversations" questions={module8AssessmentQuestions} />
+                <Module2AssessmentOne
+                  assessmentId="m8-assessment-1"
+                  moduleLabel="Basic Conversations"
+                  questions={module8AssessmentQuestions}
+                />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-2" ? (
                 <GestureCameraAssessment
+                  assessmentId="m8-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
                   targets={MODULE8_GESTURE_TARGETS}
@@ -2806,68 +2908,3 @@ export default function ModuleDetailPage() {
     </section>
   );
 }
-
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = questions.length;
-    const right = score;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = questions
-      .filter((question) => selectedChoices[question.id] !== question.answer)
-      .map((question) => question.question);
-    onSubmitResult?.({
-      assessmentId: "m1-assessment-1",
-      assessmentTitle: "Assessment 1",
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas,
-    });
-    setReported(true);
-  }
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = MODULE1_LABELING_ITEMS.length;
-    const right = correctCount;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = MODULE1_LABELING_ITEMS.filter((item) => {
-      const value = answers[item.id]?.trim().toUpperCase() ?? "";
-      return value !== item.answer;
-    }).map((item) => `Hand sign item ${item.answer}`);
-    onSubmitResult?.({
-      assessmentId: "m1-assessment-2",
-      assessmentTitle: "Assessment 2",
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas,
-    });
-    setReported(true);
-  }
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = questions.length;
-    const right = score;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = questions
-      .filter((question) => selectedChoices[question.id] !== question.answer)
-      .map((question) => question.question);
-    onSubmitResult?.({
-      assessmentId,
-      assessmentTitle,
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas,
-    });
-    setReported(true);
-  }

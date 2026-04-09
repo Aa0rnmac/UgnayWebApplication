@@ -43,3 +43,10 @@ Available launch profiles:
   - `student_demo` / `student123`
   - `teacher_demo` / `teacher123`
 - Backend still falls back to `student_demo` when no auth token is sent to student endpoints.
+
+## Teacher Backend Guardrails
+- Teacher UI exploration happens on `tim`, but real backend contracts must come from `upstream/main`
+- Use `docs/teacher-backend-workflow.md` before adding teacher features that need backend support
+- Define new teacher backend work with `docs/templates/teacher-backend-contract.md`
+- Run the backend drift check before review:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\check-teacher-backend-alignment.ps1`

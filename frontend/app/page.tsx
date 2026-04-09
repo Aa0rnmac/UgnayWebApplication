@@ -180,7 +180,7 @@ export default function LoginPage() {
       const response = await login(username.trim(), password);
       window.localStorage.setItem("auth_token", response.token);
       window.localStorage.setItem("auth_username", response.user.username);
-      window.location.href = "/dashboard";
+      window.location.href = response.user.role === "teacher" ? "/teacher" : "/dashboard";
     } catch (loginError) {
       const message = loginError instanceof Error ? loginError.message : "Login failed.";
       setError(message);
@@ -242,7 +242,7 @@ export default function LoginPage() {
       );
       window.localStorage.setItem("auth_token", response.token);
       window.localStorage.setItem("auth_username", response.user.username);
-      window.location.href = "/dashboard";
+      window.location.href = response.user.role === "teacher" ? "/teacher" : "/dashboard";
     } catch (verifyError) {
       const message =
         verifyError instanceof Error ? verifyError.message : "Failed to verify OTP code.";
