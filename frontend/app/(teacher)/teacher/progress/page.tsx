@@ -21,6 +21,7 @@ import {
   getTeacherStudent,
   getTeacherStudentActivityAttempts,
 } from "@/lib/api";
+import { TeacherStudentReviewPanels } from "@/components/teacher/student-review-panels";
 
 const PREVIEW_LIMIT = 5;
 const BREAKDOWN_PREVIEW_LIMIT = 10;
@@ -984,138 +985,14 @@ function StudentProgressModal({
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-4 xl:grid-cols-[0.88fr,1.12fr]">
-                    <div className="rounded-[28px] border border-black/10 bg-black/5 px-5 py-5">
-                      <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandBlue">
-                        Module Progress
-                      </p>
-                      <div className="mt-4 space-y-3">
-                        {student?.module_progress.length ? (
-                          student.module_progress.map((item) => (
-                            <div
-                              key={item.module_id}
-                              className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <p className="teacher-card-title text-sm font-black">
-                                  {item.module_title}
-                                </p>
-                                <span className="rounded-full border border-white/15 bg-black/25 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-900">
-                                  {item.status}
-                                </span>
-                              </div>
-                              <p className="teacher-card-copy mt-3 text-sm">
-                                Progress {item.progress_percent}% - assessment{" "}
-                                {formatPercent(item.assessment_score, 2)}
-                              </p>
-                              <p className="teacher-card-meta mt-2 text-xs">
-                                Updated {formatDateTime(item.updated_at)}
-                              </p>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                            No module progress has been saved for this student yet.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-[28px] border border-black/10 bg-black/5 px-5 py-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-                          Activity Taken
-                        </p>
-                        <p className="teacher-card-meta text-xs">
-                          {attemptSummary.modulesTouched} module(s) touched
-                        </p>
-                      </div>
-
-                      <div className="mt-4 space-y-3">
-                        {attempts.length ? (
-                          attempts.map((attempt) => (
-                            <details
-                              key={attempt.id}
-                              className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                            >
-                              <summary className="cursor-pointer list-none">
-                                <div className="flex flex-wrap items-start justify-between gap-3">
-                                  <div>
-                                    <p className="teacher-card-title text-sm font-black">
-                                      {attempt.activity_title}
-                                    </p>
-                                    <p className="teacher-card-meta mt-1 text-xs">
-                                      {attempt.module_title} - {attempt.activity_type}
-                                    </p>
-                                  </div>
-                                  <div className="text-right">
-                                    <p className="teacher-card-title text-sm font-black">
-                                      {formatPercent(attempt.score_percent, 2)}
-                                    </p>
-                                    <p className="teacher-card-meta mt-1 text-xs">
-                                      {attempt.right_count}/{attempt.total_items} correct
-                                    </p>
-                                  </div>
-                                </div>
-                                <p className="teacher-card-meta mt-3 text-xs">
-                                  Submitted {formatDateTime(attempt.submitted_at)}
-                                </p>
-                              </summary>
-
-                              {attempt.improvement_areas.length ? (
-                                <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
-                                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-brandBlue">
-                                    Improvement Areas
-                                  </p>
-                                  <p className="teacher-card-copy mt-2 text-sm">
-                                    {attempt.improvement_areas.join(", ")}
-                                  </p>
-                                </div>
-                              ) : null}
-
-                              <div className="mt-4 space-y-3">
-                                {attempt.items.map((item) => (
-                                  <div
-                                    key={item.id}
-                                    className="rounded-2xl border border-white/10 bg-black/25 p-4"
-                                  >
-                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                      <p className="teacher-card-title text-sm font-semibold">
-                                        {item.prompt ?? item.item_key}
-                                      </p>
-                                      <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-900">
-                                        {item.is_correct === true
-                                          ? "Correct"
-                                          : item.is_correct === false
-                                            ? "Needs review"
-                                            : "Ungraded"}
-                                      </span>
-                                    </div>
-                                    <p className="teacher-card-copy mt-3 text-sm">
-                                      Expected: {item.expected_answer ?? "Not provided"}
-                                    </p>
-                                    <p className="teacher-card-copy mt-1 text-sm">
-                                      Student answer: {item.student_answer ?? "No answer"}
-                                    </p>
-                                    <p className="teacher-card-meta mt-2 text-xs">
-                                      Confidence{" "}
-                                      {item.confidence !== null
-                                        ? `${(item.confidence * 100).toFixed(1)}%`
-                                        : "Not captured"}
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
-                            </details>
-                          ))
-                        ) : (
-                          <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                            No saved activity attempts are available for this student yet.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <TeacherStudentReviewPanels
+                    activityPanelClassName="rounded-[28px] border border-black/10 bg-black/5 px-5 py-5"
+                    activityTitle="Activity Taken"
+                    attempts={attempts}
+                    containerClassName="mt-4 grid gap-4 xl:grid-cols-[0.88fr,1.12fr]"
+                    modulePanelClassName="rounded-[28px] border border-black/10 bg-black/5 px-5 py-5"
+                    student={student}
+                  />
                 </>
               )}
             </div>
