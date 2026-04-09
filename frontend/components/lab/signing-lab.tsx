@@ -492,7 +492,7 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     if (autoMode) {
       setCaptureStatus(
         isTeacherTester
-          ? "Recognition tester active: keep one gesture centered in view."
+          ? "Live recognition active: keep one gesture centered in view."
           : "Auto capture: hold your gesture in view."
       );
       return;
@@ -803,32 +803,33 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     void ensureSelectedModeReady({ fromCamera: true });
   }, [running, mode, numbersCategory, wordsCategory, predicting]);
 
-  const sectionTitle = isTeacherTester ? "Gesture Recognition Tester" : "Free Signing Lab";
-  const sectionDescription = isTeacherTester
-    ? "Run isolated recognition tests against the live recognition models. This teacher tool shows the latest result only and does not build student-style phrase input."
-    : "For Alphabet mode, show an open palm to enter the current predicted letter. Numbers and Words support manual capture.";
-  const modeLabel = isTeacherTester ? "What do you want to test?" : "What do you want to sign?";
-  const actionLabel = isTeacherTester ? "Run Recognition Test" : "Analyze Sign Now";
-  const outputLabel = isTeacherTester ? "Latest Test Result" : "Prediction Output";
+  const sectionTitle = "Free Signing Lab";
+  const sectionDescription =
+    "For Alphabet mode, show an open palm to enter the current predicted letter. Numbers and Words support manual capture.";
+  const modeLabel = isTeacherTester ? "Recognition Mode" : "What do you want to sign?";
+  const actionLabel = "Analyze Sign Now";
+  const outputLabel = "Prediction Output";
   const idleStatus = isTeacherTester
     ? isSequenceMode
-      ? `${mode === "words" ? "Words" : "Numbers"} tester ready`
-      : "Alphabet tester ready"
+      ? `${mode === "words" ? "Words" : "Numbers"} mode ready`
+      : "Alphabet mode ready"
     : isSequenceMode
       ? `${mode === "words" ? "Words" : "Numbers"} manual mode ready`
       : "Alphabet mode active (show open palm to enter)";
   const activeStatus = isTeacherTester
-    ? "Recognition test running..."
+    ? "Analyzing gesture..."
     : isSequenceMode
       ? "Analyzing gesture sequence..."
       : "Live mode active";
 
   return (
     <section className="space-y-4">
-      <div className="panel panel-lively">
-        <h2 className="text-2xl font-semibold title-gradient">{sectionTitle}</h2>
-        <p className="mt-2 text-sm text-muted">{sectionDescription}</p>
-      </div>
+      {!isTeacherTester ? (
+        <div className="panel panel-lively">
+          <h2 className="text-2xl font-semibold title-gradient">{sectionTitle}</h2>
+          <p className="mt-2 text-sm text-muted">{sectionDescription}</p>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
         <div className="panel panel-lively">
@@ -969,23 +970,16 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
           <p className="mt-1 text-xs text-slate-600">
             Top candidates: {topCandidates.length > 0 ? topCandidates.join(" | ") : "N/A"}
           </p>
+          {isTeacherTester ? (
+            <p className="mt-2 text-xs text-slate-600">
+              Last result: {formatResultTime(lastTestedAt)}
+            </p>
+          ) : null}
 
           {isTeacherTester ? (
             <>
-              <div className="mt-4 rounded-xl border border-brandBorder bg-brandMutedSurface px-3 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-brandBlue">
-                  Tester Notes
-                </p>
-                <p className="mt-2 text-sm text-slate-700">
-                  This teacher tool keeps only the latest recognition result so you can inspect one
-                  gesture test at a time.
-                </p>
-                <p className="mt-2 text-xs text-slate-600">
-                  Last test: {formatResultTime(lastTestedAt)}
-                </p>
-              </div>
               <button
-                className="mt-2 rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                className="mt-4 rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
                 onClick={() => {
                   setPrediction("No prediction yet.");
                   setConfidence(null);
@@ -995,7 +989,7 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
                 }}
                 type="button"
               >
-                Reset Test Result
+                Clear Result
               </button>
             </>
           ) : (
