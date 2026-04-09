@@ -6,6 +6,7 @@ import {
   ApiUser,
   changeMyPassword,
   getCurrentUser,
+  resolveUploadsBase,
   updateMyProfile,
   uploadMyProfilePhoto
 } from "@/lib/api";
@@ -15,7 +16,6 @@ import {
   isValidPhilippinePhone,
   normalizePhilippinePhone
 } from "@/lib/validation";
-import { getUploadBase } from "@/lib/api-base";
 
 type ProfileForm = {
   firstName: string;
@@ -57,7 +57,8 @@ export default function ProfilePage() {
     if (!user?.profile_image_path) {
       return null;
     }
-    return `${getUploadBase()}/${user.profile_image_path}`;
+    const uploadBase = resolveUploadsBase();
+    return `${uploadBase}/${user.profile_image_path}`;
   }, [user?.profile_image_path]);
 
   useEffect(() => {

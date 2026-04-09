@@ -1,4 +1,38 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
+function isLocalHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+export function resolveApiBase(): string {
+  const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (configuredBase) {
+    if (typeof window !== "undefined") {
+      try {
+        const configuredUrl = new URL(configuredBase);
+        // If frontend is accessed over LAN, but env still points to localhost,
+        // auto-rewrite host to the current browser host to avoid network fetch failures.
+        if (isLocalHostname(configuredUrl.hostname) && !isLocalHostname(window.location.hostname)) {
+          configuredUrl.hostname = window.location.hostname;
+          configuredUrl.protocol = window.location.protocol;
+          return configuredUrl.toString().replace(/\/$/, "");
+        }
+      } catch {
+        // Ignore malformed env values; fallback logic below will apply.
+      }
+    }
+    return configuredBase;
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8000/api`;
+  }
+
+  return "http://localhost:8000/api";
+}
+
+export function resolveUploadsBase(): string {
+  return resolveApiBase().replace(/\/api\/?$/, "");
+}
 
 function getStoredToken(): string | undefined {
   if (typeof window === "undefined") {
@@ -64,6 +98,51 @@ export type TeacherInviteVerifyPasskeyResponse = {
 export type TeacherInviteIssueCredentialsResponse = {
   message: string;
   username: string;
+};
+
+export type TeacherStudentReportRow = {
+  student_id: number;
+  student_name: string;
+  student_email?: string | null;
+  total_assessments: number;
+  pending_reports: number;
+  generated_reports: number;
+  average_score_percent: number;
+  latest_activity_at?: string | null;
+};
+
+export type TeacherStudentReportTableResponse = {
+  students: TeacherStudentReportRow[];
+};
+
+export type TeacherModuleSummary = {
+  module_id: number;
+  module_title: string;
+  assessments_taken: number;
+  right_count: number;
+  wrong_count: number;
+  total_items: number;
+  score_percent: number;
+};
+
+export type TeacherImprovementAreaItem = {
+  area: string;
+  count: number;
+};
+
+export type TeacherGeneratedStudentReport = {
+  student_id: number;
+  student_name: string;
+  student_email?: string | null;
+  generated_at: string;
+  total_assessments: number;
+  pending_reports_before_generate: number;
+  total_right: number;
+  total_wrong: number;
+  total_items: number;
+  overall_score_percent: number;
+  modules: TeacherModuleSummary[];
+  top_improvement_areas: TeacherImprovementAreaItem[];
 };
 
 export type RegistrationPayload = {
@@ -186,47 +265,6 @@ export type TeacherAssessmentReport = {
   improvement_areas: string[];
   status: string;
   created_at: string;
-};
-
-export type TeacherStudentReportRow = {
-  student_id: number;
-  student_name: string;
-  student_email: string | null;
-  total_assessments: number;
-  pending_reports: number;
-  generated_reports: number;
-  average_score_percent: number;
-  latest_activity_at: string | null;
-};
-
-export type TeacherModuleSummary = {
-  module_id: number;
-  module_title: string;
-  assessments_taken: number;
-  right_count: number;
-  wrong_count: number;
-  total_items: number;
-  score_percent: number;
-};
-
-export type TeacherImprovementAreaItem = {
-  area: string;
-  count: number;
-};
-
-export type TeacherGeneratedStudentReport = {
-  student_id: number;
-  student_name: string;
-  student_email: string | null;
-  generated_at: string;
-  total_assessments: number;
-  pending_reports_before_generate: number;
-  total_right: number;
-  total_wrong: number;
-  total_items: number;
-  overall_score_percent: number;
-  modules: TeacherModuleSummary[];
-  top_improvement_areas: TeacherImprovementAreaItem[];
 };
 
 export type TeacherBatch = {
@@ -565,11 +603,41 @@ type TeacherAssessmentReportsResponse = {
   reports: TeacherAssessmentReport[];
 };
 
-type TeacherStudentReportTableResponse = {
-  students: TeacherStudentReportRow[];
-};
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => formatApiErrorDetail(item))
+      .filter((item) => item && item !== "Request failed");
+    return parts.length > 0 ? parts.join(" ") : "Request failed";
+  }
+
+  if (detail && typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    const message =
+      (typeof record.msg === "string" && record.msg) ||
+      (typeof record.message === "string" && record.message) ||
+      (typeof record.detail === "string" && record.detail);
+
+    if (message) {
+      const location = Array.isArray(record.loc)
+        ? record.loc
+            .map((part) => String(part))
+            .filter((part) => part !== "body")
+            .join(".")
+        : "";
+      return location ? `${location}: ${message}` : message;
+    }
+  }
+
+  return "Request failed";
+}
 
 async function performRequest(path: string, options?: RequestInit, token?: string): Promise<Response> {
+  const apiBase = resolveApiBase();
   const headers = new Headers(options?.headers);
   if (!(options?.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -582,7 +650,7 @@ async function performRequest(path: string, options?: RequestInit, token?: strin
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(`${apiBase}${path}`, {
       ...options,
       headers,
       cache: "no-store",
@@ -590,7 +658,7 @@ async function performRequest(path: string, options?: RequestInit, token?: strin
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown network error";
     throw new Error(
-      `Unable to reach API at ${API_BASE}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
+      `Unable to reach API at ${apiBase}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
     );
   }
 
@@ -598,8 +666,11 @@ async function performRequest(path: string, options?: RequestInit, token?: strin
     const fallback = "Request failed";
     let detail = fallback;
     try {
-      const data = (await response.json()) as { detail?: string; message?: string };
-      detail = data.detail ?? data.message ?? fallback;
+      const data = (await response.json()) as { detail?: unknown; message?: unknown };
+      detail =
+        formatApiErrorDetail(data.detail) ||
+        formatApiErrorDetail(data.message) ||
+        fallback;
     } catch {
       try {
         detail = (await response.text()) || fallback;
@@ -925,6 +996,7 @@ export function updateModuleProgress(
   moduleId: number,
   payload: {
     completed_lesson_id?: string;
+    assessment_id?: string;
     assessment_score?: number;
     assessment_right?: number;
     assessment_wrong?: number;
@@ -943,6 +1015,10 @@ export function updateModuleProgress(
     },
     token
   );
+}
+
+export function getTeacherReportStudents(token?: string): Promise<TeacherStudentReportTableResponse> {
+  return request<TeacherStudentReportTableResponse>("/teacher/reports/students", undefined, token);
 }
 
 export function predictSign(

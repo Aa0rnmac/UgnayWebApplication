@@ -935,6 +935,12 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
             </div>
           ) : null}
 
+          {!isTeacherTester && mode === "alphabet" ? (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-900">
+              Note: Show an open palm after the prediction appears to enter the letter.
+            </div>
+          ) : null}
+
           {isSequenceMode || isTeacherTester ? (
             <div className="mt-3 flex flex-wrap gap-2">
               <button

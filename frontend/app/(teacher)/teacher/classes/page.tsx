@@ -80,7 +80,20 @@ export default function TeacherClassesPage() {
       setApproved(nextApproved);
       setDrafts((previous) => {
         const next: Record<number, ReviewDraft> = {};
-        for (const item of nextPending) next[item.id] = previous[item.id] ?? defaultDraft(nextBatches);
+        for (const item of nextPending) {
+          const existing = previous[item.id];
+          const existingBatchStillValid =
+            !!existing?.batchId && nextBatches.some((batch) => String(batch.id) === existing.batchId);
+
+          next[item.id] = existingBatchStillValid
+            ? existing
+            : {
+                ...(existing ?? defaultDraft(nextBatches)),
+                batchId: existingBatchStillValid
+                  ? existing.batchId
+                  : defaultDraft(nextBatches).batchId,
+              };
+        }
         return next;
       });
     } catch (requestError) {
