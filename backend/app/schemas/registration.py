@@ -17,7 +17,6 @@ class RegistrationCreate(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     phone_number: str = Field(min_length=11, max_length=11)
     reference_number: str = Field(min_length=1, max_length=120)
-    requested_batch_name: str | None = Field(default=None, max_length=120)
 
     @field_validator("email")
     @classmethod
@@ -37,14 +36,6 @@ class RegistrationCreate(BaseModel):
             raise ValueError("Phone number must be exactly 11 digits (example: 09XXXXXXXXX).")
         return trimmed
 
-    @field_validator("requested_batch_name")
-    @classmethod
-    def validate_requested_batch_name(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = " ".join(value.split()).strip()
-        return trimmed or None
-
 
 class RegistrationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -59,18 +50,13 @@ class RegistrationOut(BaseModel):
     phone_number: str
     reference_number: str
     reference_image_path: str | None
-    requested_batch_name: str | None
     status: str
     validated_at: datetime | None
     validated_by: str | None
-    rejected_at: datetime | None
-    rejected_by: str | None
     linked_user_id: int | None
-    batch_id: int | None
     issued_username: str | None
-    credential_email_status: str | None
-    credential_sent_at: datetime | None
-    credential_email_error: str | None
+    enrollment_id: int | None = None
+    payment_review_status: str | None = None
     notes: str | None
     created_at: datetime
 
@@ -97,21 +83,5 @@ class RegistrationValidationRequest(BaseModel):
 
 
 class RegistrationValidationResponse(BaseModel):
-    message: str
-    registration: RegistrationOut
-
-
-class TeacherRegistrationApprovalRequest(BaseModel):
-    issued_username: str = Field(min_length=3, max_length=120)
-    batch_name: str = Field(min_length=1, max_length=120)
-    current_week_number: int = Field(default=1, ge=1, le=52)
-    notes: str | None = Field(default=None, max_length=1000)
-
-
-class TeacherRegistrationRejectRequest(BaseModel):
-    notes: str | None = Field(default=None, max_length=1000)
-
-
-class TeacherRegistrationActionResponse(BaseModel):
     message: str
     registration: RegistrationOut

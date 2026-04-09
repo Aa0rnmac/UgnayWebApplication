@@ -86,6 +86,53 @@ def send_teacher_initial_credentials_email(
         raise RuntimeError("Failed to send teacher credentials email. Check SMTP settings.") from exc
 
 
+def send_student_initial_credentials_email(
+    *,
+    to_email: str,
+    username: str,
+    temporary_password: str,
+    batch_name: str | None = None,
+) -> None:
+    if not settings.smtp_host or not settings.smtp_from_email:
+        raise RuntimeError(
+            "SMTP is not configured. Set SMTP_HOST and SMTP_FROM_EMAIL in backend/.env."
+        )
+
+    batch_line = f"Assigned Batch: {batch_name}\n" if batch_name else ""
+    message = EmailMessage()
+    message["Subject"] = "UGNAY Learning Hub - Student Initial Credentials"
+    message["From"] = settings.smtp_from_email
+    message["To"] = to_email
+    message.set_content(
+        (
+            "Hello Student,\n\n"
+            "Your enrollment has been approved for UGNAY Learning Hub.\n\n"
+            f"Username: {username}\n"
+            f"Temporary Password: {temporary_password}\n"
+            f"{batch_line}\n"
+            "Please log in and change your password immediately.\n\n"
+            "Hand and Heart\n"
+        )
+    )
+
+    try:
+        if settings.smtp_use_ssl:
+            with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=30) as client:
+                if settings.smtp_username:
+                    client.login(settings.smtp_username, settings.smtp_password)
+                client.send_message(message)
+            return
+
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as client:
+            if settings.smtp_use_tls:
+                client.starttls()
+            if settings.smtp_username:
+                client.login(settings.smtp_username, settings.smtp_password)
+            client.send_message(message)
+    except Exception as exc:  # pragma: no cover - depends on SMTP environment
+        raise RuntimeError("Failed to send student credentials email. Check SMTP settings.") from exc
+
+
 def send_teacher_student_report_email(
     to_email: str,
     teacher_name: str,

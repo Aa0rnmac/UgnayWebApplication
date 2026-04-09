@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 import re
 from typing import Literal
 
@@ -28,72 +28,11 @@ class UserLogin(BaseModel):
     password: str
 
 
-class TeacherRegisterRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=120)
-    password: str = Field(min_length=8, max_length=120)
-    passkey: str = Field(min_length=1, max_length=255)
-    first_name: str = Field(min_length=1, max_length=120)
-    middle_name: str | None = Field(default=None, max_length=120)
-    last_name: str = Field(min_length=1, max_length=120)
-    email: str = Field(min_length=5, max_length=255)
-    phone_number: str | None = Field(default=None, max_length=40)
-    address: str | None = Field(default=None, max_length=1000)
-    birth_date: date | None = None
-
-    @field_validator("password")
-    @classmethod
-    def validate_teacher_password(cls, value: str) -> str:
-        if not PASSWORD_PATTERN.match(value):
-            raise ValueError(
-                "Password must be at least 8 characters and include 1 uppercase letter, 1 number, and 1 symbol."
-            )
-        return value
-
-    @field_validator("username", "passkey", "first_name", "last_name")
-    @classmethod
-    def strip_required_text(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("This field is required.")
-        return trimmed
-
-    @field_validator("middle_name", "address")
-    @classmethod
-    def strip_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        return trimmed or None
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not EMAIL_PATTERN.match(trimmed):
-            raise ValueError(
-                "Email must be in a valid format (example: name@gmail.com, name@hotmail.com, name@yahoo.com)."
-            )
-        return trimmed.lower()
-
-    @field_validator("phone_number")
-    @classmethod
-    def validate_phone(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if not trimmed:
-            return None
-        if not PHONE_PATTERN.match(trimmed):
-            raise ValueError("Phone number must be exactly 11 digits (example: 09XXXXXXXXX).")
-        return trimmed
-
-
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     username: str
-    role: str = "student"
     first_name: str | None = None
     middle_name: str | None = None
     last_name: str | None = None
@@ -103,7 +42,7 @@ class UserOut(BaseModel):
     birth_date: date | None = None
     profile_image_path: str | None = None
     must_change_password: bool = False
-    role: Literal["student", "teacher"] = "student"
+    role: Literal["student", "teacher", "admin"] = "student"
 
 
 class UserProfileUpdate(BaseModel):
@@ -210,6 +149,9 @@ class TeacherInviteVerifyQrRequest(BaseModel):
 
 class TeacherInviteVerifyQrResponse(BaseModel):
     invite_code: str
+    label: str | None = None
+    expires_at: datetime | None = None
+    remaining_uses: int | None = None
     message: str
 
 
@@ -220,6 +162,8 @@ class TeacherInviteVerifyPasskeyRequest(BaseModel):
 
 class TeacherInviteVerifyPasskeyResponse(BaseModel):
     onboarding_token: str
+    expires_at: datetime | None = None
+    remaining_uses: int | None = None
     message: str
 
 
@@ -241,3 +185,7 @@ class TeacherInviteIssueCredentialsRequest(BaseModel):
 class TeacherInviteIssueCredentialsResponse(BaseModel):
     message: str
     username: str
+
+
+class TeacherInviteRevokeRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)

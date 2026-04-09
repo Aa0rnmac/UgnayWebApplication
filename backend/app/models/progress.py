@@ -18,6 +18,7 @@ class UserModuleProgress(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="locked")
     progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_lessons: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    completed_assessments: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     assessment_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     assessment_right_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     assessment_wrong_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

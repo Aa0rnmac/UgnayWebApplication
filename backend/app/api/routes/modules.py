@@ -1,50 +1,52 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from collections import OrderedDict
 
-from app.api.deps import get_current_user
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session, selectinload
+
+from app.api.deps import get_current_learning_user, has_teacher_access
 from app.db.session import get_db
+from app.models.activity_attempt import ActivityAttempt, ActivityAttemptItem
 from app.models.assessment_report import AssessmentReport
 from app.models.module import Module
+from app.models.module_activity import ModuleActivity
 from app.models.progress import UserModuleProgress
 from app.models.user import User
-from app.schemas.module import ModuleOut
+from app.schemas.module import ActivityAttemptCreate, ActivityAttemptOut, ModuleActivityOut, ModuleOut
 from app.schemas.progress import ProgressUpdateRequest
 
 router = APIRouter(prefix="/modules", tags=["modules"])
 
 
-def _queue_assessment_report(
-    db: Session,
-    current_user: User,
+def _visible_modules_query(db: Session, current_user: User):
+    query = db.query(Module).options(selectinload(Module.activities)).order_by(Module.order_index.asc())
+    if has_teacher_access(current_user):
+        return query
+    return query.filter(Module.is_published.is_(True))
+
+
+def _published_activities(module: Module, current_user: User | None = None) -> list[ModuleActivity]:
+    if current_user and has_teacher_access(current_user):
+        return sorted(list(module.activities or []), key=lambda item: item.order_index)
+    return [
+        item
+        for item in sorted(list(module.activities or []), key=lambda activity: activity.order_index)
+        if item.is_published
+    ]
+
+
+def _module_total_activities(module: Module, current_user: User | None = None) -> int:
+    activities = _published_activities(module, current_user=current_user)
+    if activities:
+        return len(activities)
+    return max(1, len(module.assessments))
+
+
+def _module_payload(
     module: Module,
-    payload: ProgressUpdateRequest,
-    progress: UserModuleProgress,
-) -> None:
-    if (
-        payload.assessment_total is None
-        or payload.assessment_right is None
-        or payload.assessment_wrong is None
-        or payload.assessment_title is None
-    ):
-        return
-
-    report = AssessmentReport(
-        user_id=current_user.id,
-        module_id=module.id,
-        module_title=module.title,
-        assessment_id=(payload.assessment_id or payload.assessment_title.lower().replace(" ", "-")),
-        assessment_title=payload.assessment_title.strip() or "Assessment",
-        right_count=payload.assessment_right,
-        wrong_count=payload.assessment_wrong,
-        total_items=payload.assessment_total,
-        score_percent=progress.assessment_score or 0,
-        improvement_areas=list(progress.improvement_areas or []),
-        status="queued",
-    )
-    db.add(report)
-
-
-def _module_payload(module: Module, progress: UserModuleProgress | None) -> ModuleOut:
+    progress: UserModuleProgress | None,
+    *,
+    current_user: User | None = None,
+) -> ModuleOut:
     status_value = "in_progress"
     progress_percent = 0
     assessment_score = None
@@ -55,7 +57,7 @@ def _module_payload(module: Module, progress: UserModuleProgress | None) -> Modu
             status_value = "completed"
             progress_percent = 100
         else:
-            status_value = "in_progress"
+            status_value = progress.status or "in_progress"
             progress_percent = progress.progress_percent
 
     return ModuleOut(
@@ -66,57 +68,289 @@ def _module_payload(module: Module, progress: UserModuleProgress | None) -> Modu
         order_index=module.order_index,
         lessons=module.lessons,
         assessments=module.assessments,
+        activities=[
+            ModuleActivityOut.model_validate(activity)
+            for activity in _published_activities(module, current_user=current_user)
+        ],
         is_locked=False,
+        is_published=module.is_published,
         status=status_value,
         progress_percent=progress_percent,
         assessment_score=assessment_score,
     )
 
 
-def _build_modules_for_user(db: Session, user_id: int) -> list[ModuleOut]:
-    modules = (
-        db.query(Module).filter(Module.is_published.is_(True)).order_by(Module.order_index.asc()).all()
-    )
+def _build_modules_for_user(db: Session, current_user: User) -> list[ModuleOut]:
+    modules = _visible_modules_query(db, current_user).all()
     progress_entries = (
-        db.query(UserModuleProgress).filter(UserModuleProgress.user_id == user_id).all()
+        db.query(UserModuleProgress).filter(UserModuleProgress.user_id == current_user.id).all()
     )
     progress_by_module = {item.module_id: item for item in progress_entries}
 
-    result: list[ModuleOut] = []
-    for module in modules:
-        progress = progress_by_module.get(module.id)
-        result.append(_module_payload(module, progress))
-    return result
+    return [
+        _module_payload(module, progress_by_module.get(module.id), current_user=current_user)
+        for module in modules
+    ]
 
 
 def _get_module_and_progress(
-    db: Session, user_id: int, module_id: int
+    db: Session, current_user: User, module_id: int
 ) -> tuple[Module, UserModuleProgress | None]:
-    module = db.query(Module).filter(Module.id == module_id, Module.is_published.is_(True)).first()
+    query = _visible_modules_query(db, current_user).filter(Module.id == module_id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
 
     progress = (
         db.query(UserModuleProgress)
-        .filter(UserModuleProgress.user_id == user_id, UserModuleProgress.module_id == module_id)
+        .filter(UserModuleProgress.user_id == current_user.id, UserModuleProgress.module_id == module_id)
         .first()
     )
     return module, progress
 
 
+def _ensure_progress(
+    db: Session,
+    current_user: User,
+    module_id: int,
+    progress: UserModuleProgress | None,
+) -> UserModuleProgress:
+    if progress:
+        return progress
+
+    progress = UserModuleProgress(
+        user_id=current_user.id,
+        module_id=module_id,
+        status="in_progress",
+        progress_percent=0,
+        completed_lessons=[],
+        completed_assessments=[],
+    )
+    db.add(progress)
+    db.flush()
+    return progress
+
+
+def _update_completed_lessons(progress: UserModuleProgress, completed_lesson_id: str | None) -> None:
+    completed_lessons = list(progress.completed_lessons or [])
+    if completed_lesson_id and completed_lesson_id not in completed_lessons:
+        completed_lessons.append(completed_lesson_id)
+    progress.completed_lessons = completed_lessons
+
+
+def _queue_assessment_report_from_attempt(
+    db: Session,
+    current_user: User,
+    module: Module,
+    attempt: ActivityAttempt,
+) -> None:
+    report = AssessmentReport(
+        user_id=current_user.id,
+        module_id=module.id,
+        module_title=module.title,
+        assessment_id=attempt.activity_key,
+        assessment_title=attempt.activity_title,
+        right_count=attempt.right_count,
+        wrong_count=attempt.wrong_count,
+        total_items=attempt.total_items,
+        score_percent=attempt.score_percent,
+        improvement_areas=list(attempt.improvement_areas or []),
+        status="queued",
+    )
+    db.add(report)
+
+
+def _sync_module_progress_from_attempts(
+    db: Session,
+    current_user: User,
+    module: Module,
+    progress: UserModuleProgress,
+    *,
+    mark_completed: bool = False,
+) -> None:
+    attempts = (
+        db.query(ActivityAttempt)
+        .filter(ActivityAttempt.user_id == current_user.id, ActivityAttempt.module_id == module.id)
+        .order_by(ActivityAttempt.submitted_at.desc(), ActivityAttempt.id.desc())
+        .all()
+    )
+
+    completed_assessments = list(
+        OrderedDict.fromkeys(attempt.activity_key for attempt in attempts if attempt.activity_key)
+    )
+    progress.completed_assessments = completed_assessments
+
+    total_activities = _module_total_activities(module, current_user=current_user)
+    completed_count = min(len(completed_assessments), total_activities)
+    progress.progress_percent = int((completed_count / total_activities) * 100) if total_activities else 0
+
+    latest_attempt = attempts[0] if attempts else None
+    if latest_attempt:
+        progress.assessment_score = latest_attempt.score_percent
+        progress.assessment_right_count = latest_attempt.right_count
+        progress.assessment_wrong_count = latest_attempt.wrong_count
+        progress.assessment_total_items = latest_attempt.total_items
+        progress.assessment_label = latest_attempt.activity_title
+        progress.improvement_areas = list(latest_attempt.improvement_areas or [])
+
+    if mark_completed or progress.progress_percent >= 100:
+        progress.status = "completed"
+        progress.progress_percent = 100
+    else:
+        progress.status = "in_progress"
+
+    db.add(progress)
+
+
+def _get_activity_or_404(db: Session, module_id: int, activity_identifier: str) -> ModuleActivity:
+    query = db.query(ModuleActivity).filter(ModuleActivity.module_id == module_id)
+    activity = query.filter(ModuleActivity.activity_key == activity_identifier).first()
+    if activity is None and activity_identifier.isdigit():
+        activity = query.filter(ModuleActivity.id == int(activity_identifier)).first()
+    if not activity:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found.")
+    return activity
+
+
+def _ensure_legacy_activity(
+    db: Session,
+    module: Module,
+    *,
+    activity_key: str,
+    activity_title: str,
+) -> ModuleActivity:
+    activity = (
+        db.query(ModuleActivity)
+        .filter(ModuleActivity.module_id == module.id, ModuleActivity.activity_key == activity_key)
+        .first()
+    )
+    if activity:
+        return activity
+
+    next_order = len(module.activities or []) + 1
+    activity = ModuleActivity(
+        module_id=module.id,
+        activity_key=activity_key,
+        title=activity_title,
+        activity_type="multiple_choice",
+        order_index=next_order,
+        instructions="Legacy compatibility activity generated from /modules/{module_id}/progress.",
+        definition={"items": []},
+        is_published=module.is_published,
+    )
+    db.add(activity)
+    db.flush()
+    return activity
+
+
 @router.get("", response_model=list[ModuleOut])
 def list_modules(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_learning_user)
 ) -> list[ModuleOut]:
-    return _build_modules_for_user(db, current_user.id)
+    return _build_modules_for_user(db, current_user)
 
 
 @router.get("/{module_id}", response_model=ModuleOut)
 def get_module(
-    module_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_learning_user),
 ) -> ModuleOut:
-    module, progress = _get_module_and_progress(db, current_user.id, module_id)
-    return _module_payload(module, progress)
+    module, progress = _get_module_and_progress(db, current_user, module_id)
+    return _module_payload(module, progress, current_user=current_user)
+
+
+@router.post("/{module_id}/activities/{activity_key}/attempts", response_model=ActivityAttemptOut)
+def submit_activity_attempt(
+    module_id: int,
+    activity_key: str,
+    payload: ActivityAttemptCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_learning_user),
+) -> ActivityAttemptOut:
+    module, progress = _get_module_and_progress(db, current_user, module_id)
+    activity = _get_activity_or_404(db, module.id, activity_key)
+    if not activity.is_published and not has_teacher_access(current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found.")
+
+    progress = _ensure_progress(db, current_user, module.id, progress)
+    _update_completed_lessons(progress, payload.completed_lesson_id)
+
+    attempt = ActivityAttempt(
+        user_id=current_user.id,
+        module_id=module.id,
+        module_activity_id=activity.id,
+        activity_key=activity.activity_key,
+        activity_title=activity.title,
+        activity_type=activity.activity_type,
+        right_count=payload.right_count,
+        wrong_count=payload.wrong_count,
+        total_items=payload.total_items,
+        score_percent=payload.score_percent,
+        improvement_areas=[area.strip() for area in payload.improvement_areas if area and area.strip()],
+        ai_metadata=payload.ai_metadata,
+        source=payload.source.strip() or "api",
+        notes=payload.notes.strip() if payload.notes else None,
+    )
+    db.add(attempt)
+    db.flush()
+
+    for item in payload.items:
+        db.add(
+            ActivityAttemptItem(
+                attempt_id=attempt.id,
+                item_key=item.item_key,
+                prompt=item.prompt,
+                expected_answer=item.expected_answer,
+                student_answer=item.student_answer,
+                is_correct=item.is_correct,
+                confidence=item.confidence,
+                ai_metadata=item.ai_metadata,
+            )
+        )
+
+    _queue_assessment_report_from_attempt(db, current_user, module, attempt)
+    _sync_module_progress_from_attempts(
+        db,
+        current_user,
+        module,
+        progress,
+        mark_completed=payload.mark_module_completed,
+    )
+
+    db.commit()
+    db.refresh(progress)
+    db.refresh(attempt)
+
+    return ActivityAttemptOut(
+        id=attempt.id,
+        module_id=module.id,
+        module_activity_id=activity.id,
+        activity_key=attempt.activity_key,
+        activity_title=attempt.activity_title,
+        activity_type=attempt.activity_type,
+        right_count=attempt.right_count,
+        wrong_count=attempt.wrong_count,
+        total_items=attempt.total_items,
+        score_percent=attempt.score_percent,
+        improvement_areas=list(attempt.improvement_areas or []),
+        ai_metadata=dict(attempt.ai_metadata or {}),
+        source=attempt.source,
+        items=[
+            {
+                "id": item.id,
+                "item_key": item.item_key,
+                "prompt": item.prompt,
+                "expected_answer": item.expected_answer,
+                "student_answer": item.student_answer,
+                "is_correct": item.is_correct,
+                "confidence": item.confidence,
+                "ai_metadata": item.ai_metadata or {},
+            }
+            for item in attempt.items
+        ],
+        progress=_module_payload(module, progress, current_user=current_user),
+    )
 
 
 @router.post("/{module_id}/progress", response_model=ModuleOut)
@@ -124,55 +358,55 @@ def update_module_progress(
     module_id: int,
     payload: ProgressUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_learning_user),
 ) -> ModuleOut:
-    module, progress = _get_module_and_progress(db, current_user.id, module_id)
+    module, progress = _get_module_and_progress(db, current_user, module_id)
+    progress = _ensure_progress(db, current_user, module_id, progress)
+    _update_completed_lessons(progress, payload.completed_lesson_id)
 
-    if not progress:
-        progress = UserModuleProgress(
-            user_id=current_user.id,
-            module_id=module_id,
-            status="in_progress",
-            progress_percent=0,
-            completed_lessons=[],
+    has_assessment_summary = (
+        payload.assessment_total is not None
+        and payload.assessment_right is not None
+        and payload.assessment_wrong is not None
+        and payload.assessment_title is not None
+    )
+    if has_assessment_summary:
+        activity_key = (payload.assessment_id or payload.assessment_title.lower().replace(" ", "-")).strip()
+        activity = _ensure_legacy_activity(
+            db,
+            module,
+            activity_key=activity_key,
+            activity_title=payload.assessment_title.strip() or "Assessment",
         )
-        db.add(progress)
+        attempt = ActivityAttempt(
+            user_id=current_user.id,
+            module_id=module.id,
+            module_activity_id=activity.id,
+            activity_key=activity.activity_key,
+            activity_title=activity.title,
+            activity_type=activity.activity_type,
+            right_count=payload.assessment_right,
+            wrong_count=payload.assessment_wrong,
+            total_items=payload.assessment_total,
+            score_percent=payload.assessment_score or 0,
+            improvement_areas=[
+                area.strip() for area in (payload.improvement_areas or []) if area and area.strip()
+            ],
+            ai_metadata={},
+            source="legacy_progress",
+        )
+        db.add(attempt)
         db.flush()
+        _queue_assessment_report_from_attempt(db, current_user, module, attempt)
 
-    completed_lessons = list(progress.completed_lessons or [])
-    if payload.completed_lesson_id and payload.completed_lesson_id not in completed_lessons:
-        completed_lessons.append(payload.completed_lesson_id)
-    progress.completed_lessons = completed_lessons
-
-    total_lessons = max(1, len(module.lessons))
-    learned = min(len(completed_lessons), total_lessons)
-    progress.progress_percent = int((learned / total_lessons) * 100)
-
-    if payload.assessment_score is not None:
-        progress.assessment_score = payload.assessment_score
-    if payload.assessment_right is not None:
-        progress.assessment_right_count = payload.assessment_right
-    if payload.assessment_wrong is not None:
-        progress.assessment_wrong_count = payload.assessment_wrong
-    if payload.assessment_total is not None:
-        progress.assessment_total_items = payload.assessment_total
-    if payload.assessment_title is not None:
-        progress.assessment_label = payload.assessment_title.strip() or None
-    if payload.improvement_areas is not None:
-        progress.improvement_areas = [
-            area.strip() for area in payload.improvement_areas if area and area.strip()
-        ]
-
-    if payload.mark_completed or progress.progress_percent >= 100:
-        progress.status = "completed"
-        progress.progress_percent = 100
-    else:
-        progress.status = "in_progress"
-
-    db.add(progress)
-    _queue_assessment_report(db, current_user, module, payload, progress)
+    _sync_module_progress_from_attempts(
+        db,
+        current_user,
+        module,
+        progress,
+        mark_completed=payload.mark_completed,
+    )
 
     db.commit()
     db.refresh(progress)
-
-    return _module_payload(module, progress)
+    return _module_payload(module, progress, current_user=current_user)

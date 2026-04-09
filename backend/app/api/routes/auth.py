@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 import secrets
 from uuid import uuid4
@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_teacher, get_current_user
 from app.core.config import settings
+from app.core.datetime_utils import as_utc, utc_now
 from app.core.security import create_session_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.password_reset_otp import PasswordResetOtp
@@ -22,6 +23,7 @@ from app.schemas.auth import (
     PasswordChangeRequest,
     TeacherInviteIssueCredentialsRequest,
     TeacherInviteIssueCredentialsResponse,
+    TeacherInviteRevokeRequest,
     TeacherInviteVerifyPasskeyRequest,
     TeacherInviteVerifyPasskeyResponse,
     TeacherInviteVerifyQrRequest,
@@ -37,6 +39,7 @@ from app.services.email_sender import (
 )
 from app.services.teacher_invites import (
     create_onboarding_token,
+    ensure_invite_is_usable,
     generate_temporary_password,
     parse_qr_payload,
     verify_onboarding_token,
@@ -45,9 +48,15 @@ from app.services.teacher_invites import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _remaining_invite_uses(invite: TeacherInvite) -> int | None:
+    if invite.max_use_count is None:
+        return None
+    return max(invite.max_use_count - invite.use_count, 0)
+
+
 def create_user_session(db: Session, user_id: int) -> str:
     token = create_session_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.session_hours)
+    expires_at = utc_now() + timedelta(hours=settings.session_hours)
 
     session = UserSession(user_id=user_id, token=token, expires_at=expires_at)
     db.add(session)
@@ -97,25 +106,36 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthResponse:
 def verify_teacher_qr(
     payload: TeacherInviteVerifyQrRequest, db: Session = Depends(get_db)
 ) -> TeacherInviteVerifyQrResponse:
+    qr_input = payload.qr_payload.strip()
+    invite_code: str | None = None
+
     try:
-        invite_code = parse_qr_payload(payload.qr_payload)
+        invite_code = parse_qr_payload(qr_input)
     except ValueError as exc:
-        message = str(exc)
-        status_code = (
-            status.HTTP_503_SERVICE_UNAVAILABLE
-            if "TEACHER_INVITE_SIGNING_SECRET" in message
-            else status.HTTP_401_UNAUTHORIZED
-        )
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        # Fallback: allow direct invite code entry when browser QR scanner is unavailable.
+        # Passkey verification is still required in the next step.
+        if qr_input and ":" not in qr_input:
+            invite_code = qr_input
+        else:
+            message = str(exc)
+            status_code = (
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if "TEACHER_INVITE_SIGNING_SECRET" in message
+                else status.HTTP_401_UNAUTHORIZED
+            )
+            raise HTTPException(status_code=status_code, detail=message) from exc
 
     invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == invite_code).first()
-    if not invite or invite.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Teacher invite is invalid or inactive."
-        )
+    try:
+        invite = ensure_invite_is_usable(invite)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     return TeacherInviteVerifyQrResponse(
         invite_code=invite_code,
+        label=invite.label,
+        expires_at=invite.expires_at,
+        remaining_uses=_remaining_invite_uses(invite),
         message="QR verified. Enter the matching passkey.",
     )
 
@@ -125,10 +145,10 @@ def verify_teacher_passkey(
     payload: TeacherInviteVerifyPasskeyRequest, db: Session = Depends(get_db)
 ) -> TeacherInviteVerifyPasskeyResponse:
     invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == payload.invite_code).first()
-    if not invite or invite.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Teacher invite is invalid or inactive."
-        )
+    try:
+        invite = ensure_invite_is_usable(invite)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     if not verify_password(payload.passkey, invite.passkey_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid passkey.")
@@ -142,6 +162,8 @@ def verify_teacher_passkey(
         ) from exc
     return TeacherInviteVerifyPasskeyResponse(
         onboarding_token=onboarding_token,
+        expires_at=invite.expires_at,
+        remaining_uses=_remaining_invite_uses(invite),
         message="Passkey verified. Enter teacher email to receive credentials.",
     )
 
@@ -164,10 +186,10 @@ def issue_teacher_credentials(
         raise HTTPException(status_code=status_code, detail=message) from exc
 
     invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == invite_code).first()
-    if not invite or invite.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Teacher invite is invalid or inactive."
-        )
+    try:
+        invite = ensure_invite_is_usable(invite)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     normalized_email = payload.email.strip().lower()
 
@@ -221,7 +243,9 @@ def issue_teacher_credentials(
         ) from exc
 
     invite.use_count += 1
-    invite.last_used_at = datetime.now(timezone.utc)
+    invite.last_used_at = utc_now()
+    if invite.max_use_count is not None and invite.use_count >= invite.max_use_count:
+        invite.status = "inactive"
     db.add(invite)
     db.commit()
 
@@ -229,6 +253,26 @@ def issue_teacher_credentials(
         message="Teacher credentials sent successfully.",
         username=normalized_email,
     )
+
+
+@router.post("/teacher-invite/{invite_code}/revoke")
+def revoke_teacher_invite(
+    invite_code: str,
+    payload: TeacherInviteRevokeRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> dict[str, str]:
+    invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == invite_code).first()
+    if not invite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher invite not found.")
+
+    invite.status = "inactive"
+    invite.revoked_at = utc_now()
+    invite.revoked_by_user_id = current_teacher.id
+    invite.revoked_reason = payload.reason.strip() if payload.reason else None
+    db.add(invite)
+    db.commit()
+    return {"message": "Teacher invite revoked successfully."}
 
 
 @router.post("/forgot-password/request")
@@ -244,7 +288,7 @@ def request_password_reset_otp(
             detail="No email is linked to this account yet. Please contact your teacher/admin.",
         )
 
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     db.query(PasswordResetOtp).filter(
         PasswordResetOtp.expires_at < now,
     ).delete(synchronize_session=False)
@@ -291,7 +335,7 @@ def verify_password_reset_otp(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP request.")
 
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     otp_record = (
         db.query(PasswordResetOtp)
         .filter(
@@ -301,7 +345,7 @@ def verify_password_reset_otp(
         .order_by(PasswordResetOtp.created_at.desc())
         .first()
     )
-    if not otp_record or otp_record.expires_at < now:
+    if not otp_record or (as_utc(otp_record.expires_at) and as_utc(otp_record.expires_at) < now):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP is missing or expired. Request a new code.",

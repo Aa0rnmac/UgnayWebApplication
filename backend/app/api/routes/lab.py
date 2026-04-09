@@ -3,7 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
-from app.api.deps import get_current_student_user
+from app.api.deps import get_current_learning_user
 from app.core.config import settings
 from app.models.user import User
 from app.schemas.lab import AlphabetModelStatusResponse
@@ -94,7 +94,7 @@ def _pick_best_numbers_prediction(predictions: list[LabPredictionResponse]) -> L
 
 @router.post("/predict", response_model=LabPredictionResponse)
 def predict_sign(
-    payload: LabPredictionRequest, current_user: User = Depends(get_current_student_user)
+    payload: LabPredictionRequest, current_user: User = Depends(get_current_learning_user)
 ) -> LabPredictionResponse:
     labels = ALPHABET_LABELS_24
     seed_text = f"{current_user.id}:{payload.frame_count}:{payload.metadata or {}}"
@@ -115,7 +115,7 @@ def predict_sign(
 async def predict_sign_from_image(
     image: UploadFile = File(...),
     mode: Literal["alphabet", "numbers", "words"] = Form(default="alphabet"),
-    current_user: User = Depends(get_current_student_user),
+    current_user: User = Depends(get_current_learning_user),
 ) -> LabPredictionResponse:
     del current_user
     contents = await image.read()
@@ -124,13 +124,7 @@ async def predict_sign_from_image(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded image is empty."
         )
 
-    try:
-        candidates = extract_landmark_feature_candidates(contents)
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
+    candidates = extract_landmark_feature_candidates(contents)
     if not candidates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -163,7 +157,7 @@ async def predict_sign_from_image(
 @router.post("/detect-open-palm", response_model=OpenPalmDetectionResponse)
 async def detect_open_palm(
     image: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_learning_user),
 ) -> OpenPalmDetectionResponse:
     del current_user
     contents = await image.read()
@@ -179,7 +173,7 @@ async def detect_open_palm(
 async def predict_words_sequence(
     frames: list[UploadFile] = File(...),
     word_group: str = Form(default="greeting"),
-    current_user: User = Depends(get_current_student_user),
+    current_user: User = Depends(get_current_learning_user),
 ) -> LabPredictionResponse:
     del current_user
     if not frames:
@@ -218,11 +212,6 @@ async def predict_words_sequence(
         prediction = service.predict_from_frame_bytes(payloads, allowed_labels=allowed_labels)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
 
     return LabPredictionResponse(
         prediction=prediction.prediction,
@@ -235,7 +224,7 @@ async def predict_words_sequence(
 async def predict_numbers_sequence(
     frames: list[UploadFile] = File(...),
     number_group: str = Form(default="0-10"),
-    current_user: User = Depends(get_current_student_user),
+    current_user: User = Depends(get_current_learning_user),
 ) -> LabPredictionResponse:
     del current_user
     if not frames:
@@ -284,11 +273,6 @@ async def predict_numbers_sequence(
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
-            ) from exc
 
         return LabPredictionResponse(
             prediction=result.prediction,
@@ -318,23 +302,12 @@ async def predict_numbers_sequence(
         except ValueError:
             # Fall through to static digit fallback when sequence is unclear.
             pass
-        except RuntimeError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
-            ) from exc
 
     predictions: list[LabPredictionResponse] = []
     sample_stride = max(1, len(payloads) // 6)
     sampled_payloads = payloads[::sample_stride][:6]
     for payload in sampled_payloads:
-        try:
-            candidates = extract_landmark_feature_candidates(payload)
-        except RuntimeError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
-            ) from exc
+        candidates = extract_landmark_feature_candidates(payload)
         if not candidates:
             continue
         item = numbers_service.predict_best_of_candidates(candidates)

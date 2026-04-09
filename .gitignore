@@ -18,7 +18,10 @@ Thumbs.db
 datasets/
 
 backend/artifacts/*.joblib
+/backend/artifacts/teacher_invites/
+/backend/uploads/
 /FSL-105 A dataset for recognizing 105 Filipino sign language videos.zip
 /backend/artifacts/words_model.joblib
 /backend/artifacts/numbers_motion_model.joblib
 backend/fsl_learning_hub.db
+*.db

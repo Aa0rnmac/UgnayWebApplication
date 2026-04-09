@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -12,7 +12,6 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="student")
     first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     middle_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -21,7 +20,6 @@ class User(Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     profile_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"), nullable=True, index=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     role: Mapped[str] = mapped_column(
         String(20), nullable=False, default="student", server_default="student"
@@ -37,7 +35,18 @@ class User(Base):
     progress_entries = relationship(
         "UserModuleProgress", back_populates="user", cascade="all, delete-orphan"
     )
-    assessment_attempts = relationship(
-        "UserAssessmentAttempt", back_populates="user", cascade="all, delete-orphan"
+    enrollments = relationship(
+        "Enrollment",
+        back_populates="user",
+        foreign_keys="Enrollment.user_id",
     )
-    batch = relationship("Batch", back_populates="students")
+    activity_attempts = relationship(
+        "ActivityAttempt",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    created_batches = relationship(
+        "Batch",
+        back_populates="created_by",
+        foreign_keys="Batch.created_by_user_id",
+    )

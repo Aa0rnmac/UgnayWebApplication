@@ -7,26 +7,45 @@
 
 ## Environment
 1. Copy `.env.example` to `.env`.
-2. Confirm DB values:
-   - `postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub`
-3. Set dataset root (optional):
+2. Confirm the production-first database values:
+   - `DATABASE_URL=postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub`
+   - `AUTO_BOOTSTRAP_SCHEMA=false` for PostgreSQL
+3. Use SQLite only for explicitly local bootstrap/testing:
+   - `DATABASE_URL=sqlite:///./fsl_learning_hub.db`
+   - `AUTO_BOOTSTRAP_SCHEMA=true`
+4. Set dataset/artifact roots (optional):
    - `DATASETS_ROOT=datasets` (default, resolved from project root)
+   - `ARTIFACTS_ROOT=artifacts` (default, resolved from `backend/`)
    - You can also use an absolute path, for example `DATASETS_ROOT=C:\Users\Marissa\Datasets\FSL`.
-4. Configure SMTP for forgot-password OTP email:
+5. Configure SMTP for forgot-password OTP email:
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
    - TLS/SSL flags: `SMTP_USE_TLS`, `SMTP_USE_SSL`
-5. Configure teacher invite signing:
+6. Configure teacher invite signing:
    - `TEACHER_INVITE_SIGNING_SECRET` (required for QR verification and onboarding tokens)
+   - `TEACHER_INVITE_DEFAULT_EXPIRY_DAYS`
+   - `TEACHER_INVITE_DEFAULT_MAX_USES`
+
+## Install
+```bash
+pip install -r requirements.txt
+```
+
+## Migrate
+```bash
+alembic upgrade head
+```
 
 ## Run
 ```bash
-pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-On startup, tables are created and 3 modules are seeded if empty.
+On startup:
+- SQLite local mode can bootstrap tables automatically.
+- PostgreSQL mode expects migrations to be applied first.
+- The backend seeds 12 module slots, with Modules 1-8 published and Modules 9-12 kept as draft placeholders until curriculum assets are finalized.
 
-## API (initial)
+## API
 - `GET /api/health`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
@@ -35,11 +54,30 @@ On startup, tables are created and 3 modules are seeded if empty.
 - `POST /api/auth/teacher-invite/verify-qr`
 - `POST /api/auth/teacher-invite/verify-passkey`
 - `POST /api/auth/teacher-invite/issue-credentials`
+- `POST /api/auth/teacher-invite/{invite_code}/revoke`
 - `GET /api/auth/me`
 - `GET /api/modules`
 - `GET /api/modules/{module_id}`
+- `POST /api/modules/{module_id}/activities/{activity_id_or_key}/attempts`
 - `POST /api/modules/{module_id}/progress`
 - `GET /api/progress/summary`
+- `POST /api/registrations`
+- `POST /api/registrations/{registration_id}/validate` (legacy compatibility)
+- `GET /api/teacher/enrollments`
+- `GET /api/teacher/enrollments/{enrollment_id}`
+- `GET /api/teacher/enrollments/{enrollment_id}/payment-proof`
+- `POST /api/teacher/enrollments/{enrollment_id}/approve`
+- `POST /api/teacher/enrollments/{enrollment_id}/reject`
+- `GET /api/teacher/batches`
+- `POST /api/teacher/batches`
+- `GET /api/teacher/batches/{batch_id}/students`
+- `GET /api/teacher/students/{student_id}`
+- `GET /api/teacher/students/{student_id}/activity-attempts`
+- `GET /api/teacher/activity-attempts/{attempt_id}`
+- `GET /api/teacher/reports`
+- `GET /api/teacher/reports/students`
+- `POST /api/teacher/reports/students/{student_id}/generate`
+- `GET /api/teacher/reports/summary`
 - `POST /api/lab/predict`
 - `GET /api/lab/alphabet-dataset`
 - `GET /api/lab/alphabet-model`
@@ -59,6 +97,11 @@ On startup, tables are created and 3 modules are seeded if empty.
 Generate reusable teacher onboarding invite assets (QR + passkey + printable files):
 ```bash
 python scripts/generate_teacher_invite.py --label "Main Campus"
+```
+
+Example with expiry and limited uses:
+```bash
+python scripts/generate_teacher_invite.py --label "Main Campus" --expires-days 14 --max-uses 3
 ```
 
 Outputs:

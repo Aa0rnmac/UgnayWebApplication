@@ -1,10 +1,21 @@
-from sqlalchemy import inspect, text
-from sqlalchemy.orm import Session
+import json
+from datetime import datetime
 
+from sqlalchemy import inspect
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import text
+
+from app.core.config import settings
+from app.core.datetime_utils import utc_now
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.activity_attempt import ActivityAttempt, ActivityAttemptItem
 from app.models.module import Module
+from app.models.module_activity import ModuleActivity
+from app.models.assessment_report import AssessmentReport
+from app.models.enrollment import Enrollment
+from app.models.registration import Registration
 from app.models.user import User
 
 SEED_MODULES = [
@@ -603,6 +614,414 @@ SEED_MODULES = [
         ],
     },
 ]
+SEED_MODULES.extend(
+    [
+        {
+            "slug": "module-9-draft",
+            "title": "Module 9: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 9,
+            "lessons": [
+                {
+                    "id": "m9-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 9 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+        {
+            "slug": "module-10-draft",
+            "title": "Module 10: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 10,
+            "lessons": [
+                {
+                    "id": "m10-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 10 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+        {
+            "slug": "module-11-draft",
+            "title": "Module 11: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 11,
+            "lessons": [
+                {
+                    "id": "m11-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 11 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+        {
+            "slug": "module-12-draft",
+            "title": "Module 12: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 12,
+            "lessons": [
+                {
+                    "id": "m12-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 12 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+    ]
+)
+
+
+def _seed_module_by_slug(slug: str) -> dict:
+    return next(item for item in SEED_MODULES if item["slug"] == slug)
+
+
+def _multiple_choice_definition(slug: str) -> dict:
+    module = _seed_module_by_slug(slug)
+    return {
+        "items": [
+            {
+                "item_key": item["id"],
+                "prompt": item["question"],
+                "choices": list(item["choices"]),
+                "expected_answer": item["answer"],
+            }
+            for item in module["assessments"]
+        ]
+    }
+
+
+MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG: dict[str, list[dict]] = {
+    "fsl-alphabets": [
+        {
+            "activity_key": "m1-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the full alphabet review quiz.",
+            "definition": _multiple_choice_definition("fsl-alphabets"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m1-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "identification",
+            "order_index": 2,
+            "instructions": "Identify the hand sign shown in each image prompt.",
+            "definition": {
+                "items": [
+                    {"item_key": "m1-i1", "prompt": "Alphabet image A", "expected_answer": "A"},
+                    {"item_key": "m1-i2", "prompt": "Alphabet image J", "expected_answer": "J"},
+                    {"item_key": "m1-i3", "prompt": "Alphabet image M", "expected_answer": "M"},
+                    {"item_key": "m1-i4", "prompt": "Alphabet image T", "expected_answer": "T"},
+                    {"item_key": "m1-i5", "prompt": "Alphabet image Z", "expected_answer": "Z"},
+                ]
+            },
+            "is_published": True,
+        },
+        {
+            "activity_key": "m1-assessment-3",
+            "title": "Assessment 3",
+            "activity_type": "practical_camera",
+            "order_index": 3,
+            "instructions": "Use the AI camera flow to sign the target letters.",
+            "definition": {
+                "ai_mode": "alphabet",
+                "min_required": 5,
+                "targets": ["A", "B", "C", "J", "Z"],
+            },
+            "is_published": True,
+        },
+    ],
+    "numbers": [
+        {
+            "activity_key": "m2-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the numbers module quiz.",
+            "definition": _multiple_choice_definition("numbers"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign numbers from 1 to 10 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "0-10", "targets": ["1", "2", "3", "4", "5"]},
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-3",
+            "title": "Assessment 3",
+            "activity_type": "practical_camera",
+            "order_index": 3,
+            "instructions": "Sign numbers from 11 to 20 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "11-20", "targets": ["11", "12", "13", "14", "15"]},
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-4",
+            "title": "Assessment 4",
+            "activity_type": "practical_camera",
+            "order_index": 4,
+            "instructions": "Sign numbers from 31 to 40 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "31-40", "targets": ["31", "32", "33", "34", "35"]},
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-5",
+            "title": "Assessment 5",
+            "activity_type": "practical_camera",
+            "order_index": 5,
+            "instructions": "Sign numbers from 91 to 100 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "91-100", "targets": ["91", "92", "93", "94", "95"]},
+            "is_published": True,
+        },
+    ],
+    "common-words": [
+        {
+            "activity_key": "m3-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the greetings quiz.",
+            "definition": _multiple_choice_definition("common-words"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m3-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign greeting expressions using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "greeting",
+                "targets": ["GOOD MORNING", "HELLO", "THANK YOU", "SEE YOU TOMORROW"],
+            },
+            "is_published": True,
+        },
+    ],
+    "family-members": [
+        {
+            "activity_key": "m4-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the family members quiz.",
+            "definition": _multiple_choice_definition("family-members"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m4-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign at least five family-member gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "family",
+                "targets": ["FATHER", "MOTHER", "SON", "DAUGHTER", "COUSIN"],
+            },
+            "is_published": True,
+        },
+    ],
+    "people-description": [
+        {
+            "activity_key": "m5-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the people-description quiz.",
+            "definition": _multiple_choice_definition("people-description"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m5-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign at least five people-description gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "relationship",
+                "targets": ["BOY", "GIRL", "DEAF", "BLIND", "MARRIED"],
+            },
+            "is_published": True,
+        },
+    ],
+    "days": [
+        {
+            "activity_key": "m6-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the days and time-reference quiz.",
+            "definition": _multiple_choice_definition("days"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m6-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign weekday and time-reference gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "date",
+                "targets": ["MONDAY", "FRIDAY", "TODAY", "TOMORROW", "YESTERDAY"],
+            },
+            "is_published": True,
+        },
+    ],
+    "colors-descriptions": [
+        {
+            "activity_key": "m7-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the colors and descriptions quiz.",
+            "definition": _multiple_choice_definition("colors-descriptions"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m7-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "identification",
+            "order_index": 2,
+            "instructions": "Identify the target color sign shown in each prompt.",
+            "definition": {
+                "items": [
+                    {"item_key": "m7-i1", "prompt": "Color prompt BLUE", "expected_answer": "BLUE"},
+                    {"item_key": "m7-i2", "prompt": "Color prompt RED", "expected_answer": "RED"},
+                    {"item_key": "m7-i3", "prompt": "Color prompt YELLOW", "expected_answer": "YELLOW"},
+                    {"item_key": "m7-i4", "prompt": "Color prompt PINK", "expected_answer": "PINK"},
+                    {"item_key": "m7-i5", "prompt": "Color prompt VIOLET", "expected_answer": "VIOLET"},
+                ]
+            },
+            "is_published": True,
+        },
+        {
+            "activity_key": "m7-assessment-3",
+            "title": "Assessment 3",
+            "activity_type": "practical_camera",
+            "order_index": 3,
+            "instructions": "Sign at least five color or descriptive gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "color",
+                "targets": ["BLUE", "GREEN", "RED", "LIGHT", "DARK"],
+            },
+            "is_published": True,
+        },
+    ],
+    "basic-conversations": [
+        {
+            "activity_key": "m8-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the basic-conversations quiz.",
+            "definition": _multiple_choice_definition("basic-conversations"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m8-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign at least five response gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "responses",
+                "targets": ["YES", "NO", "UNDERSTAND", "DON'T KNOW", "SLOW"],
+            },
+            "is_published": True,
+        },
+    ],
+    "module-9-draft": [
+        {
+            "activity_key": "m9-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m9-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+    "module-10-draft": [
+        {
+            "activity_key": "m10-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m10-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+    "module-11-draft": [
+        {
+            "activity_key": "m11-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m11-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+    "module-12-draft": [
+        {
+            "activity_key": "m12-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m12-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+}
+
+REQUIRED_TABLES = {
+    "activity_attempt_items",
+    "activity_attempts",
+    "assessment_reports",
+    "batches",
+    "enrollments",
+    "module_activities",
+    "modules",
+    "password_reset_otps",
+    "registrations",
+    "teacher_invites",
+    "user_module_progress",
+    "user_sessions",
+    "users",
+}
 
 
 def seed_modules(db: Session) -> None:
@@ -617,7 +1036,47 @@ def seed_modules(db: Session) -> None:
         existing.description = item["description"]
         existing.lessons = item["lessons"]
         existing.assessments = item["assessments"]
-        existing.is_published = True
+        existing.is_published = item.get("is_published", True)
+    db.commit()
+
+
+def seed_module_activities(db: Session) -> None:
+    modules_by_slug = {module.slug: module for module in db.query(Module).all()}
+    for slug, activities in MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.items():
+        module = modules_by_slug.get(slug)
+        if not module:
+            continue
+
+        existing_by_key = {
+            activity.activity_key: activity
+            for activity in db.query(ModuleActivity).filter(ModuleActivity.module_id == module.id).all()
+        }
+
+        for activity in activities:
+            existing = existing_by_key.get(activity["activity_key"])
+            if existing is None:
+                db.add(
+                    ModuleActivity(
+                        module_id=module.id,
+                        activity_key=activity["activity_key"],
+                        title=activity["title"],
+                        activity_type=activity["activity_type"],
+                        order_index=activity["order_index"],
+                        instructions=activity.get("instructions"),
+                        definition=activity.get("definition", {}),
+                        is_published=activity.get("is_published", True),
+                    )
+                )
+                continue
+
+            existing.title = activity["title"]
+            existing.activity_type = activity["activity_type"]
+            existing.order_index = activity["order_index"]
+            existing.instructions = activity.get("instructions")
+            existing.definition = activity.get("definition", {})
+            existing.is_published = activity.get("is_published", True)
+            db.add(existing)
+
     db.commit()
 
 
@@ -625,102 +1084,301 @@ def seed_demo_user(db: Session) -> None:
     existing_user = db.query(User).filter(User.username == "student_demo").first()
     if existing_user:
         return
-    db.add(User(username="student_demo", password_hash=hash_password("student123")))
+    db.add(
+        User(
+            username="student_demo",
+            password_hash=hash_password("student123"),
+            role="student",
+        )
+    )
     db.commit()
 
 
-def _add_column_if_missing(table_name: str, column_name: str, ddl_sql: str) -> None:
+def backfill_enrollments(db: Session) -> None:
+    registrations = (
+        db.query(Registration)
+        .outerjoin(Enrollment, Enrollment.registration_id == Registration.id)
+        .filter(Enrollment.id.is_(None))
+        .all()
+    )
+    for registration in registrations:
+        normalized_status = registration.status
+        if normalized_status == "validated":
+            normalized_status = "approved"
+
+        payment_review_status = "submitted"
+        if normalized_status == "approved":
+            payment_review_status = "approved"
+        elif normalized_status == "rejected":
+            payment_review_status = "rejected"
+
+        enrollment = Enrollment(
+            registration_id=registration.id,
+            user_id=registration.linked_user_id,
+            status=normalized_status,
+            payment_review_status=payment_review_status,
+            review_notes=registration.notes,
+            reviewed_at=registration.validated_at,
+            approved_at=registration.validated_at if normalized_status == "approved" else None,
+        )
+        db.add(enrollment)
+
+    db.commit()
+
+
+def _coerce_json_value(raw_value):
+    if raw_value in (None, ""):
+        return []
+    if isinstance(raw_value, (list, dict)):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+    return raw_value
+
+
+def _coerce_datetime_value(raw_value) -> datetime | None:
+    if raw_value in (None, ""):
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value
+    value = str(raw_value).replace("Z", "+00:00")
+    return datetime.fromisoformat(value)
+
+
+def _ensure_module_activity(
+    db: Session,
+    *,
+    module_id: int,
+    activity_key: str,
+    activity_title: str,
+    activity_type: str,
+) -> ModuleActivity:
+    activity = (
+        db.query(ModuleActivity)
+        .filter(ModuleActivity.module_id == module_id, ModuleActivity.activity_key == activity_key)
+        .first()
+    )
+    if activity:
+        return activity
+
+    next_order = (
+        db.query(ModuleActivity)
+        .filter(ModuleActivity.module_id == module_id)
+        .count()
+        + 1
+    )
+    activity = ModuleActivity(
+        module_id=module_id,
+        activity_key=activity_key,
+        title=activity_title,
+        activity_type=activity_type or "legacy_import",
+        order_index=next_order,
+        instructions="Legacy activity imported during database bootstrap.",
+        definition={"items": []},
+        is_published=True,
+    )
+    db.add(activity)
+    db.flush()
+    return activity
+
+
+def backfill_legacy_activity_attempts(db: Session) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
-    if table_name not in existing_tables:
+    if "activity_attempts" not in existing_tables or "module_activities" not in existing_tables:
         return
-    existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
-    if column_name in existing_columns:
-        return
-    with engine.begin() as connection:
-        connection.execute(text(ddl_sql))
+
+    detailed_import_keys: set[tuple[int, int, str]] = set()
+    if "user_assessment_attempts" in existing_tables:
+        legacy_rows = db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    module_id,
+                    assessment_id,
+                    assessment_title,
+                    assessment_type,
+                    score_percent,
+                    score_correct,
+                    score_total,
+                    answers,
+                    snapshots,
+                    submitted_at
+                FROM user_assessment_attempts
+                ORDER BY id ASC
+                """
+            )
+        ).mappings()
+
+        for row in legacy_rows:
+            note_token = f"legacy_attempt_id={row['id']}"
+            if (
+                db.query(ActivityAttempt)
+                .filter(ActivityAttempt.source == "legacy_import", ActivityAttempt.notes == note_token)
+                .first()
+            ):
+                detailed_import_keys.add((row["user_id"], row["module_id"], str(row["assessment_id"])))
+                continue
+
+            activity = _ensure_module_activity(
+                db,
+                module_id=row["module_id"],
+                activity_key=str(row["assessment_id"]),
+                activity_title=str(row["assessment_title"] or row["assessment_id"]),
+                activity_type=str(row["assessment_type"] or "legacy_import"),
+            )
+            answers = list(_coerce_json_value(row["answers"]) or [])
+            snapshots = list(_coerce_json_value(row["snapshots"]) or [])
+            snapshots_by_item = {
+                str(snapshot.get("assessment_item_id") or "").strip(): snapshot
+                for snapshot in snapshots
+                if isinstance(snapshot, dict) and str(snapshot.get("assessment_item_id") or "").strip()
+            }
+
+            right_count = int(row["score_correct"] or 0)
+            total_items = int(row["score_total"] or 0)
+            attempt = ActivityAttempt(
+                user_id=row["user_id"],
+                module_id=row["module_id"],
+                module_activity_id=activity.id,
+                activity_key=activity.activity_key,
+                activity_title=activity.title,
+                activity_type=activity.activity_type,
+                right_count=right_count,
+                wrong_count=max(total_items - right_count, 0),
+                total_items=total_items,
+                score_percent=float(row["score_percent"] or 0),
+                improvement_areas=[],
+                ai_metadata={"legacy_snapshot_count": len(snapshots)},
+                source="legacy_import",
+                notes=note_token,
+                submitted_at=_coerce_datetime_value(row["submitted_at"]) or utc_now(),
+            )
+            db.add(attempt)
+            db.flush()
+
+            for index, answer in enumerate(answers, start=1):
+                if not isinstance(answer, dict):
+                    continue
+                item_key = str(answer.get("assessment_item_id") or f"legacy-item-{index}").strip()
+                snapshot = snapshots_by_item.get(item_key)
+                item_ai_metadata = {}
+                if snapshot:
+                    item_ai_metadata = {
+                        key: value for key, value in snapshot.items() if key != "assessment_item_id"
+                    }
+                db.add(
+                    ActivityAttemptItem(
+                        attempt_id=attempt.id,
+                        item_key=item_key,
+                        prompt=answer.get("prompt"),
+                        expected_answer=answer.get("expected_response"),
+                        student_answer=answer.get("response_text"),
+                        is_correct=answer.get("is_correct"),
+                        confidence=answer.get("confidence"),
+                        ai_metadata=item_ai_metadata,
+                    )
+                )
+
+            detailed_import_keys.add((row["user_id"], row["module_id"], str(row["assessment_id"])))
+
+        db.commit()
+
+    report_rows = (
+        db.query(AssessmentReport)
+        .order_by(AssessmentReport.created_at.asc(), AssessmentReport.id.asc())
+        .all()
+    )
+    for report in report_rows:
+        report_key = (report.user_id, report.module_id, report.assessment_id)
+        if report_key in detailed_import_keys:
+            continue
+
+        note_token = f"legacy_report_id={report.id}"
+        if (
+            db.query(ActivityAttempt)
+            .filter(ActivityAttempt.source == "legacy_report_import", ActivityAttempt.notes == note_token)
+            .first()
+        ):
+            continue
+
+        activity = _ensure_module_activity(
+            db,
+            module_id=report.module_id,
+            activity_key=report.assessment_id,
+            activity_title=report.assessment_title,
+            activity_type="legacy_report",
+        )
+        db.add(
+            ActivityAttempt(
+                user_id=report.user_id,
+                module_id=report.module_id,
+                module_activity_id=activity.id,
+                activity_key=activity.activity_key,
+                activity_title=activity.title,
+                activity_type=activity.activity_type,
+                right_count=report.right_count,
+                wrong_count=report.wrong_count,
+                total_items=report.total_items,
+                score_percent=report.score_percent,
+                improvement_areas=list(report.improvement_areas or []),
+                ai_metadata={},
+                source="legacy_report_import",
+                notes=note_token,
+                submitted_at=report.created_at,
+            )
+        )
+
+    db.commit()
 
 
-def ensure_schema_updates() -> None:
-    # Users table profile/account lifecycle columns.
-    _add_column_if_missing("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR(120)")
-    _add_column_if_missing("users", "middle_name", "ALTER TABLE users ADD COLUMN middle_name VARCHAR(120)")
-    _add_column_if_missing("users", "last_name", "ALTER TABLE users ADD COLUMN last_name VARCHAR(120)")
-    _add_column_if_missing("users", "email", "ALTER TABLE users ADD COLUMN email VARCHAR(255)")
-    _add_column_if_missing(
-        "users", "phone_number", "ALTER TABLE users ADD COLUMN phone_number VARCHAR(40)"
-    )
-    _add_column_if_missing("users", "address", "ALTER TABLE users ADD COLUMN address TEXT")
-    _add_column_if_missing("users", "birth_date", "ALTER TABLE users ADD COLUMN birth_date DATE")
-    _add_column_if_missing(
-        "users", "profile_image_path", "ALTER TABLE users ADD COLUMN profile_image_path VARCHAR(500)"
-    )
-    _add_column_if_missing(
-        "users",
-        "must_change_password",
-        "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
-    )
-    _add_column_if_missing(
-        "users",
-        "role",
-        "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'",
-    )
-    _add_column_if_missing(
-        "user_module_progress",
-        "assessment_right_count",
-        "ALTER TABLE user_module_progress ADD COLUMN assessment_right_count INTEGER",
-    )
-    _add_column_if_missing(
-        "user_module_progress",
-        "assessment_wrong_count",
-        "ALTER TABLE user_module_progress ADD COLUMN assessment_wrong_count INTEGER",
-    )
-    _add_column_if_missing(
-        "user_module_progress",
-        "assessment_total_items",
-        "ALTER TABLE user_module_progress ADD COLUMN assessment_total_items INTEGER",
-    )
-    _add_column_if_missing(
-        "user_module_progress",
-        "assessment_label",
-        "ALTER TABLE user_module_progress ADD COLUMN assessment_label VARCHAR(255)",
-    )
-    _add_column_if_missing(
-        "user_module_progress",
-        "improvement_areas",
-        "ALTER TABLE user_module_progress ADD COLUMN improvement_areas JSON NOT NULL DEFAULT '[]'",
-    )
-    _add_column_if_missing(
-        "user_module_progress",
-        "report_sent_at",
-        "ALTER TABLE user_module_progress ADD COLUMN report_sent_at TIMESTAMP",
-    )
+def validate_seed_data() -> None:
+    published_slugs = {item["slug"] for item in SEED_MODULES if item.get("is_published", True)}
+    for item in SEED_MODULES:
+        if item.get("is_published", True) and not item.get("lessons"):
+            raise RuntimeError(f"Published module '{item['slug']}' is missing lessons.")
 
-    # Registration workflow columns for teacher validation.
-    _add_column_if_missing(
-        "registrations", "status", "ALTER TABLE registrations ADD COLUMN status VARCHAR(20) DEFAULT 'pending'"
+    missing_activity_blueprints = sorted(
+        slug for slug in published_slugs if not MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.get(slug)
     )
-    _add_column_if_missing(
-        "registrations", "validated_at", "ALTER TABLE registrations ADD COLUMN validated_at TIMESTAMP"
-    )
-    _add_column_if_missing(
-        "registrations", "validated_by", "ALTER TABLE registrations ADD COLUMN validated_by VARCHAR(120)"
-    )
-    _add_column_if_missing(
-        "registrations", "linked_user_id", "ALTER TABLE registrations ADD COLUMN linked_user_id INTEGER"
-    )
-    _add_column_if_missing(
-        "registrations", "issued_username", "ALTER TABLE registrations ADD COLUMN issued_username VARCHAR(120)"
-    )
-    _add_column_if_missing("registrations", "notes", "ALTER TABLE registrations ADD COLUMN notes TEXT")
+    if missing_activity_blueprints:
+        raise RuntimeError(
+            "Published modules are missing activity blueprints: "
+            + ", ".join(missing_activity_blueprints)
+        )
+
+
+def _verify_required_tables() -> None:
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    missing_tables = sorted(REQUIRED_TABLES - existing_tables)
+    if missing_tables:
+        raise RuntimeError(
+            "Database schema is missing required tables. "
+            "Run Alembic migrations (`alembic upgrade head`) or use SQLite local bootstrap. "
+            f"Missing: {', '.join(missing_tables)}"
+        )
 
 
 def init_db() -> None:
     # Import models before create_all so SQLAlchemy registers metadata.
     from app import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    ensure_schema_updates()
+    validate_seed_data()
+
+    if settings.should_auto_bootstrap_schema:
+        Base.metadata.create_all(bind=engine)
+    else:
+        _verify_required_tables()
+
     with SessionLocal() as db:
         seed_modules(db)
+        seed_module_activities(db)
         seed_demo_user(db)
+        backfill_enrollments(db)
+        backfill_legacy_activity_attempts(db)

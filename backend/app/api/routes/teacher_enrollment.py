@@ -1,382 +1,432 @@
-from __future__ import annotations
-
-from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.deps import get_current_teacher
-from app.core.security import create_temporary_password, hash_password
+from app.models.activity_attempt import ActivityAttempt
+from app.core.config import PROJECT_ROOT
 from app.db.session import get_db
 from app.models.batch import Batch
+from app.models.enrollment import Enrollment
+from app.models.progress import UserModuleProgress
 from app.models.registration import Registration
 from app.models.user import User
-from app.schemas.registration import (
-    RegistrationOut,
-    TeacherRegistrationActionResponse,
-    TeacherRegistrationApprovalRequest,
-    TeacherRegistrationRejectRequest,
+from app.schemas.registration import RegistrationOut
+from app.schemas.teacher import (
+    TeacherBatchCreateRequest,
+    TeacherBatchOut,
+    TeacherEnrollmentApproveRequest,
+    TeacherEnrollmentOut,
+    TeacherEnrollmentRejectRequest,
+    TeacherStudentModuleProgressOut,
+    TeacherStudentOut,
+    TeacherUserSummary,
 )
-from app.schemas.teacher import TeacherBatchOverview, TeacherBatchStudent, TeacherBatchUpdateRequest
-from app.services.email_service import EmailDeliveryError, build_student_credentials_email, send_email
+from app.schemas.teacher_report import TeacherActivityAttemptItemOut, TeacherActivityAttemptOut
+from app.services.enrollment_service import (
+    approve_enrollment,
+    get_or_create_batch,
+    normalize_batch_code,
+)
 
 router = APIRouter(prefix="/teacher", tags=["teacher-enrollment"])
 
+REGISTRATION_UPLOADS_DIR = (PROJECT_ROOT / "backend" / "uploads" / "registrations").resolve()
 
-def _teacher_display_name(user: User) -> str:
+
+def _full_name(user: User) -> str:
     full_name = " ".join(
-        part.strip() for part in [user.first_name, user.last_name] if part and part.strip()
+        part.strip()
+        for part in [user.first_name or "", user.middle_name or "", user.last_name or ""]
+        if part and part.strip()
     ).strip()
     return full_name or user.username
 
 
-def _normalize_batch_name(value: str) -> str:
-    normalized = " ".join(value.split()).strip()
-    if not normalized:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Batch name is required.",
-        )
-    return normalized
-
-
-def _registration_query(db: Session, status_filter: str | None):
-    query = db.query(Registration).order_by(Registration.created_at.desc())
-    if status_filter:
-        query = query.filter(Registration.status == status_filter)
-    return query
-
-
-def _get_registration_or_404(db: Session, registration_id: int) -> Registration:
-    registration = db.query(Registration).filter(Registration.id == registration_id).first()
-    if not registration:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found.")
-    return registration
-
-
-def _get_or_create_batch(
-    *,
-    db: Session,
-    batch_name: str,
-    current_week_number: int,
-) -> Batch:
-    normalized_name = _normalize_batch_name(batch_name)
-    batch = db.query(Batch).filter(Batch.name == normalized_name).first()
-    if batch:
-        return batch
-
-    batch = Batch(name=normalized_name, current_week_number=current_week_number)
-    db.add(batch)
-    db.flush()
-    return batch
-
-
-def _registration_full_name(registration: Registration) -> str:
-    return " ".join(
-        part.strip()
-        for part in [registration.first_name, registration.middle_name or "", registration.last_name]
-        if part and part.strip()
-    ).strip()
-
-
-def _send_credentials_email(
-    *,
-    registration: Registration,
-    username: str,
-    temporary_password: str,
-    batch_name: str | None,
-) -> str:
-    message = build_student_credentials_email(
-        recipient_email=registration.email,
-        recipient_name=_registration_full_name(registration),
-        username=username,
-        temporary_password=temporary_password,
-        batch_name=batch_name,
-    )
-    return send_email(message)
-
-
-@router.get("/registrations", response_model=list[RegistrationOut])
-def get_teacher_registrations(
-    status_filter: str | None = Query(default=None, alias="status"),
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
-) -> list[RegistrationOut]:
-    query = _registration_query(db, status_filter)
-    return query.all()
-
-
-@router.post(
-    "/registrations/{registration_id}/approve",
-    response_model=TeacherRegistrationActionResponse,
-)
-def approve_registration(
-    registration_id: int,
-    payload: TeacherRegistrationApprovalRequest,
-    db: Session = Depends(get_db),
-    current_teacher: User = Depends(get_current_teacher),
-) -> TeacherRegistrationActionResponse:
-    registration = _get_registration_or_404(db, registration_id)
-    if registration.status == "approved" and registration.linked_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Registration is already approved.",
-        )
-    if registration.status == "rejected":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Registration has already been rejected.",
-        )
-
-    issued_username = payload.issued_username.strip()
-    existing_user = db.query(User).filter(User.username == issued_username).first()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists.")
-
-    normalized_email = registration.email.strip().lower()
-    existing_email = db.query(User).filter(User.email == normalized_email).first()
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email is already linked to another account.",
-        )
-
-    batch = _get_or_create_batch(
-        db=db,
-        batch_name=payload.batch_name,
-        current_week_number=payload.current_week_number,
-    )
-    temporary_password = create_temporary_password()
-    user = User(
-        username=issued_username,
-        password_hash=hash_password(temporary_password),
-        role="student",
+def _registration_out(registration: Registration, enrollment: Enrollment | None = None) -> RegistrationOut:
+    resolved_enrollment = enrollment or registration.enrollment
+    return RegistrationOut(
+        id=registration.id,
         first_name=registration.first_name,
         middle_name=registration.middle_name,
         last_name=registration.last_name,
         birth_date=registration.birth_date,
         address=registration.address,
-        email=normalized_email,
+        email=registration.email,
         phone_number=registration.phone_number,
-        batch_id=batch.id,
-        must_change_password=True,
+        reference_number=registration.reference_number,
+        reference_image_path=registration.reference_image_path,
+        status=registration.status,
+        validated_at=registration.validated_at,
+        validated_by=registration.validated_by,
+        linked_user_id=registration.linked_user_id,
+        issued_username=registration.issued_username,
+        enrollment_id=resolved_enrollment.id if resolved_enrollment else None,
+        payment_review_status=resolved_enrollment.payment_review_status if resolved_enrollment else None,
+        notes=registration.notes,
+        created_at=registration.created_at,
     )
-    db.add(user)
-    db.flush()
 
-    try:
-        email_status = _send_credentials_email(
-            registration=registration,
-            username=issued_username,
-            temporary_password=temporary_password,
-            batch_name=batch.name,
+
+def _batch_out(batch: Batch | None, *, student_count: int = 0) -> TeacherBatchOut | None:
+    if batch is None:
+        return None
+    return TeacherBatchOut(
+        id=batch.id,
+        code=batch.code,
+        name=batch.name,
+        status=batch.status,
+        start_date=batch.start_date,
+        end_date=batch.end_date,
+        capacity=batch.capacity,
+        notes=batch.notes,
+        student_count=student_count,
+        created_at=batch.created_at,
+    )
+
+
+def _student_summary(user: User | None) -> TeacherUserSummary | None:
+    if user is None:
+        return None
+    return TeacherUserSummary(
+        id=user.id,
+        username=user.username,
+        full_name=_full_name(user),
+        email=user.email,
+    )
+
+
+def _enrollment_out(enrollment: Enrollment) -> TeacherEnrollmentOut:
+    registration = enrollment.registration
+    batch = enrollment.batch
+    student = enrollment.user
+    student_count = (
+        sum(1 for item in batch.enrollments if item.status == "approved" and item.user_id is not None)
+        if batch
+        else 0
+    )
+    return TeacherEnrollmentOut(
+        id=enrollment.id,
+        status=enrollment.status,
+        payment_review_status=enrollment.payment_review_status,
+        review_notes=enrollment.review_notes,
+        reviewed_at=enrollment.reviewed_at,
+        approved_at=enrollment.approved_at,
+        rejected_at=enrollment.rejected_at,
+        created_at=enrollment.created_at,
+        updated_at=enrollment.updated_at,
+        registration=_registration_out(registration, enrollment),
+        batch=_batch_out(batch, student_count=student_count),
+        student=_student_summary(student),
+    )
+
+
+def _activity_attempt_out(attempt: ActivityAttempt) -> TeacherActivityAttemptOut:
+    return TeacherActivityAttemptOut(
+        id=attempt.id,
+        student_id=attempt.user_id,
+        student_name=_full_name(attempt.user),
+        module_id=attempt.module_id,
+        module_title=attempt.module.title,
+        activity_id=attempt.module_activity_id,
+        activity_key=attempt.activity_key,
+        activity_title=attempt.activity_title,
+        activity_type=attempt.activity_type,
+        right_count=attempt.right_count,
+        wrong_count=attempt.wrong_count,
+        total_items=attempt.total_items,
+        score_percent=attempt.score_percent,
+        improvement_areas=list(attempt.improvement_areas or []),
+        ai_metadata=dict(attempt.ai_metadata or {}),
+        submitted_at=attempt.submitted_at,
+        items=[
+            TeacherActivityAttemptItemOut(
+                id=item.id,
+                item_key=item.item_key,
+                prompt=item.prompt,
+                expected_answer=item.expected_answer,
+                student_answer=item.student_answer,
+                is_correct=item.is_correct,
+                confidence=item.confidence,
+                ai_metadata=dict(item.ai_metadata or {}),
+            )
+            for item in attempt.items
+        ],
+    )
+
+
+def _get_enrollment_or_404(db: Session, enrollment_id: int) -> Enrollment:
+    enrollment = db.query(Enrollment).filter(Enrollment.id == enrollment_id).first()
+    if not enrollment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enrollment not found.")
+    return enrollment
+
+
+def _resolve_payment_proof_path(registration: Registration) -> Path:
+    if not registration.reference_image_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment proof not found.")
+
+    raw_path = Path(registration.reference_image_path)
+    if raw_path.is_absolute():
+        candidate = raw_path.resolve()
+    else:
+        normalized = registration.reference_image_path.replace("uploads/registrations/", "registrations/")
+        candidate = (REGISTRATION_UPLOADS_DIR.parent / normalized).resolve()
+    if REGISTRATION_UPLOADS_DIR not in candidate.parents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment proof path is invalid.")
+    if not candidate.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment proof file not found.")
+    return candidate
+
+
+def _student_attempts_query(db: Session, student_id: int):
+    return (
+        db.query(ActivityAttempt)
+        .options(
+            joinedload(ActivityAttempt.user),
+            joinedload(ActivityAttempt.module),
+            selectinload(ActivityAttempt.items),
         )
-    except EmailDeliveryError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Student account email could not be sent. {exc}",
-        ) from exc
-
-    now = datetime.now(timezone.utc)
-    registration.status = "approved"
-    registration.validated_at = now
-    registration.validated_by = _teacher_display_name(current_teacher)
-    registration.rejected_at = None
-    registration.rejected_by = None
-    registration.linked_user_id = user.id
-    registration.batch_id = batch.id
-    registration.issued_username = issued_username
-    registration.notes = payload.notes.strip() if payload.notes else None
-    registration.credential_email_status = "sent" if email_status == "sent" else "logged"
-    registration.credential_sent_at = now
-    registration.credential_email_error = None
-
-    db.add(registration)
-    db.commit()
-    db.refresh(registration)
-
-    return TeacherRegistrationActionResponse(
-        message="Registration approved and credentials prepared for delivery.",
-        registration=registration,
+        .filter(ActivityAttempt.user_id == student_id)
+        .order_by(ActivityAttempt.submitted_at.desc(), ActivityAttempt.id.desc())
     )
 
 
-@router.post(
-    "/registrations/{registration_id}/reject",
-    response_model=TeacherRegistrationActionResponse,
-)
-def reject_registration(
-    registration_id: int,
-    payload: TeacherRegistrationRejectRequest,
+def _get_activity_attempt_or_404(db: Session, attempt_id: int) -> ActivityAttempt:
+    attempt = (
+        db.query(ActivityAttempt)
+        .options(
+            joinedload(ActivityAttempt.user),
+            joinedload(ActivityAttempt.module),
+            selectinload(ActivityAttempt.items),
+        )
+        .filter(ActivityAttempt.id == attempt_id)
+        .first()
+    )
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity attempt not found.")
+    return attempt
+
+
+@router.get("/enrollments", response_model=list[TeacherEnrollmentOut])
+def list_teacher_enrollments(
+    status_filter: str | None = Query(default=None, alias="status"),
+    batch_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> list[TeacherEnrollmentOut]:
+    query = db.query(Enrollment).order_by(Enrollment.created_at.desc(), Enrollment.id.desc())
+    if status_filter:
+        query = query.filter(Enrollment.status == status_filter)
+    if batch_id is not None:
+        query = query.filter(Enrollment.batch_id == batch_id)
+    return [_enrollment_out(enrollment) for enrollment in query.all()]
+
+
+@router.get("/enrollments/{enrollment_id}", response_model=TeacherEnrollmentOut)
+def get_teacher_enrollment(
+    enrollment_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> TeacherEnrollmentOut:
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    return _enrollment_out(enrollment)
+
+
+@router.get("/enrollments/{enrollment_id}/payment-proof")
+def get_enrollment_payment_proof(
+    enrollment_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+):
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    proof_path = _resolve_payment_proof_path(enrollment.registration)
+    return FileResponse(path=proof_path)
+
+
+@router.post("/enrollments/{enrollment_id}/approve", response_model=TeacherEnrollmentOut)
+def approve_teacher_enrollment(
+    enrollment_id: int,
+    payload: TeacherEnrollmentApproveRequest,
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
-) -> TeacherRegistrationActionResponse:
-    registration = _get_registration_or_404(db, registration_id)
-    if registration.status == "approved":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Approved registrations cannot be rejected from this flow.",
-        )
-    if registration.status == "rejected":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Registration is already rejected.",
-        )
-
-    registration.status = "rejected"
-    registration.rejected_at = datetime.now(timezone.utc)
-    registration.rejected_by = _teacher_display_name(current_teacher)
-    registration.notes = payload.notes.strip() if payload.notes else None
-    db.add(registration)
-    db.commit()
-    db.refresh(registration)
-
-    return TeacherRegistrationActionResponse(
-        message="Registration rejected successfully.",
-        registration=registration,
+) -> TeacherEnrollmentOut:
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    batch = get_or_create_batch(
+        db,
+        current_teacher=current_teacher,
+        batch_id=payload.batch_id,
+        batch_code=payload.batch_code,
+        batch_name=payload.batch_name,
     )
+    approve_enrollment(
+        db,
+        enrollment=enrollment,
+        current_teacher=current_teacher,
+        batch=batch,
+        issued_username=payload.issued_username,
+        temporary_password=payload.temporary_password,
+        notes=payload.notes,
+        send_email=payload.send_email,
+    )
+    db.commit()
+    db.refresh(enrollment)
+    return _enrollment_out(enrollment)
 
 
-@router.post(
-    "/registrations/{registration_id}/resend-credentials",
-    response_model=TeacherRegistrationActionResponse,
-)
-def resend_registration_credentials(
-    registration_id: int,
+@router.post("/enrollments/{enrollment_id}/reject", response_model=TeacherEnrollmentOut)
+def reject_teacher_enrollment(
+    enrollment_id: int,
+    payload: TeacherEnrollmentRejectRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherEnrollmentOut:
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    from app.services.enrollment_service import reject_enrollment
+
+    reject_enrollment(db, enrollment=enrollment, current_teacher=current_teacher, notes=payload.notes)
+    db.commit()
+    db.refresh(enrollment)
+    return _enrollment_out(enrollment)
+
+
+@router.get("/batches", response_model=list[TeacherBatchOut])
+def list_teacher_batches(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
-) -> TeacherRegistrationActionResponse:
-    registration = _get_registration_or_404(db, registration_id)
-    if registration.status != "approved" or not registration.linked_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Only approved registrations with linked accounts can resend credentials.",
-        )
-
-    user = db.query(User).filter(User.id == registration.linked_user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked user not found.")
-
-    temporary_password = create_temporary_password()
-    user.password_hash = hash_password(temporary_password)
-    user.must_change_password = True
-    db.add(user)
-
-    batch = db.query(Batch).filter(Batch.id == registration.batch_id).first() if registration.batch_id else None
-    try:
-        email_status = _send_credentials_email(
-            registration=registration,
-            username=user.username,
-            temporary_password=temporary_password,
-            batch_name=batch.name if batch else None,
-        )
-    except EmailDeliveryError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Credential resend email could not be sent. {exc}",
-        ) from exc
-
-    registration.credential_email_status = "sent" if email_status == "sent" else "logged"
-    registration.credential_sent_at = datetime.now(timezone.utc)
-    registration.credential_email_error = None
-    db.add(registration)
-    db.commit()
-    db.refresh(registration)
-
-    return TeacherRegistrationActionResponse(
-        message="Credentials resent successfully.",
-        registration=registration,
-    )
-
-
-@router.get("/batches", response_model=list[TeacherBatchOverview])
-def get_teacher_batches(
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
-) -> list[TeacherBatchOverview]:
+) -> list[TeacherBatchOut]:
     batches = db.query(Batch).order_by(Batch.name.asc()).all()
-    payload: list[TeacherBatchOverview] = []
-    for batch in batches:
-        students = (
-            db.query(User)
-            .filter(User.batch_id == batch.id, User.role == "student")
-            .order_by(User.last_name.asc(), User.first_name.asc(), User.username.asc())
-            .all()
+    return [
+        _batch_out(
+            batch,
+            student_count=sum(
+                1
+                for enrollment in batch.enrollments
+                if enrollment.status == "approved" and enrollment.user_id is not None
+            ),
         )
-        payload.append(
-            TeacherBatchOverview(
-                id=batch.id,
-                name=batch.name,
-                current_week_number=batch.current_week_number,
-                student_count=len(students),
-                students=[
-                    TeacherBatchStudent(
-                        user_id=student.id,
-                        username=student.username,
-                        full_name=" ".join(
-                            part.strip()
-                            for part in [
-                                student.first_name or "",
-                                student.middle_name or "",
-                                student.last_name or "",
-                            ]
-                            if part and part.strip()
-                        ).strip()
-                        or student.username,
-                        email=student.email,
-                    )
-                    for student in students
-                ],
-            )
-        )
-    return payload
+        for batch in batches
+    ]
 
 
-@router.patch("/batches/{batch_id}", response_model=TeacherBatchOverview)
-def update_teacher_batch(
+@router.post("/batches", response_model=TeacherBatchOut, status_code=status.HTTP_201_CREATED)
+def create_teacher_batch(
+    payload: TeacherBatchCreateRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherBatchOut:
+    existing = (
+        db.query(Batch)
+        .filter((Batch.code == normalize_batch_code(payload.code)) | (Batch.name == payload.name.strip()))
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Batch already exists.")
+
+    batch = Batch(
+        code=normalize_batch_code(payload.code),
+        name=payload.name.strip(),
+        status=payload.status.strip() or "active",
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        capacity=payload.capacity,
+        notes=payload.notes.strip() if payload.notes else None,
+        created_by_user_id=current_teacher.id,
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _batch_out(batch, student_count=0)
+
+
+@router.get("/batches/{batch_id}/students", response_model=list[TeacherUserSummary])
+def list_batch_students(
     batch_id: int,
-    payload: TeacherBatchUpdateRequest,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
-) -> TeacherBatchOverview:
+) -> list[TeacherUserSummary]:
     batch = db.query(Batch).filter(Batch.id == batch_id).first()
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
 
-    batch.current_week_number = payload.current_week_number
-    db.add(batch)
-    db.commit()
-    db.refresh(batch)
+    students = [
+        enrollment.user
+        for enrollment in batch.enrollments
+        if enrollment.status == "approved" and enrollment.user is not None
+    ]
+    students.sort(key=lambda item: (_full_name(item), item.username))
+    return [_student_summary(student) for student in students if student is not None]
 
-    students = (
-        db.query(User)
-        .filter(User.batch_id == batch.id, User.role == "student")
-        .order_by(User.last_name.asc(), User.first_name.asc(), User.username.asc())
+
+@router.get("/students/{student_id}", response_model=TeacherStudentOut)
+def get_teacher_student(
+    student_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> TeacherStudentOut:
+    student = db.query(User).filter(User.id == student_id, User.role == "student").first()
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
+
+    active_enrollment = (
+        db.query(Enrollment)
+        .filter(Enrollment.user_id == student.id, Enrollment.status == "approved")
+        .order_by(Enrollment.approved_at.desc(), Enrollment.id.desc())
+        .first()
+    )
+    progress_rows = (
+        db.query(UserModuleProgress)
+        .filter(UserModuleProgress.user_id == student.id)
+        .order_by(UserModuleProgress.module_id.asc())
         .all()
     )
-    return TeacherBatchOverview(
-        id=batch.id,
-        name=batch.name,
-        current_week_number=batch.current_week_number,
-        student_count=len(students),
-        students=[
-            TeacherBatchStudent(
-                user_id=student.id,
-                username=student.username,
-                full_name=" ".join(
-                    part.strip()
-                    for part in [
-                        student.first_name or "",
-                        student.middle_name or "",
-                        student.last_name or "",
-                    ]
-                    if part and part.strip()
-                ).strip()
-                or student.username,
-                email=student.email,
+    module_progress = []
+    for row in progress_rows:
+        module_title = row.module.title if getattr(row, "module", None) else f"Module {row.module_id}"
+        module_progress.append(
+            TeacherStudentModuleProgressOut(
+                module_id=row.module_id,
+                module_title=module_title,
+                status=row.status,
+                progress_percent=row.progress_percent,
+                assessment_score=row.assessment_score,
+                updated_at=row.updated_at,
             )
-            for student in students
-        ],
+        )
+
+    return TeacherStudentOut(
+        id=student.id,
+        username=student.username,
+        full_name=_full_name(student),
+        email=student.email,
+        phone_number=student.phone_number,
+        address=student.address,
+        birth_date=student.birth_date,
+        role=student.role,
+        enrollment_status=active_enrollment.status if active_enrollment else None,
+        batch=_batch_out(active_enrollment.batch, student_count=0) if active_enrollment else None,
+        module_progress=module_progress,
     )
+
+
+@router.get("/students/{student_id}/activity-attempts", response_model=list[TeacherActivityAttemptOut])
+def list_teacher_student_activity_attempts(
+    student_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> list[TeacherActivityAttemptOut]:
+    student = db.query(User).filter(User.id == student_id, User.role == "student").first()
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
+    return [_activity_attempt_out(attempt) for attempt in _student_attempts_query(db, student_id).all()]
+
+
+@router.get("/activity-attempts/{attempt_id}", response_model=TeacherActivityAttemptOut)
+def get_teacher_activity_attempt(
+    attempt_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> TeacherActivityAttemptOut:
+    return _activity_attempt_out(_get_activity_attempt_or_404(db, attempt_id))

@@ -1,21 +1,24 @@
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.core.config import PROJECT_ROOT, settings
-from app.core.security import hash_password
+from app.api.deps import get_current_teacher
+from app.core.config import PROJECT_ROOT
 from app.db.session import get_db
+from app.models.enrollment import Enrollment
 from app.models.registration import Registration
 from app.models.user import User
 from app.schemas.registration import (
     RegistrationCreate,
+    RegistrationOut,
     RegistrationSubmitResponse,
     RegistrationValidationRequest,
     RegistrationValidationResponse,
 )
+from app.services.enrollment_service import approve_enrollment, get_or_create_batch
 
 router = APIRouter(prefix="/registrations", tags=["registrations"])
 
@@ -35,6 +38,31 @@ def _clean_optional(value: str | None) -> str | None:
     return stripped if stripped else None
 
 
+def _registration_out(registration: Registration, enrollment: Enrollment | None = None) -> RegistrationOut:
+    resolved_enrollment = enrollment or registration.enrollment
+    return RegistrationOut(
+        id=registration.id,
+        first_name=registration.first_name,
+        middle_name=registration.middle_name,
+        last_name=registration.last_name,
+        birth_date=registration.birth_date,
+        address=registration.address,
+        email=registration.email,
+        phone_number=registration.phone_number,
+        reference_number=registration.reference_number,
+        reference_image_path=registration.reference_image_path,
+        status=registration.status,
+        validated_at=registration.validated_at,
+        validated_by=registration.validated_by,
+        linked_user_id=registration.linked_user_id,
+        issued_username=registration.issued_username,
+        enrollment_id=resolved_enrollment.id if resolved_enrollment else None,
+        payment_review_status=resolved_enrollment.payment_review_status if resolved_enrollment else None,
+        notes=registration.notes,
+        created_at=registration.created_at,
+    )
+
+
 @router.post("", response_model=RegistrationSubmitResponse, status_code=status.HTTP_201_CREATED)
 async def submit_registration(
     first_name: str = Form(...),
@@ -45,7 +73,6 @@ async def submit_registration(
     email: str = Form(...),
     phone_number: str = Form(...),
     reference_number: str = Form(...),
-    requested_batch_name: str | None = Form(default=None),
     reference_image: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> RegistrationSubmitResponse:
@@ -66,7 +93,6 @@ async def submit_registration(
         email=email.strip(),
         phone_number=phone_number.strip(),
         reference_number=reference_number.strip(),
-        requested_batch_name=_clean_optional(requested_batch_name),
     )
 
     if not reference_image.filename:
@@ -93,7 +119,7 @@ async def submit_registration(
     filename = f"{uuid4().hex}{suffix}"
     destination = UPLOADS_DIR / filename
     destination.write_bytes(content)
-    image_path = f"uploads/registrations/{filename}"
+    image_path = f"registrations/{filename}"
 
     registration = Registration(
         first_name=payload.first_name,
@@ -104,17 +130,25 @@ async def submit_registration(
         email=payload.email,
         phone_number=payload.phone_number,
         reference_number=payload.reference_number,
-        requested_batch_name=payload.requested_batch_name,
         reference_image_path=image_path,
         status="pending",
     )
     db.add(registration)
+    db.flush()
+
+    enrollment = Enrollment(
+        registration_id=registration.id,
+        status="pending",
+        payment_review_status="submitted",
+    )
+    db.add(enrollment)
     db.commit()
     db.refresh(registration)
+    db.refresh(enrollment)
 
     return RegistrationSubmitResponse(
         message="Registration submitted successfully.",
-        registration=registration,
+        registration=_registration_out(registration, enrollment),
     )
 
 
@@ -127,65 +161,45 @@ def validate_registration(
     registration_id: int,
     payload: RegistrationValidationRequest,
     db: Session = Depends(get_db),
-    x_teacher_key: str | None = Header(default=None),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> RegistrationValidationResponse:
-    if x_teacher_key != settings.teacher_validation_key:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid teacher key.")
-
     registration = db.query(Registration).filter(Registration.id == registration_id).first()
     if not registration:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found.")
 
-    if registration.status == "validated" and registration.linked_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Registration is already validated.",
+    enrollment = registration.enrollment
+    if enrollment is None:
+        enrollment = Enrollment(
+            registration_id=registration.id,
+            status="pending",
+            payment_review_status="submitted",
         )
+        db.add(enrollment)
+        db.flush()
 
-    existing_user = db.query(User).filter(User.username == payload.issued_username).first()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists.")
-
-    normalized_email = registration.email.strip().lower()
-    existing_email = db.query(User).filter(User.email == normalized_email).first()
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email is already linked to another account.",
-        )
-
-    user = User(
-        username=payload.issued_username.strip(),
-        password_hash=hash_password(payload.initial_password),
-        first_name=registration.first_name,
-        middle_name=registration.middle_name,
-        last_name=registration.last_name,
-        birth_date=registration.birth_date,
-        address=registration.address,
-        email=normalized_email,
-        phone_number=registration.phone_number,
-        role="student",
-        must_change_password=True,
+    batch = get_or_create_batch(
+        db,
+        current_teacher=current_teacher,
+        batch_code="LEGACY-APPROVED",
+        batch_name="Legacy Approved",
     )
-    db.add(user)
-    db.flush()
-
-    registration.status = "approved"
-    registration.validated_at = datetime.now(timezone.utc)
-    registration.validated_by = payload.teacher_name.strip()
-    registration.linked_user_id = user.id
-    registration.issued_username = payload.issued_username.strip()
-    registration.credential_email_status = "manual"
-    registration.credential_email_error = None
-    registration.notes = payload.notes.strip() if payload.notes else None
-
-    db.add(registration)
+    approve_enrollment(
+        db,
+        enrollment=enrollment,
+        current_teacher=current_teacher,
+        batch=batch,
+        issued_username=payload.issued_username,
+        temporary_password=payload.initial_password,
+        notes=payload.notes,
+        send_email=False,
+    )
     db.commit()
     db.refresh(registration)
+    db.refresh(enrollment)
 
     return RegistrationValidationResponse(
         message=(
-            "Registration validated. Send the issued username and initial password to the student email."
+            "Registration validated. Use the teacher enrollment routes for the full batch-aware approval workflow."
         ),
-        registration=registration,
+        registration=_registration_out(registration, enrollment),
     )
