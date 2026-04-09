@@ -46,6 +46,24 @@ def _register_and_approve_student(
     return approve_response.json()["enrollment"]
 
 
+def _submit_activity_attempt(
+    client,
+    *,
+    module_id: int,
+    activity_key: str,
+    headers,
+    payload: dict,
+    repeat: int = 1,
+):
+    for _ in range(repeat):
+        response = client.post(
+            f"/api/modules/{module_id}/activities/{activity_key}/attempts",
+            json=payload,
+            headers=headers,
+        )
+        assert response.status_code == 200
+
+
 def test_activity_attempts_feed_teacher_review_and_summary(
     client,
     teacher_headers_factory,
@@ -64,15 +82,72 @@ def test_activity_attempts_feed_teacher_review_and_summary(
         suffix="Two",
         issued_username="student.two",
     )
+    approved_student_three = _register_and_approve_student(
+        client,
+        teacher_headers=teacher_headers,
+        suffix="Three",
+        issued_username="student.three",
+        batch_code="BATCH-EVENING",
+        batch_name="Evening Batch",
+    )
+    approved_student_empty = _register_and_approve_student(
+        client,
+        teacher_headers=teacher_headers,
+        suffix="Empty",
+        issued_username="student.empty",
+        batch_code="BATCH-EMPTY",
+        batch_name="Empty Batch",
+    )
+    pending_registration_response = client.post(
+        "/api/registrations",
+        data={
+            "first_name": "Student",
+            "middle_name": "T",
+            "last_name": "Pending",
+            "birth_date": "2011-06-15",
+            "address": "Quezon City",
+            "email": "student.pending@example.com",
+            "phone_number": "09123456789",
+            "reference_number": "REF-Pending",
+        },
+        files={"reference_image": ("proof.png", b"proof-image", "image/png")},
+    )
+    assert pending_registration_response.status_code == 201
+
+    rejected_registration_response = client.post(
+        "/api/registrations",
+        data={
+            "first_name": "Student",
+            "middle_name": "T",
+            "last_name": "Rejected",
+            "birth_date": "2011-06-15",
+            "address": "Quezon City",
+            "email": "student.rejected@example.com",
+            "phone_number": "09123456789",
+            "reference_number": "REF-Rejected",
+        },
+        files={"reference_image": ("proof.png", b"proof-image", "image/png")},
+    )
+    assert rejected_registration_response.status_code == 201
+    rejected_enrollment_id = rejected_registration_response.json()["registration"]["enrollment_id"]
+    reject_response = client.post(
+        f"/api/teacher/enrollments/{rejected_enrollment_id}/reject",
+        json={"notes": "Rejected for activity reporting coverage."},
+        headers=teacher_headers,
+    )
+    assert reject_response.status_code == 200
 
     with SessionLocal() as db:
         student_one = db.query(User).filter(User.username == "student.one").first()
         student_two = db.query(User).filter(User.username == "student.two").first()
+        student_three = db.query(User).filter(User.username == "student.three").first()
         assert student_one is not None
         assert student_two is not None
+        assert student_three is not None
 
     student_one_headers = student_headers_factory("student.one")
     student_two_headers = student_headers_factory("student.two")
+    student_three_headers = student_headers_factory("student.three")
 
     modules_response = client.get("/api/modules", headers=student_one_headers)
     assert modules_response.status_code == 200
@@ -193,22 +268,86 @@ def test_activity_attempts_feed_teacher_review_and_summary(
             },
         ],
     }
+    medium_attempt_payload = {
+        "right_count": 3,
+        "wrong_count": 2,
+        "total_items": 5,
+        "score_percent": 60,
+        "improvement_areas": ["Timing control"],
+        "ai_metadata": {"capture_mode": "manual"},
+        "source": "api",
+        "items": [
+            {
+                "item_key": "m1-q1",
+                "prompt": "Prompt 1",
+                "expected_answer": "A",
+                "student_answer": "A",
+                "is_correct": True,
+                "confidence": 0.87,
+                "ai_metadata": {},
+            },
+            {
+                "item_key": "m1-q2",
+                "prompt": "Prompt 2",
+                "expected_answer": "J and Z",
+                "student_answer": "J",
+                "is_correct": False,
+                "confidence": 0.49,
+                "ai_metadata": {},
+            },
+            {
+                "item_key": "m1-q3",
+                "prompt": "Prompt 3",
+                "expected_answer": "Finger-spell the word clearly letter by letter",
+                "student_answer": "Finger-spell the word clearly letter by letter",
+                "is_correct": True,
+                "confidence": 0.84,
+                "ai_metadata": {},
+            },
+            {
+                "item_key": "m1-q4",
+                "prompt": "Prompt 4",
+                "expected_answer": "It helps sign names and specific terms",
+                "student_answer": "Different answer",
+                "is_correct": False,
+                "confidence": 0.52,
+                "ai_metadata": {},
+            },
+            {
+                "item_key": "m1-q5",
+                "prompt": "Prompt 5",
+                "expected_answer": "Clear handshape and readable pacing",
+                "student_answer": "Clear handshape and readable pacing",
+                "is_correct": True,
+                "confidence": 0.88,
+                "ai_metadata": {},
+            },
+        ],
+    }
 
-    for _ in range(3):
-        low_response = client.post(
-            f"/api/modules/{module_id}/activities/{activity_key}/attempts",
-            json=low_attempt_payload,
-            headers=student_one_headers,
-        )
-        assert low_response.status_code == 200
-
-    for _ in range(2):
-        strong_response = client.post(
-            f"/api/modules/{module_id}/activities/{activity_key}/attempts",
-            json=strong_attempt_payload,
-            headers=student_two_headers,
-        )
-        assert strong_response.status_code == 200
+    _submit_activity_attempt(
+        client,
+        module_id=module_id,
+        activity_key=activity_key,
+        headers=student_one_headers,
+        payload=low_attempt_payload,
+        repeat=3,
+    )
+    _submit_activity_attempt(
+        client,
+        module_id=module_id,
+        activity_key=activity_key,
+        headers=student_two_headers,
+        payload=strong_attempt_payload,
+        repeat=2,
+    )
+    _submit_activity_attempt(
+        client,
+        module_id=module_id,
+        activity_key=activity_key,
+        headers=student_three_headers,
+        payload=medium_attempt_payload,
+    )
 
     student_attempts_response = client.get(
         f"/api/teacher/students/{student_one.id}/activity-attempts",
@@ -234,9 +373,180 @@ def test_activity_attempts_feed_teacher_review_and_summary(
     )
     assert summary_response.status_code == 200
     summary = summary_response.json()
+    assert summary["registered_student_count"] == 4
     assert summary["total_attempts"] == 5
     assert summary["total_students"] == 2
     assert summary["weak_items"]
     assert summary["weak_items"][0]["item_key"] == "m1-q1"
     assert summary["students_needing_attention"][0]["student_id"] == student_one.id
     assert summary["recent_concern_attempts"]
+
+    batch_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?batch_id={batch_id}",
+        headers=teacher_headers,
+    )
+    assert batch_breakdown_response.status_code == 200
+    batch_breakdown = batch_breakdown_response.json()
+    assert batch_breakdown["mode"] == "batch"
+    assert batch_breakdown["batch_name"] == approved_student_one["batch"]["name"]
+    assert [row["student_id"] for row in batch_breakdown["rows"]] == [student_one.id, student_two.id]
+    assert batch_breakdown["rows"][0]["average_score_percent"] == 40
+    assert batch_breakdown["rows"][0]["highest_correct_module"] == {
+        "module_id": module_id,
+        "module_title": module["title"],
+        "count": 6,
+    }
+    assert batch_breakdown["rows"][0]["highest_incorrect_module"] == {
+        "module_id": module_id,
+        "module_title": module["title"],
+        "count": 9,
+    }
+
+    module_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?module_id={module_id}",
+        headers=teacher_headers,
+    )
+    assert module_breakdown_response.status_code == 200
+    module_breakdown = module_breakdown_response.json()
+    assert module_breakdown["mode"] == "module"
+    assert module_breakdown["module_title"] == module["title"]
+    assert module_breakdown["rows"] == [
+        {
+            "batch_id": approved_student_one["batch"]["id"],
+            "batch_name": approved_student_one["batch"]["name"],
+            "average_score_percent": 56.0,
+            "correct_answers": 14,
+            "incorrect_answers": 11,
+        },
+        {
+            "batch_id": approved_student_three["batch"]["id"],
+            "batch_name": approved_student_three["batch"]["name"],
+            "average_score_percent": 60.0,
+            "correct_answers": 3,
+            "incorrect_answers": 2,
+        },
+    ]
+
+    empty_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?batch_id={approved_student_empty['batch']['id']}",
+        headers=teacher_headers,
+    )
+    assert empty_breakdown_response.status_code == 200
+    empty_breakdown = empty_breakdown_response.json()
+    assert empty_breakdown["mode"] == "batch"
+    assert empty_breakdown["batch_name"] == approved_student_empty["batch"]["name"]
+    assert empty_breakdown["rows"] == []
+
+    archive_batch_response = client.post(
+        f"/api/teacher/batches/{approved_student_three['batch']['id']}/archive",
+        headers=teacher_headers,
+    )
+    assert archive_batch_response.status_code == 200
+    assert archive_batch_response.json()["status"] == "archived"
+
+    filtered_summary_response = client.get(
+        "/api/teacher/reports/summary",
+        headers=teacher_headers,
+    )
+    assert filtered_summary_response.status_code == 200
+    filtered_summary = filtered_summary_response.json()
+    assert filtered_summary["registered_student_count"] == 3
+    assert filtered_summary["total_attempts"] == 5
+    assert filtered_summary["total_students"] == 2
+
+    archived_summary_response = client.get(
+        "/api/teacher/reports/summary?include_archived_batches=true",
+        headers=teacher_headers,
+    )
+    assert archived_summary_response.status_code == 200
+    archived_summary = archived_summary_response.json()
+    assert archived_summary["registered_student_count"] == 3
+    assert archived_summary["total_attempts"] == 6
+    assert archived_summary["total_students"] == 3
+
+    filtered_module_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?module_id={module_id}",
+        headers=teacher_headers,
+    )
+    assert filtered_module_breakdown_response.status_code == 200
+    filtered_module_breakdown = filtered_module_breakdown_response.json()
+    assert filtered_module_breakdown["rows"] == [
+        {
+            "batch_id": approved_student_one["batch"]["id"],
+            "batch_name": approved_student_one["batch"]["name"],
+            "average_score_percent": 56.0,
+            "correct_answers": 14,
+            "incorrect_answers": 11,
+        }
+    ]
+
+    archived_module_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?module_id={module_id}&include_archived_batches=true",
+        headers=teacher_headers,
+    )
+    assert archived_module_breakdown_response.status_code == 200
+    archived_module_breakdown = archived_module_breakdown_response.json()
+    assert archived_module_breakdown["rows"] == [
+        {
+            "batch_id": approved_student_one["batch"]["id"],
+            "batch_name": approved_student_one["batch"]["name"],
+            "average_score_percent": 56.0,
+            "correct_answers": 14,
+            "incorrect_answers": 11,
+        },
+        {
+            "batch_id": approved_student_three["batch"]["id"],
+            "batch_name": approved_student_three["batch"]["name"],
+            "average_score_percent": 60.0,
+            "correct_answers": 3,
+            "incorrect_answers": 2,
+        },
+    ]
+
+    archived_batch_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?batch_id={approved_student_three['batch']['id']}",
+        headers=teacher_headers,
+    )
+    assert archived_batch_breakdown_response.status_code == 200
+    archived_batch_breakdown = archived_batch_breakdown_response.json()
+    assert archived_batch_breakdown["mode"] == "batch"
+    assert archived_batch_breakdown["rows"] == []
+
+    included_archived_batch_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?batch_id={approved_student_three['batch']['id']}&include_archived_batches=true",
+        headers=teacher_headers,
+    )
+    assert included_archived_batch_breakdown_response.status_code == 200
+    included_archived_batch_breakdown = included_archived_batch_breakdown_response.json()
+    assert included_archived_batch_breakdown["mode"] == "batch"
+    assert included_archived_batch_breakdown["rows"] == [
+        {
+            "student_id": student_three.id,
+            "student_name": "Student T Three",
+            "average_score_percent": 60.0,
+            "highest_correct_module": {
+                "module_id": module_id,
+                "module_title": module["title"],
+                "count": 3,
+            },
+            "highest_incorrect_module": {
+                "module_id": module_id,
+                "module_title": module["title"],
+                "count": 2,
+            },
+        }
+    ]
+
+    invalid_both_filters_response = client.get(
+        f"/api/teacher/reports/breakdown?batch_id={batch_id}&module_id={module_id}",
+        headers=teacher_headers,
+    )
+    assert invalid_both_filters_response.status_code == 422
+    assert invalid_both_filters_response.json()["detail"] == "Select either batch_id or module_id, but not both."
+
+    invalid_missing_filters_response = client.get(
+        "/api/teacher/reports/breakdown",
+        headers=teacher_headers,
+    )
+    assert invalid_missing_filters_response.status_code == 422
+    assert invalid_missing_filters_response.json()["detail"] == "Select either batch_id or module_id, but not both."

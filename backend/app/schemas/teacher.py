@@ -19,7 +19,7 @@ class TeacherBatchOut(BaseModel):
     id: int
     code: str
     name: str
-    status: str
+    status: Literal["active", "archived"]
     start_date: date | None = None
     end_date: date | None = None
     capacity: int | None = None
@@ -31,7 +31,7 @@ class TeacherBatchOut(BaseModel):
 class TeacherBatchCreateRequest(BaseModel):
     code: str = Field(min_length=1, max_length=60)
     name: str = Field(min_length=2, max_length=160)
-    status: str = Field(default="active", max_length=20)
+    status: Literal["active", "archived"] = "active"
     start_date: date | None = None
     end_date: date | None = None
     capacity: int | None = Field(default=None, ge=1)

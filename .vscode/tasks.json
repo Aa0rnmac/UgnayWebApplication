@@ -10,7 +10,20 @@
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; exit 0"
+        "$workspace='${workspaceFolder}'; $expectedRoot=[System.IO.Path]::GetFullPath((Join-Path $workspace 'backend')).ToLowerInvariant(); $foreign=@(); Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { $listenerPid=$_; $proc=Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $listenerPid) -ErrorAction SilentlyContinue; if (-not $proc) { return }; $cmd=''; if ($proc.CommandLine) { $cmd=$proc.CommandLine.ToLowerInvariant() }; if (($cmd -like ('*' + $expectedRoot + '*')) -and (($cmd -like '*uvicorn*') -or ($cmd -like '*app.main:app*'))) { Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue } else { $foreign += $listenerPid } }; if ($foreign.Count -gt 0) { Write-Error ('Port 8000 is already in use by non-Ugnay process(es): ' + (($foreign | Sort-Object -Unique) -join ', ')); exit 1 }; exit 0"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Stop port 3000",
+      "type": "process",
+      "command": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "$workspace='${workspaceFolder}'; $expectedRoot=[System.IO.Path]::GetFullPath((Join-Path $workspace 'frontend')).ToLowerInvariant(); $foreign=@(); Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { $listenerPid=$_; $proc=Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $listenerPid) -ErrorAction SilentlyContinue; if (-not $proc) { return }; $cmd=''; if ($proc.CommandLine) { $cmd=$proc.CommandLine.ToLowerInvariant() }; if (($cmd -like ('*' + $expectedRoot + '*')) -and (($cmd -like '*next*dev*') -or ($cmd -like '*dev-clean.mjs*') -or ($cmd -like '*-p 3000*'))) { Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue } else { $foreign += $listenerPid } }; if ($foreign.Count -gt 0) { Write-Error ('Port 3000 is already in use by non-Ugnay process(es): ' + (($foreign | Sort-Object -Unique) -join ', ')); exit 1 }; exit 0"
       ],
       "problemMatcher": []
     },
@@ -35,6 +48,14 @@
       "dependsOn": [
         "Backend: Stop port 8000",
         "Backend: Alembic upgrade head"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Prepare run",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Frontend: Stop port 3000"
       ],
       "problemMatcher": []
     }

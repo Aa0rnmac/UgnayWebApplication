@@ -9,7 +9,9 @@ from app.api.deps import get_current_teacher
 from app.db.session import get_db
 from app.models.activity_attempt import ActivityAttempt
 from app.models.assessment_report import AssessmentReport
+from app.models.batch import Batch
 from app.models.enrollment import Enrollment
+from app.models.module import Module
 from app.models.user import User
 from app.schemas.teacher_report import (
     TeacherActivityAttemptItemOut,
@@ -17,10 +19,16 @@ from app.schemas.teacher_report import (
     TeacherAssessmentReportOut,
     TeacherAssessmentReportsResponse,
     TeacherAttentionStudentOut,
+    TeacherBatchBreakdownResponse,
+    TeacherBatchBreakdownRowOut,
+    TeacherBreakdownModuleMetricOut,
     TeacherConcernAttemptOut,
     TeacherGeneratedStudentReport,
     TeacherImprovementAreaItem,
+    TeacherModuleBreakdownResponse,
+    TeacherModuleBreakdownRowOut,
     TeacherModuleSummary,
+    TeacherReportBreakdownResponse,
     TeacherReportSummaryOut,
     TeacherStudentReportRow,
     TeacherStudentReportTableResponse,
@@ -46,18 +54,38 @@ def _display_name(user: User) -> str:
     return full_name or user.username
 
 
-def _approved_enrollments_by_user(db: Session) -> dict[int, Enrollment]:
+def _approved_enrollments_by_user(
+    db: Session,
+    *,
+    include_archived_batches: bool = True,
+) -> dict[int, Enrollment]:
     rows = (
         db.query(Enrollment)
+        .options(joinedload(Enrollment.batch), joinedload(Enrollment.user))
         .filter(Enrollment.status == "approved")
         .order_by(Enrollment.approved_at.desc(), Enrollment.id.desc())
         .all()
     )
     mapping: dict[int, Enrollment] = {}
     for enrollment in rows:
-        if enrollment.user_id and enrollment.user_id not in mapping:
+        if (
+            not include_archived_batches
+            and enrollment.batch is not None
+            and enrollment.batch.status == "archived"
+        ):
+            continue
+        if (
+            enrollment.user_id
+            and enrollment.user is not None
+            and enrollment.user.role == "student"
+            and enrollment.user_id not in mapping
+        ):
             mapping[enrollment.user_id] = enrollment
     return mapping
+
+
+def _registered_student_count(db: Session) -> int:
+    return len(_approved_enrollments_by_user(db, include_archived_batches=False))
 
 
 def _filtered_attempts(
@@ -66,6 +94,7 @@ def _filtered_attempts(
     batch_id: int | None = None,
     module_id: int | None = None,
     student_id: int | None = None,
+    include_archived_batches: bool = True,
 ) -> list[ActivityAttempt]:
     query = (
         db.query(ActivityAttempt)
@@ -83,14 +112,33 @@ def _filtered_attempts(
     if student_id is not None:
         query = query.filter(ActivityAttempt.user_id == student_id)
     attempts = query.all()
-    if batch_id is None:
+    enrollment_by_user = _approved_enrollments_by_user(db)
+
+    if batch_id is not None:
+        return [
+            attempt
+            for attempt in attempts
+            if (
+                enrollment := enrollment_by_user.get(attempt.user_id)
+            )
+            and enrollment.batch_id == batch_id
+            and (
+                include_archived_batches
+                or enrollment.batch is None
+                or enrollment.batch.status != "archived"
+            )
+        ]
+
+    if include_archived_batches:
         return attempts
 
-    enrollment_by_user = _approved_enrollments_by_user(db)
     return [
         attempt
         for attempt in attempts
-        if enrollment_by_user.get(attempt.user_id) and enrollment_by_user[attempt.user_id].batch_id == batch_id
+        if (
+            enrollment := enrollment_by_user.get(attempt.user_id)
+        )
+        and (enrollment.batch is None or enrollment.batch.status != "archived")
     ]
 
 
@@ -125,6 +173,23 @@ def _activity_attempt_out(attempt: ActivityAttempt) -> TeacherActivityAttemptOut
             )
             for item in attempt.items
         ],
+    )
+
+
+def _top_module_metric(
+    module_totals: dict[tuple[int, str], dict[str, int]], metric_key: str
+) -> TeacherBreakdownModuleMetricOut | None:
+    if not module_totals:
+        return None
+
+    (module_id, module_title), values = sorted(
+        module_totals.items(),
+        key=lambda item: (-item[1][metric_key], item[0][1].lower(), item[0][0]),
+    )[0]
+    return TeacherBreakdownModuleMetricOut(
+        module_id=module_id,
+        module_title=module_title,
+        count=values[metric_key],
     )
 
 
@@ -343,20 +408,144 @@ def get_activity_attempt_detail(
     return _activity_attempt_out(attempt)
 
 
+@router.get("/breakdown", response_model=TeacherReportBreakdownResponse)
+def get_teacher_report_breakdown(
+    batch_id: int | None = Query(default=None, ge=1),
+    module_id: int | None = Query(default=None, ge=1),
+    include_archived_batches: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> TeacherReportBreakdownResponse:
+    if (batch_id is None) == (module_id is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Select either batch_id or module_id, but not both.",
+        )
+
+    enrollment_by_user = _approved_enrollments_by_user(db)
+
+    if batch_id is not None:
+        batch = db.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+        attempts = _filtered_attempts(
+            db,
+            batch_id=batch_id,
+            include_archived_batches=include_archived_batches,
+        )
+        attempts_by_student: dict[int, list[ActivityAttempt]] = defaultdict(list)
+
+        for attempt in attempts:
+            attempts_by_student[attempt.user_id].append(attempt)
+
+        rows: list[TeacherBatchBreakdownRowOut] = []
+        for student_id, student_attempts in attempts_by_student.items():
+            module_totals: dict[tuple[int, str], dict[str, int]] = {}
+
+            for attempt in student_attempts:
+                key = (attempt.module_id, attempt.module.title)
+                totals = module_totals.setdefault(key, {"right_count": 0, "wrong_count": 0})
+                totals["right_count"] += int(attempt.right_count or 0)
+                totals["wrong_count"] += int(attempt.wrong_count or 0)
+
+            reference_attempt = student_attempts[0]
+            rows.append(
+                TeacherBatchBreakdownRowOut(
+                    student_id=student_id,
+                    student_name=_display_name(reference_attempt.user),
+                    average_score_percent=round(mean(attempt.score_percent for attempt in student_attempts), 2),
+                    highest_correct_module=_top_module_metric(module_totals, "right_count"),
+                    highest_incorrect_module=_top_module_metric(module_totals, "wrong_count"),
+                )
+            )
+
+        rows.sort(
+            key=lambda item: (
+                item.average_score_percent,
+                -(item.highest_incorrect_module.count if item.highest_incorrect_module else 0),
+                item.student_name.lower(),
+                item.student_id,
+            )
+        )
+
+        return TeacherBatchBreakdownResponse(
+            mode="batch",
+            batch_id=batch.id,
+            batch_name=batch.name,
+            rows=rows,
+        )
+
+    module = db.query(Module).filter(Module.id == module_id).first()
+    if not module:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
+
+    attempts = _filtered_attempts(
+        db,
+        module_id=module_id,
+        include_archived_batches=include_archived_batches,
+    )
+    attempts_by_batch: dict[tuple[int | None, str], list[ActivityAttempt]] = defaultdict(list)
+
+    for attempt in attempts:
+        enrollment = enrollment_by_user.get(attempt.user_id)
+        batch_key = (
+            enrollment.batch_id if enrollment else None,
+            enrollment.batch.name if enrollment and enrollment.batch else "Unassigned batch",
+        )
+        attempts_by_batch[batch_key].append(attempt)
+
+    rows: list[TeacherModuleBreakdownRowOut] = []
+    for (group_batch_id, batch_name), batch_attempts in attempts_by_batch.items():
+        rows.append(
+            TeacherModuleBreakdownRowOut(
+                batch_id=group_batch_id,
+                batch_name=batch_name,
+                average_score_percent=round(mean(attempt.score_percent for attempt in batch_attempts), 2),
+                correct_answers=sum(int(attempt.right_count or 0) for attempt in batch_attempts),
+                incorrect_answers=sum(int(attempt.wrong_count or 0) for attempt in batch_attempts),
+            )
+        )
+
+    rows.sort(
+        key=lambda item: (
+            item.average_score_percent,
+            -item.incorrect_answers,
+            item.batch_name.lower(),
+            item.batch_id or 0,
+        )
+    )
+
+    return TeacherModuleBreakdownResponse(
+        mode="module",
+        module_id=module.id,
+        module_title=module.title,
+        rows=rows,
+    )
+
+
 @router.get("/summary", response_model=TeacherReportSummaryOut)
 def get_teacher_report_summary(
     batch_id: int | None = Query(default=None, ge=1),
     module_id: int | None = Query(default=None, ge=1),
+    include_archived_batches: bool = Query(default=False),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
 ) -> TeacherReportSummaryOut:
-    attempts = _filtered_attempts(db, batch_id=batch_id, module_id=module_id)
+    registered_student_count = _registered_student_count(db)
+    attempts = _filtered_attempts(
+        db,
+        batch_id=batch_id,
+        module_id=module_id,
+        include_archived_batches=include_archived_batches,
+    )
     enrollment_by_user = _approved_enrollments_by_user(db)
 
     if not attempts:
         return TeacherReportSummaryOut(
             batch_id=batch_id,
             module_id=module_id,
+            registered_student_count=registered_student_count,
             total_students=0,
             total_attempts=0,
             average_score_percent=0.0,
@@ -470,6 +659,7 @@ def get_teacher_report_summary(
     return TeacherReportSummaryOut(
         batch_id=batch_id,
         module_id=module_id,
+        registered_student_count=registered_student_count,
         total_students=len(attempts_by_student),
         total_attempts=len(attempts),
         average_score_percent=round(mean(attempt.score_percent for attempt in attempts), 2),

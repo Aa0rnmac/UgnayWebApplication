@@ -117,6 +117,11 @@ def approve_enrollment(
     registration = enrollment.registration
     if registration is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is missing registration data.")
+    if batch.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Archived batches cannot accept new approvals. Restore the batch first.",
+        )
     if enrollment.status == "approved" and enrollment.user_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is already approved.")
     if enrollment.status == "rejected":

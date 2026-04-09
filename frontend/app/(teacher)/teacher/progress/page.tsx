@@ -1,20 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 import {
   ModuleItem,
+  TeacherAttentionStudent,
   TeacherBatch,
-  TeacherGeneratedStudentReport,
+  TeacherBreakdownModuleMetric,
+  TeacherReportBreakdownResponse,
   TeacherReportSummary,
-  TeacherStudentReportRow,
-  generateTeacherStudentReport,
+  TeacherWeakItem,
   getModules,
   getTeacherBatches,
+  getTeacherReportBreakdown,
   getTeacherReportSummary,
-  getTeacherStudentReportRows,
 } from "@/lib/api";
+
+const PREVIEW_LIMIT = 3;
+
+type DetailPanel = "weak_items" | "students";
+
+type AlertSummaryCardProps = {
+  title: string;
+  badge: string;
+  accentClassName: string;
+  summaryStats: Array<{ label: string; value: string }>;
+  preview: ReactNode;
+  emptyMessage: string;
+  footerLabel: string;
+  onOpen: () => void;
+  disabled?: boolean;
+};
+
+type DetailDrawerProps = {
+  activePanel: DetailPanel | null;
+  onClose: () => void;
+  weakItems: TeacherWeakItem[];
+  attentionStudents: TeacherAttentionStudent[];
+};
 
 function formatPercent(value: number | null | undefined, digits = 1) {
   if (value === null || value === undefined) return "No data";
@@ -32,359 +56,775 @@ function formatDateTime(value: string | null | undefined) {
   }
 }
 
+function formatModuleMetric(metric: TeacherBreakdownModuleMetric | null | undefined) {
+  if (!metric) {
+    return "No module data";
+  }
+  return `${metric.module_title} (${metric.count})`;
+}
+
+function getMostAffectedWeakModule(weakItems: TeacherWeakItem[]) {
+  if (weakItems.length === 0) {
+    return "No module data";
+  }
+
+  const moduleMap = new Map<string, { hits: number; worstRate: number }>();
+  for (const item of weakItems) {
+    const current = moduleMap.get(item.module_title) ?? { hits: 0, worstRate: 0 };
+    current.hits += 1;
+    current.worstRate = Math.max(current.worstRate, item.wrong_rate_percent);
+    moduleMap.set(item.module_title, current);
+  }
+
+  const [moduleTitle] = [...moduleMap.entries()].sort((left, right) => {
+    if (right[1].hits !== left[1].hits) {
+      return right[1].hits - left[1].hits;
+    }
+    if (right[1].worstRate !== left[1].worstRate) {
+      return right[1].worstRate - left[1].worstRate;
+    }
+    return left[0].localeCompare(right[0]);
+  })[0];
+
+  return moduleTitle;
+}
+
+function getLowestStudentAverage(attentionStudents: TeacherAttentionStudent[]) {
+  if (attentionStudents.length === 0) {
+    return "No data";
+  }
+  return formatPercent(
+    attentionStudents.reduce(
+      (lowest, student) => Math.min(lowest, student.average_score_percent),
+      attentionStudents[0].average_score_percent
+    ),
+    2
+  );
+}
+
+function getLatestFlaggedAttempt(attentionStudents: TeacherAttentionStudent[]) {
+  if (attentionStudents.length === 0) {
+    return "No activity yet";
+  }
+
+  const latest = attentionStudents.reduce((latestValue, student) => {
+    if (!latestValue) {
+      return student.latest_attempt_at;
+    }
+    return new Date(student.latest_attempt_at) > new Date(latestValue)
+      ? student.latest_attempt_at
+      : latestValue;
+  }, attentionStudents[0].latest_attempt_at);
+
+  return formatDateTime(latest);
+}
+
+function SummaryStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-black/5 bg-black/5 px-3 py-3">
+      <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.22em]">{label}</p>
+      <p className="teacher-card-title mt-2 text-base font-black">{value}</p>
+    </div>
+  );
+}
+
+function AlertSummaryCard({
+  title,
+  badge,
+  accentClassName,
+  summaryStats,
+  preview,
+  emptyMessage,
+  footerLabel,
+  onOpen,
+  disabled = false,
+}: AlertSummaryCardProps) {
+  return (
+    <button
+      aria-disabled={disabled}
+      aria-haspopup="dialog"
+      className="panel group relative flex h-full min-h-[430px] flex-col overflow-hidden text-left transition hover:-translate-y-1 disabled:cursor-default disabled:hover:translate-y-0"
+      disabled={disabled}
+      onClick={onOpen}
+      type="button"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className={`text-xs font-semibold uppercase tracking-[0.35em] ${accentClassName}`}>
+          {title}
+        </p>
+        <span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+          {badge}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        {summaryStats.map((stat) => (
+          <SummaryStat key={stat.label} label={stat.label} value={stat.value} />
+        ))}
+      </div>
+
+      <div className="relative mt-4 flex-1">
+        {disabled ? (
+          <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+            {emptyMessage}
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3 overflow-hidden">{preview}</div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white via-white/95 to-white/0" />
+          </>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/5 pt-4">
+        <p className="teacher-card-meta text-xs">Click card to open full details.</p>
+        <span className="inline-flex rounded-full border border-black/10 bg-black/5 px-3 py-2 text-xs font-semibold text-slate-800 transition group-hover:bg-black/10">
+          {footerLabel}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function DetailDrawer({
+  activePanel,
+  onClose,
+  weakItems,
+  attentionStudents,
+}: DetailDrawerProps) {
+  if (!activePanel) {
+    return null;
+  }
+
+  let title = "";
+  let subtitle = "";
+  let content: ReactNode = null;
+
+  if (activePanel === "weak_items") {
+    title = "Modules That Need Attention";
+    subtitle = `${weakItems.length} weak item(s) across the current filter view.`;
+    content = weakItems.length ? (
+      <div className="space-y-3">
+        {weakItems.map((item) => (
+          <div
+            key={`${item.activity_key}-${item.item_key}`}
+            className="rounded-2xl border border-white/10 bg-black/20 p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="teacher-card-title text-sm font-black">{item.activity_title}</p>
+                <p className="teacher-card-meta mt-1 text-xs">{item.module_title}</p>
+              </div>
+              <div className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+                {formatPercent(item.wrong_rate_percent, 2)} wrong rate
+              </div>
+            </div>
+            <p className="teacher-card-copy mt-3 text-sm">
+              {item.prompt ?? item.expected_answer ?? item.item_key}
+            </p>
+            <p className="teacher-card-meta mt-3 text-xs">
+              Wrong {item.wrong_count} time(s) across {item.attempt_count} attempts
+            </p>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+        No weak items matched the current filter yet.
+      </div>
+    );
+  }
+
+  if (activePanel === "students") {
+    title = "Students Needing Attention";
+    subtitle = `${attentionStudents.length} flagged student(s) in the current filter view.`;
+    content = attentionStudents.length ? (
+      <div className="space-y-3">
+        {attentionStudents.map((student) => (
+          <div
+            key={student.student_id}
+            className="rounded-2xl border border-white/10 bg-black/20 p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="teacher-card-title text-sm font-black">{student.student_name}</p>
+                <p className="teacher-card-meta mt-1 text-xs">
+                  {student.batch_name ?? "Unassigned batch"} - {student.attempt_count} attempts
+                </p>
+              </div>
+              <Link
+                className="inline-flex rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
+                href={`/teacher/students/${student.student_id}`}
+                onClick={onClose}
+              >
+                Open Student
+              </Link>
+            </div>
+            <p className="teacher-card-copy mt-3 text-sm">
+              Average {formatPercent(student.average_score_percent, 2)} - {student.low_score_count} low score(s) in the latest five attempts
+            </p>
+            <p className="teacher-card-meta mt-2 text-xs">
+              Latest attempt {formatDateTime(student.latest_attempt_at)}
+            </p>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+        No students are currently flagged by the attention rules.
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <button
+        aria-label="Close details"
+        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]"
+        onClick={onClose}
+        type="button"
+      />
+      <aside className="absolute inset-0 md:left-auto md:w-[560px]">
+        <div className="flex h-full flex-col border-l border-black/10 bg-[#f7f4ef] shadow-2xl">
+          <div className="flex items-start justify-between gap-4 border-b border-black/10 px-5 py-5">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandBlue">
+                Detail View
+              </p>
+              <h3 className="teacher-panel-heading mt-2 text-2xl font-black">{title}</h3>
+              <p className="teacher-card-meta mt-2 text-sm">{subtitle}</p>
+            </div>
+            <button
+              className="teacher-card-ghost-button rounded-xl border px-3 py-2 text-sm font-semibold transition"
+              onClick={onClose}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-5 py-5">{content}</div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 export default function TeacherProgressPage() {
   const [summary, setSummary] = useState<TeacherReportSummary | null>(null);
   const [batches, setBatches] = useState<TeacherBatch[]>([]);
   const [modules, setModules] = useState<ModuleItem[]>([]);
-  const [studentRows, setStudentRows] = useState<TeacherStudentReportRow[]>([]);
-  const [generatedReport, setGeneratedReport] = useState<TeacherGeneratedStudentReport | null>(null);
+  const [breakdown, setBreakdown] = useState<TeacherReportBreakdownResponse | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
   const [selectedModuleId, setSelectedModuleId] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-  const [busyStudentId, setBusyStudentId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [showArchivedBatches, setShowArchivedBatches] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [staticError, setStaticError] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [breakdownError, setBreakdownError] = useState<string | null>(null);
+  const [activePanel, setActivePanel] = useState<DetailPanel | null>(null);
 
-  async function loadStaticData() {
-    try {
-      const [nextBatches, nextModules, nextStudents] = await Promise.all([
-        getTeacherBatches(),
-        getModules(),
-        getTeacherStudentReportRows(),
-      ]);
-      setBatches(nextBatches);
-      setModules(nextModules);
-      setStudentRows(nextStudents);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load teacher reports.");
-    }
-  }
+  const batchId = selectedBatchId ? Number(selectedBatchId) : null;
+  const moduleId = selectedModuleId ? Number(selectedModuleId) : null;
+  const hasBatchFilter = batchId !== null;
+  const hasModuleFilter = moduleId !== null;
+  const hasExactOneFilter = hasBatchFilter !== hasModuleFilter;
 
-  async function loadSummary(batchId?: number | null, moduleId?: number | null) {
-    setLoading(true);
-    setError(null);
-    try {
-      const nextSummary = await getTeacherReportSummary({ batchId, moduleId });
-      setSummary(nextSummary);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load teacher summary.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const selectedBatchName =
+    batches.find((batch) => batch.id === batchId)?.name ??
+    (breakdown?.mode === "batch" ? breakdown.batch_name : null);
+  const selectedModuleName =
+    modules.find((module) => module.id === moduleId)?.title ??
+    (breakdown?.mode === "module" ? breakdown.module_title : null);
+
+  const weakItems = summary?.weak_items ?? [];
+  const attentionStudents = summary?.students_needing_attention ?? [];
+  const registeredStudentCount = summary?.registered_student_count ?? 0;
 
   useEffect(() => {
-    void loadStaticData();
-  }, []);
+    let isActive = true;
+
+    void (async () => {
+      try {
+        setStaticError(null);
+        const [nextBatches, nextModules] = await Promise.all([
+          getTeacherBatches({ status: showArchivedBatches ? "all" : "active" }),
+          getModules(),
+        ]);
+        if (!isActive) {
+          return;
+        }
+        setBatches(nextBatches);
+        setModules(nextModules);
+      } catch (requestError) {
+        if (!isActive) {
+          return;
+        }
+        setStaticError(
+          requestError instanceof Error ? requestError.message : "Unable to load teacher reports."
+        );
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [showArchivedBatches]);
 
   useEffect(() => {
-    const batchId = selectedBatchId ? Number(selectedBatchId) : null;
-    const moduleId = selectedModuleId ? Number(selectedModuleId) : null;
-    void loadSummary(batchId, moduleId);
-  }, [selectedBatchId, selectedModuleId]);
-
-  async function handleGenerate(studentId: number) {
-    setBusyStudentId(studentId);
-    setError(null);
-    try {
-      const report = await generateTeacherStudentReport(studentId);
-      setGeneratedReport(report);
-      setStudentRows(await getTeacherStudentReportRows());
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Unable to generate printable student summary."
-      );
-    } finally {
-      setBusyStudentId(null);
+    if (showArchivedBatches || !selectedBatchId) {
+      return;
     }
-  }
+
+    const selectedBatch = batches.find((batch) => String(batch.id) === selectedBatchId);
+    if (selectedBatch?.status === "archived") {
+      setSelectedBatchId("");
+    }
+  }, [batches, selectedBatchId, showArchivedBatches]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    void (async () => {
+      try {
+        setSummaryLoading(true);
+        setSummaryError(null);
+        const nextSummary = await getTeacherReportSummary({
+          batchId,
+          moduleId,
+          includeArchivedBatches: showArchivedBatches,
+        });
+        if (!isActive) {
+          return;
+        }
+        setSummary(nextSummary);
+      } catch (requestError) {
+        if (!isActive) {
+          return;
+        }
+        setSummaryError(
+          requestError instanceof Error ? requestError.message : "Unable to load teacher summary."
+        );
+      } finally {
+        if (isActive) {
+          setSummaryLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [batchId, moduleId, showArchivedBatches]);
+
+  useEffect(() => {
+    if (!hasExactOneFilter) {
+      setBreakdown(null);
+      setBreakdownError(null);
+      setBreakdownLoading(false);
+      return;
+    }
+
+    let isActive = true;
+
+    void (async () => {
+      try {
+        setBreakdownLoading(true);
+        setBreakdownError(null);
+        const nextBreakdown = await getTeacherReportBreakdown({
+          batchId,
+          moduleId,
+          includeArchivedBatches: showArchivedBatches,
+        });
+        if (!isActive) {
+          return;
+        }
+        setBreakdown(nextBreakdown);
+      } catch (requestError) {
+        if (!isActive) {
+          return;
+        }
+        setBreakdown(null);
+        setBreakdownError(
+          requestError instanceof Error ? requestError.message : "Unable to load breakdown table."
+        );
+      } finally {
+        if (isActive) {
+          setBreakdownLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [batchId, hasExactOneFilter, moduleId, showArchivedBatches]);
+
+  useEffect(() => {
+    if (!activePanel) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActivePanel(null);
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activePanel]);
+
+  const globalError = staticError ?? summaryError;
+  const breakdownLabel =
+    !hasBatchFilter && !hasModuleFilter
+      ? "Select either Enrolled Batch or Live Module to view a detailed breakdown."
+      : hasBatchFilter && hasModuleFilter
+        ? "Use only one filter at a time to unlock the breakdown table."
+        : hasBatchFilter
+          ? `Enrolled Batch: ${selectedBatchName ?? "Selected batch"}`
+          : `Live Module: ${selectedModuleName ?? "Selected module"}`;
 
   return (
-    <section className="space-y-6">
-      <div className="panel overflow-hidden">
-        <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandGreen">
-          Teacher Progress
-        </p>
-        <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
-          Spot weak items, attention students, and concern attempts from saved activity data.
-        </h2>
-        <p className="teacher-panel-copy mt-3 max-w-3xl text-sm leading-relaxed">
-          Filter by enrolled batch or module to see which activity items need review and which students may need extra teaching support.
-        </p>
-
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr,1fr,auto]">
-          <label className="space-y-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brandBlue">
-              Enrolled Batch
-            </span>
-            <select
-              className="teacher-card-control"
-              onChange={(event) => setSelectedBatchId(event.target.value)}
-              value={selectedBatchId}
-            >
-              <option value="">All enrolled batches</option>
-              {batches.map((batch) => (
-                <option key={batch.id} value={batch.id}>
-                  {batch.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brandGreen">
-              Module
-            </span>
-            <select
-              className="teacher-card-control"
-              onChange={(event) => setSelectedModuleId(event.target.value)}
-              value={selectedModuleId}
-            >
-              <option value="">All modules</option>
-              {modules.map((module) => (
-                <option key={module.id} value={module.id}>
-                  Module {module.order_index}: {module.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="teacher-card-ghost-button rounded-xl border px-3 py-2 text-sm font-semibold transition xl:self-end"
-            onClick={() => {
-              setSelectedBatchId("");
-              setSelectedModuleId("");
-            }}
-            type="button"
-          >
-            Clear Filters
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accent">Students</p>
-          <p className="teacher-panel-value mt-3 text-4xl font-black">{summary?.total_students ?? 0}</p>
-          <p className="teacher-panel-copy mt-2 text-sm">Tracked learners in the current filter view.</p>
-        </div>
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Attempts</p>
-          <p className="teacher-panel-value mt-3 text-4xl font-black">{summary?.total_attempts ?? 0}</p>
-          <p className="teacher-panel-copy mt-2 text-sm">Saved activity attempts available for review.</p>
-        </div>
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandGreen">Average</p>
-          <p className="teacher-panel-value mt-3 text-4xl font-black">
-            {formatPercent(summary?.average_score_percent ?? 0, 2)}
+    <>
+      <section className="space-y-6">
+        <div className="panel overflow-hidden">
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandGreen">
+            Teacher Progress
           </p>
-          <p className="teacher-panel-copy mt-2 text-sm">Average score across the filtered attempt set.</p>
-        </div>
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accentWarm">Watchlist</p>
-          <p className="teacher-panel-value mt-3 text-4xl font-black">
-            {(summary?.students_needing_attention.length ?? 0) + (summary?.weak_items.length ?? 0)}
+          <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
+            Spot weak items and attention students from saved activity data.
+          </h2>
+          <p className="teacher-panel-copy mt-3 max-w-3xl text-sm leading-relaxed">
+            Filter by enrolled batch or live module to see which activity items need review and
+            which students may need extra teaching support.
           </p>
-          <p className="teacher-panel-copy mt-2 text-sm">Combined teaching alerts from weak items and students.</p>
-        </div>
-      </div>
 
-      {loading ? (
-        <div className="panel">
-          <p className="teacher-panel-copy text-sm">Loading teacher summary...</p>
-        </div>
-      ) : null}
+          <div className="mt-5 rounded-3xl border border-black/10 bg-black/5 px-5 py-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accent">
+              Students Count
+            </p>
+            <p className="teacher-panel-value mt-3 text-4xl font-black">
+              {summary ? registeredStudentCount : "..."}
+            </p>
+            <p className="teacher-panel-copy mt-2 text-sm">
+              Approved active students. Includes learners with 0 progress and 0 attempts.
+            </p>
+          </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-            MODULE THAT NEEDS ATTENTION
-          </p>
-          <div className="mt-4 space-y-3">
-            {summary?.weak_items.length ? (
-              summary.weak_items.map((item) => (
-                <div key={`${item.activity_key}-${item.item_key}`} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+          {summaryLoading ? (
+            <div className="teacher-card-copy mt-4 rounded-2xl border border-black/10 bg-black/5 px-4 py-4 text-sm">
+              Refreshing teacher summary...
+            </div>
+          ) : null}
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <AlertSummaryCard
+              accentClassName="text-accentWarm"
+              badge={`${weakItems.length} item(s)`}
+              disabled={weakItems.length === 0}
+              emptyMessage="No weak items matched the current filter yet. Weak items appear after at least 5 attempts and a 40% wrong rate."
+              footerLabel="View all weak items"
+              onOpen={() => setActivePanel("weak_items")}
+              preview={weakItems.slice(0, PREVIEW_LIMIT).map((item) => (
+                <div
+                  key={`${item.activity_key}-${item.item_key}`}
+                  className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                >
                   <p className="teacher-card-title text-sm font-black">{item.activity_title}</p>
                   <p className="teacher-card-meta mt-1 text-xs">{item.module_title}</p>
-                  <p className="teacher-card-copy mt-3 text-sm">{item.prompt ?? item.expected_answer ?? item.item_key}</p>
+                  <p className="teacher-card-copy mt-3 text-sm">
+                    {item.prompt ?? item.expected_answer ?? item.item_key}
+                  </p>
                   <p className="teacher-card-meta mt-2 text-xs">
-                    Wrong rate {formatPercent(item.wrong_rate_percent, 2)} across {item.attempt_count} attempts
+                    Wrong rate {formatPercent(item.wrong_rate_percent, 2)} across{" "}
+                    {item.attempt_count} attempts
                   </p>
                 </div>
-              ))
-            ) : (
-              <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                No weak items matched the current filter yet. Weak items appear after at least 5 attempts and a 40% wrong rate.
-              </div>
-            )}
-          </div>
-        </div>
+              ))}
+              summaryStats={[
+                { label: "Weak Items", value: `${weakItems.length}` },
+                {
+                  label: "Worst Wrong Rate",
+                  value: weakItems[0]
+                    ? formatPercent(weakItems[0].wrong_rate_percent, 2)
+                    : "No data",
+                },
+                {
+                  label: "Most Affected Module",
+                  value: getMostAffectedWeakModule(weakItems),
+                },
+              ]}
+              title="MODULE THAT NEEDS ATTENTION"
+            />
 
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandGreen">
-            Students Needing Attention
-          </p>
-          <div className="mt-4 space-y-3">
-            {summary?.students_needing_attention.length ? (
-              summary.students_needing_attention.map((student) => (
-                <div key={student.student_id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <AlertSummaryCard
+              accentClassName="text-brandGreen"
+              badge={`${attentionStudents.length} student(s)`}
+              disabled={attentionStudents.length === 0}
+              emptyMessage="No students are currently flagged by the attention rules."
+              footerLabel="View all students"
+              onOpen={() => setActivePanel("students")}
+              preview={attentionStudents.slice(0, PREVIEW_LIMIT).map((student) => (
+                <div
+                  key={student.student_id}
+                  className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                >
                   <p className="teacher-card-title text-sm font-black">{student.student_name}</p>
                   <p className="teacher-card-meta mt-1 text-xs">
-                    {student.batch_name ?? "Unassigned batch"} · {student.attempt_count} attempts
+                    {student.batch_name ?? "Unassigned batch"} - {student.attempt_count} attempts
                   </p>
                   <p className="teacher-card-copy mt-3 text-sm">
-                    Average {formatPercent(student.average_score_percent, 2)} · {student.low_score_count} low score(s) in the latest five attempts
+                    Average {formatPercent(student.average_score_percent, 2)} -{" "}
+                    {student.low_score_count} low score(s)
                   </p>
                   <p className="teacher-card-meta mt-2 text-xs">
                     Latest attempt {formatDateTime(student.latest_attempt_at)}
                   </p>
-                  <Link
-                    className="mt-4 inline-flex rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-                    href={`/teacher/students/${student.student_id}`}
-                  >
-                    Open Student
-                  </Link>
                 </div>
-              ))
-            ) : (
-              <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                No students are currently flagged by the attention rules.
-              </div>
-            )}
+              ))}
+              summaryStats={[
+                { label: "Flagged Students", value: `${attentionStudents.length}` },
+                {
+                  label: "Lowest Average",
+                  value: getLowestStudentAverage(attentionStudents),
+                },
+                {
+                  label: "Latest Flagged",
+                  value: getLatestFlaggedAttempt(attentionStudents),
+                },
+              ]}
+              title="STUDENTS NEEDING ATTENTION"
+            />
           </div>
-        </div>
 
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandBlue">
-            Concern Attempts
-          </p>
-          <div className="mt-4 space-y-3">
-            {summary?.recent_concern_attempts.length ? (
-              summary.recent_concern_attempts.map((attempt) => (
-                <div key={attempt.attempt_id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="teacher-card-title text-sm font-black">{attempt.student_name}</p>
-                  <p className="teacher-card-meta mt-1 text-xs">
-                    {attempt.module_title} · {attempt.activity_title}
-                  </p>
-                  <p className="teacher-card-copy mt-3 text-sm">
-                    Score {formatPercent(attempt.score_percent, 2)} · {attempt.low_confidence_item_count} low-confidence item(s)
-                  </p>
-                  <p className="teacher-card-meta mt-2 text-xs">
-                    Submitted {formatDateTime(attempt.submitted_at)}
-                  </p>
-                </div>
-              ))
-            ) : (
-              <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                No recent concern attempts matched the current filter.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.05fr,0.95fr]">
-        <div className="panel">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-              Printable Summary Queue
-            </p>
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr,1fr,auto,auto]">
+            <label className="space-y-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brandBlue">
+                Enrolled Batch
+              </span>
+              <select
+                className="teacher-card-control"
+                onChange={(event) => setSelectedBatchId(event.target.value)}
+                value={selectedBatchId}
+              >
+                <option value="">
+                  {showArchivedBatches ? "All visible batches" : "All active batches"}
+                </option>
+                {batches.map((batch) => (
+                  <option key={batch.id} value={batch.id}>
+                    {batch.name}
+                    {batch.status === "archived" ? " (Archived)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brandGreen">
+                Live Module
+              </span>
+              <select
+                className="teacher-card-control"
+                onChange={(event) => setSelectedModuleId(event.target.value)}
+                value={selectedModuleId}
+              >
+                <option value="">All live modules</option>
+                {modules.map((module) => (
+                  <option key={module.id} value={module.id}>
+                    Module {module.order_index}: {module.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="teacher-card-copy flex items-center gap-2 text-sm font-semibold xl:self-end xl:pb-2">
+              <input
+                checked={showArchivedBatches}
+                onChange={(event) => setShowArchivedBatches(event.target.checked)}
+                type="checkbox"
+              />
+              Show Archived Batches
+            </label>
             <button
-              className="teacher-card-ghost-button rounded-lg border px-3 py-2 text-xs font-semibold transition"
+              className="teacher-card-ghost-button rounded-xl border px-3 py-2 text-sm font-semibold transition xl:self-end"
               onClick={() => {
-                void loadStaticData();
+                setSelectedBatchId("");
+                setSelectedModuleId("");
               }}
               type="button"
             >
-              Refresh Queue
+              Clear Filters
             </button>
           </div>
 
-          <div className="mt-4 space-y-3">
-            {studentRows.length ? (
-              studentRows.map((student) => (
-                <div key={student.student_id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="teacher-card-title text-sm font-black">{student.student_name}</p>
-                      <p className="teacher-card-meta mt-1 text-xs">
-                        {student.student_email ?? "No email on record"}
-                      </p>
-                    </div>
-                    <button
-                      className="rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90 disabled:opacity-60"
-                      disabled={busyStudentId === student.student_id}
-                      onClick={() => void handleGenerate(student.student_id)}
-                      type="button"
-                    >
-                      {busyStudentId === student.student_id ? "Generating..." : "Generate"}
-                    </button>
+          <div className="mt-5 rounded-3xl border border-black/10 bg-black/5 px-5 py-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
+                  Filtered Progress Breakdown
+                </p>
+                <p className="teacher-card-meta mt-2 text-xs">{breakdownLabel}</p>
+              </div>
+              {hasExactOneFilter && breakdown ? (
+                <p className="teacher-card-meta text-xs">
+                  {breakdown.mode === "batch"
+                    ? `${breakdown.rows.length} student row(s)`
+                    : `${breakdown.rows.length} batch row(s)`}
+                </p>
+              ) : null}
+            </div>
+            {breakdownLoading ? (
+              <div className="teacher-card-copy mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-5 text-sm">
+                Loading filtered breakdown...
+              </div>
+            ) : breakdownError ? (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-5 text-sm text-red-700">
+                Error: {breakdownError}
+              </div>
+            ) : !hasBatchFilter && !hasModuleFilter ? (
+              <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                Select either Enrolled Batch or Live Module to view a detailed breakdown.
+              </div>
+            ) : hasBatchFilter && hasModuleFilter ? (
+              <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                Keep only one filter active at a time. Clear either Enrolled Batch or Live Module to
+                view the table.
+              </div>
+            ) : breakdown?.mode === "batch" ? (
+              breakdown.rows.length ? (
+                <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/10">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-black/10">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-brandBlue">
+                            Student Name
+                          </th>
+                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.24em] text-brandGreen">
+                            Average Score
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-accentWarm">
+                            Highest Correct Module
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-brandBlue">
+                            Highest Incorrect Module
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/10">
+                        {breakdown.rows.map((row) => (
+                          <tr key={row.student_id}>
+                            <td className="px-4 py-3">
+                              <p className="teacher-card-title font-semibold">{row.student_name}</p>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <p className="teacher-card-title font-semibold">
+                                {formatPercent(row.average_score_percent, 2)}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="teacher-card-copy">
+                                {formatModuleMetric(row.highest_correct_module)}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="teacher-card-copy">
+                                {formatModuleMetric(row.highest_incorrect_module)}
+                              </p>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <p className="teacher-card-copy mt-3 text-sm">
-                    {student.total_assessments} assessment(s) · average {formatPercent(student.average_score_percent, 2)}
-                  </p>
-                  <p className="teacher-card-meta mt-2 text-xs">
-                    Latest activity {formatDateTime(student.latest_activity_at)}
-                  </p>
                 </div>
-              ))
+              ) : (
+                <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                  No saved activity attempts matched the selected batch yet.
+                </div>
+              )
+            ) : breakdown?.mode === "module" ? (
+              breakdown.rows.length ? (
+                <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/10">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-black/10">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-brandBlue">
+                            Registered Batch
+                          </th>
+                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.24em] text-brandGreen">
+                            Average Score
+                          </th>
+                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.24em] text-accentWarm">
+                            Correct Answers
+                          </th>
+                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.24em] text-brandBlue">
+                            Incorrect Answers
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/10">
+                        {breakdown.rows.map((row) => (
+                          <tr key={`${row.batch_id ?? "unassigned"}-${row.batch_name}`}>
+                            <td className="px-4 py-3">
+                              <p className="teacher-card-title font-semibold">{row.batch_name}</p>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <p className="teacher-card-title font-semibold">
+                                {formatPercent(row.average_score_percent, 2)}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <p className="teacher-card-copy">{row.correct_answers}</p>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <p className="teacher-card-copy">{row.incorrect_answers}</p>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                  No saved activity attempts matched the selected live module yet.
+                </div>
+              )
             ) : (
-              <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                No legacy report rows are available yet.
+              <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                Select either Enrolled Batch or Live Module to view a detailed breakdown.
               </div>
             )}
           </div>
         </div>
 
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandGreen">
-            Latest Generated Summary
-          </p>
-          {generatedReport ? (
-            <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="teacher-card-title text-xl font-black">{generatedReport.student_name}</p>
-              <p className="teacher-card-meta text-sm">
-                Generated {formatDateTime(generatedReport.generated_at)}
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-3">
-                  <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">Overall Score</p>
-                  <p className="teacher-card-title mt-2 text-2xl font-black">
-                    {formatPercent(generatedReport.overall_score_percent, 2)}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-3">
-                  <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">Assessments</p>
-                  <p className="teacher-card-title mt-2 text-2xl font-black">
-                    {generatedReport.total_assessments}
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                {generatedReport.top_improvement_areas.length ? (
-                  generatedReport.top_improvement_areas.slice(0, 5).map((item) => (
-                    <div key={item.area} className="rounded-xl border border-white/10 bg-black/25 px-3 py-3">
-                      <p className="teacher-card-title text-sm font-semibold">{item.area}</p>
-                      <p className="teacher-card-meta mt-1 text-xs">Flagged {item.count} time(s)</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="teacher-card-copy text-sm">No improvement areas were recorded yet.</p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="teacher-card-copy mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-              Generate a printable summary from the queue to preview it here.
-            </div>
-          )}
-        </div>
-      </div>
+        {globalError ? (
+          <div className="panel">
+            <p className="text-sm text-red-700">Error: {globalError}</p>
+          </div>
+        ) : null}
+      </section>
 
-      {error ? (
-        <div className="panel">
-          <p className="text-sm text-red-700">Error: {error}</p>
-        </div>
-      ) : null}
-    </section>
+      <DetailDrawer
+        activePanel={activePanel}
+        attentionStudents={attentionStudents}
+        onClose={() => setActivePanel(null)}
+        weakItems={weakItems}
+      />
+    </>
   );
 }

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -89,6 +90,14 @@ def _batch_out(batch: Batch | None, *, student_count: int = 0) -> TeacherBatchOu
     )
 
 
+def _batch_student_count(batch: Batch) -> int:
+    return sum(
+        1
+        for enrollment in batch.enrollments
+        if enrollment.status == "approved" and enrollment.user_id is not None
+    )
+
+
 def _student_summary(user: User | None) -> TeacherUserSummary | None:
     if user is None:
         return None
@@ -175,6 +184,13 @@ def _get_enrollment_or_404(db: Session, enrollment_id: int) -> Enrollment:
     if not enrollment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enrollment not found.")
     return enrollment
+
+
+def _get_batch_or_404(db: Session, batch_id: int) -> Batch:
+    batch = db.query(Batch).filter(Batch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+    return batch
 
 
 def _resolve_payment_proof_path(registration: Registration) -> Path:
@@ -311,18 +327,18 @@ def reject_teacher_enrollment(
 
 @router.get("/batches", response_model=list[TeacherBatchOut])
 def list_teacher_batches(
+    status_filter: Literal["active", "archived", "all"] = Query(default="active", alias="status"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
 ) -> list[TeacherBatchOut]:
-    batches = db.query(Batch).order_by(Batch.name.asc()).all()
+    query = db.query(Batch).order_by(Batch.name.asc(), Batch.id.asc())
+    if status_filter != "all":
+        query = query.filter(Batch.status == status_filter)
+    batches = query.all()
     return [
         _batch_out(
             batch,
-            student_count=sum(
-                1
-                for enrollment in batch.enrollments
-                if enrollment.status == "approved" and enrollment.user_id is not None
-            ),
+            student_count=_batch_student_count(batch),
         )
         for batch in batches
     ]
@@ -358,15 +374,43 @@ def create_teacher_batch(
     return _batch_out(batch, student_count=0)
 
 
+@router.post("/batches/{batch_id}/archive", response_model=TeacherBatchOut)
+def archive_teacher_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> TeacherBatchOut:
+    batch = _get_batch_or_404(db, batch_id)
+    if batch.status != "archived":
+        batch.status = "archived"
+        db.add(batch)
+        db.commit()
+        db.refresh(batch)
+    return _batch_out(batch, student_count=_batch_student_count(batch))
+
+
+@router.post("/batches/{batch_id}/restore", response_model=TeacherBatchOut)
+def restore_teacher_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_teacher),
+) -> TeacherBatchOut:
+    batch = _get_batch_or_404(db, batch_id)
+    if batch.status != "active":
+        batch.status = "active"
+        db.add(batch)
+        db.commit()
+        db.refresh(batch)
+    return _batch_out(batch, student_count=_batch_student_count(batch))
+
+
 @router.get("/batches/{batch_id}/students", response_model=list[TeacherUserSummary])
 def list_batch_students(
     batch_id: int,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
 ) -> list[TeacherUserSummary]:
-    batch = db.query(Batch).filter(Batch.id == batch_id).first()
-    if not batch:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+    batch = _get_batch_or_404(db, batch_id)
 
     students = [
         enrollment.user

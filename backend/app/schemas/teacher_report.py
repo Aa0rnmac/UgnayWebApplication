@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -142,9 +143,49 @@ class TeacherConcernAttemptOut(BaseModel):
 class TeacherReportSummaryOut(BaseModel):
     batch_id: int | None = None
     module_id: int | None = None
+    registered_student_count: int
     total_students: int
     total_attempts: int
     average_score_percent: float
     weak_items: list[TeacherWeakItemOut] = Field(default_factory=list)
     students_needing_attention: list[TeacherAttentionStudentOut] = Field(default_factory=list)
     recent_concern_attempts: list[TeacherConcernAttemptOut] = Field(default_factory=list)
+
+
+class TeacherBreakdownModuleMetricOut(BaseModel):
+    module_id: int
+    module_title: str
+    count: int
+
+
+class TeacherBatchBreakdownRowOut(BaseModel):
+    student_id: int
+    student_name: str
+    average_score_percent: float
+    highest_correct_module: TeacherBreakdownModuleMetricOut | None = None
+    highest_incorrect_module: TeacherBreakdownModuleMetricOut | None = None
+
+
+class TeacherModuleBreakdownRowOut(BaseModel):
+    batch_id: int | None = None
+    batch_name: str
+    average_score_percent: float
+    correct_answers: int
+    incorrect_answers: int
+
+
+class TeacherBatchBreakdownResponse(BaseModel):
+    mode: Literal["batch"]
+    batch_id: int
+    batch_name: str | None = None
+    rows: list[TeacherBatchBreakdownRowOut] = Field(default_factory=list)
+
+
+class TeacherModuleBreakdownResponse(BaseModel):
+    mode: Literal["module"]
+    module_id: int
+    module_title: str | None = None
+    rows: list[TeacherModuleBreakdownRowOut] = Field(default_factory=list)
+
+
+TeacherReportBreakdownResponse = TeacherBatchBreakdownResponse | TeacherModuleBreakdownResponse

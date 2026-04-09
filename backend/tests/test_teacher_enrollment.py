@@ -309,3 +309,161 @@ def test_teacher_approval_rolls_back_when_email_delivery_fails(
         assert student_user is None
         assert enrollment is not None
         assert enrollment.status == "pending"
+
+
+def test_teacher_can_archive_restore_and_filter_batches(client, teacher_headers_factory):
+    teacher_headers = teacher_headers_factory("teacher.archive")
+
+    first_batch_response = client.post(
+        "/api/teacher/batches",
+        json={"code": "BATCH-ACTIVE-2026", "name": "Active Batch"},
+        headers=teacher_headers,
+    )
+    assert first_batch_response.status_code == 201
+    first_batch = first_batch_response.json()
+
+    second_batch_response = client.post(
+        "/api/teacher/batches",
+        json={"code": "BATCH-ARCHIVE-2026", "name": "Archive Batch"},
+        headers=teacher_headers,
+    )
+    assert second_batch_response.status_code == 201
+    second_batch = second_batch_response.json()
+
+    archive_response = client.post(
+        f"/api/teacher/batches/{second_batch['id']}/archive",
+        headers=teacher_headers,
+    )
+    assert archive_response.status_code == 200
+    archived_batch = archive_response.json()
+    assert archived_batch["status"] == "archived"
+
+    default_batches_response = client.get("/api/teacher/batches", headers=teacher_headers)
+    assert default_batches_response.status_code == 200
+    assert [batch["id"] for batch in default_batches_response.json()] == [first_batch["id"]]
+
+    archived_batches_response = client.get(
+        "/api/teacher/batches?status=archived",
+        headers=teacher_headers,
+    )
+    assert archived_batches_response.status_code == 200
+    assert [batch["id"] for batch in archived_batches_response.json()] == [second_batch["id"]]
+
+    all_batches_response = client.get("/api/teacher/batches?status=all", headers=teacher_headers)
+    assert all_batches_response.status_code == 200
+    assert [batch["id"] for batch in all_batches_response.json()] == [
+        first_batch["id"],
+        second_batch["id"],
+    ]
+
+    restore_response = client.post(
+        f"/api/teacher/batches/{second_batch['id']}/restore",
+        headers=teacher_headers,
+    )
+    assert restore_response.status_code == 200
+    restored_batch = restore_response.json()
+    assert restored_batch["status"] == "active"
+
+    active_batches_response = client.get("/api/teacher/batches", headers=teacher_headers)
+    assert active_batches_response.status_code == 200
+    assert [batch["id"] for batch in active_batches_response.json()] == [
+        first_batch["id"],
+        second_batch["id"],
+    ]
+
+
+def test_teacher_cannot_approve_into_archived_batch(client, teacher_headers_factory):
+    teacher_headers = teacher_headers_factory("teacher.archived.approval")
+
+    batch_response = client.post(
+        "/api/teacher/batches",
+        json={"code": "BATCH-LOCKED-2026", "name": "Locked Batch"},
+        headers=teacher_headers,
+    )
+    assert batch_response.status_code == 201
+    batch = batch_response.json()
+
+    archive_response = client.post(
+        f"/api/teacher/batches/{batch['id']}/archive",
+        headers=teacher_headers,
+    )
+    assert archive_response.status_code == 200
+
+    registration = _submit_registration(
+        client,
+        email="student.archivedbatch@example.com",
+        reference_number="REF-ARCHIVE-1001",
+    )
+
+    approve_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/approve",
+        json={
+            "batch_id": batch["id"],
+            "issued_username": "student.archivedbatch",
+            "temporary_password": "Student123!",
+            "notes": "Should stay blocked.",
+            "send_email": False,
+        },
+        headers=teacher_headers,
+    )
+
+    assert approve_response.status_code == 409
+    assert (
+        approve_response.json()["detail"]
+        == "Archived batches cannot accept new approvals. Restore the batch first."
+    )
+
+    with SessionLocal() as db:
+        student_user = db.query(User).filter(User.email == "student.archivedbatch@example.com").first()
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
+        assert student_user is None
+        assert enrollment is not None
+        assert enrollment.status == "pending"
+
+
+def test_archived_batch_keeps_student_roster_and_history(client, teacher_headers_factory):
+    registration = _submit_registration(
+        client,
+        email="student.history@example.com",
+        reference_number="REF-ARCHIVE-1002",
+    )
+    teacher_headers = teacher_headers_factory("teacher.history")
+
+    approve_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/approve",
+        json={
+            "batch_code": "BATCH-HISTORY-2026",
+            "batch_name": "History Batch",
+            "issued_username": "student.history",
+            "temporary_password": "Student123!",
+            "notes": "Archive after approval.",
+            "send_email": False,
+        },
+        headers=teacher_headers,
+    )
+    assert approve_response.status_code == 200
+    approved = approve_response.json()["enrollment"]
+
+    archive_response = client.post(
+        f"/api/teacher/batches/{approved['batch']['id']}/archive",
+        headers=teacher_headers,
+    )
+    assert archive_response.status_code == 200
+    archived_batch = archive_response.json()
+    assert archived_batch["status"] == "archived"
+    assert archived_batch["student_count"] == 1
+
+    archived_batches_response = client.get(
+        "/api/teacher/batches?status=archived",
+        headers=teacher_headers,
+    )
+    assert archived_batches_response.status_code == 200
+    assert archived_batches_response.json()[0]["id"] == approved["batch"]["id"]
+    assert archived_batches_response.json()[0]["student_count"] == 1
+
+    students_response = client.get(
+        f"/api/teacher/batches/{approved['batch']['id']}/students",
+        headers=teacher_headers,
+    )
+    assert students_response.status_code == 200
+    assert students_response.json()[0]["username"] == "student.history"

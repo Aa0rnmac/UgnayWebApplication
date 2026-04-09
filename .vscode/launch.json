@@ -28,7 +28,8 @@
       "type": "node-terminal",
       "request": "launch",
       "command": "npm.cmd run dev",
-      "cwd": "${workspaceFolder}/frontend"
+      "cwd": "${workspaceFolder}/frontend",
+      "preLaunchTask": "Frontend: Prepare run"
     },
     {
       "name": "Backend: FastAPI",
