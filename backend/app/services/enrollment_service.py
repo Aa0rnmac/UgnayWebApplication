@@ -117,6 +117,11 @@ def approve_enrollment(
     registration = enrollment.registration
     if registration is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is missing registration data.")
+    if batch.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Archived batches cannot accept new approvals. Restore the batch first.",
+        )
     if enrollment.status == "approved" and enrollment.user_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is already approved.")
     if enrollment.status == "rejected":
@@ -222,7 +227,9 @@ def reject_enrollment(
     *,
     enrollment: Enrollment,
     current_teacher: User,
-    notes: str,
+    internal_note: str | None,
+    rejection_reason_code: str,
+    rejection_reason_detail: str | None = None,
 ) -> Enrollment:
     registration = enrollment.registration
     if registration is None:
@@ -236,15 +243,21 @@ def reject_enrollment(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is already rejected.")
 
     now = datetime.now(timezone.utc)
+    normalized_internal_note = internal_note.strip() if internal_note and internal_note.strip() else None
+    normalized_reason_detail = (
+        rejection_reason_detail.strip() if rejection_reason_detail and rejection_reason_detail.strip() else None
+    )
     enrollment.status = "rejected"
     enrollment.payment_review_status = "rejected"
-    enrollment.review_notes = notes.strip()
+    enrollment.review_notes = normalized_internal_note
+    enrollment.rejection_reason_code = rejection_reason_code
+    enrollment.rejection_reason_detail = normalized_reason_detail
     enrollment.reviewed_at = now
     enrollment.rejected_at = now
     enrollment.rejected_by_user_id = current_teacher.id
     db.add(enrollment)
 
     registration.status = "rejected"
-    registration.notes = notes.strip()
+    registration.notes = normalized_internal_note
     db.add(registration)
     return enrollment

@@ -98,17 +98,130 @@ def test_teacher_can_reject_pending_enrollment(client, teacher_headers_factory):
 
     reject_response = client.post(
         f"/api/teacher/enrollments/{registration['enrollment_id']}/reject",
-        json={"notes": "Reference number did not match the submitted proof."},
+        json={
+            "internal_note": "Reference number did not match the submitted proof.",
+            "rejection_reason_code": "incorrect_information",
+            "rejection_reason_detail": None,
+        },
         headers=teacher_headers,
     )
     assert reject_response.status_code == 200
     rejected = reject_response.json()
-    assert rejected["status"] == "rejected"
-    assert rejected["payment_review_status"] == "rejected"
+    assert rejected["delivery_status"] == "skipped"
+    assert rejected["recipient_email"] == "student.reject@example.com"
+    assert rejected["enrollment"]["status"] == "rejected"
+    assert rejected["enrollment"]["payment_review_status"] == "rejected"
+    assert rejected["enrollment"]["review_notes"] == "Reference number did not match the submitted proof."
+    assert rejected["enrollment"]["rejection_reason_code"] == "incorrect_information"
+    assert rejected["enrollment"]["rejection_reason_detail"] is None
 
     with SessionLocal() as db:
         student_user = db.query(User).filter(User.email == "student.reject@example.com").first()
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
         assert student_user is None
+        assert enrollment is not None
+        assert enrollment.review_notes == "Reference number did not match the submitted proof."
+        assert enrollment.rejection_reason_code == "incorrect_information"
+
+
+def test_teacher_rejection_sends_reason_email_when_smtp_available(
+    client, teacher_headers_factory, monkeypatch
+):
+    registration = _submit_registration(
+        client,
+        email="student.rejectmail@example.com",
+        reference_number="REF-1002-MAIL",
+    )
+    teacher_headers = teacher_headers_factory("teacher.rejectmail")
+    sent_payload: dict[str, str] = {}
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_from_email", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "gmail-app-password")
+
+    def fake_send_student_rejection_email(**kwargs):
+        sent_payload.update(kwargs)
+
+    monkeypatch.setattr(
+        "app.api.routes.teacher_enrollment.send_student_rejection_email",
+        fake_send_student_rejection_email,
+    )
+
+    reject_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/reject",
+        json={
+            "internal_note": "Payment proof needs teacher follow-up.",
+            "rejection_reason_code": "incorrect_amount_paid",
+            "rejection_reason_detail": None,
+        },
+        headers=teacher_headers,
+    )
+
+    assert reject_response.status_code == 200
+    rejected = reject_response.json()
+    assert rejected["delivery_status"] == "sent"
+    assert rejected["recipient_email"] == "student.rejectmail@example.com"
+    assert rejected["enrollment"]["status"] == "rejected"
+    assert rejected["enrollment"]["review_notes"] == "Payment proof needs teacher follow-up."
+    assert rejected["enrollment"]["rejection_reason_code"] == "incorrect_amount_paid"
+    assert sent_payload["to_email"] == "student.rejectmail@example.com"
+    assert "amount paid did not match the required payment amount" in sent_payload["rejection_reason"]
+    assert sent_payload["student_name"] == "Juan S Dela Cruz"
+
+
+def test_teacher_rejection_keeps_saved_status_when_email_delivery_fails(
+    client, teacher_headers_factory, monkeypatch
+):
+    registration = _submit_registration(
+        client,
+        email="student.rejectfail@example.com",
+        reference_number="REF-1002-FAIL",
+    )
+    teacher_headers = teacher_headers_factory("teacher.rejectfail")
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_from_email", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "gmail-app-password")
+
+    def failing_send_student_rejection_email(**_kwargs):
+        raise RuntimeError("SMTP failed")
+
+    monkeypatch.setattr(
+        "app.api.routes.teacher_enrollment.send_student_rejection_email",
+        failing_send_student_rejection_email,
+    )
+
+    reject_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/reject",
+        json={
+            "internal_note": "Teacher needs corrected registration details.",
+            "rejection_reason_code": "incorrect_information",
+            "rejection_reason_detail": "The submitted payment details were incomplete.",
+        },
+        headers=teacher_headers,
+    )
+
+    assert reject_response.status_code == 200
+    rejected = reject_response.json()
+    assert rejected["delivery_status"] == "failed"
+    assert rejected["recipient_email"] == "student.rejectfail@example.com"
+    assert rejected["enrollment"]["status"] == "rejected"
+    assert rejected["enrollment"]["review_notes"] == "Teacher needs corrected registration details."
+    assert rejected["enrollment"]["rejection_reason_code"] == "incorrect_information"
+    assert (
+        rejected["enrollment"]["rejection_reason_detail"]
+        == "The submitted payment details were incomplete."
+    )
+
+    with SessionLocal() as db:
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
+        assert enrollment is not None
+        assert enrollment.status == "rejected"
+        assert enrollment.review_notes == "Teacher needs corrected registration details."
+        assert enrollment.rejection_reason_code == "incorrect_information"
+        assert enrollment.rejection_reason_detail == "The submitted payment details were incomplete."
 
 
 def test_registration_normalizes_phone_number(client):
@@ -309,3 +422,161 @@ def test_teacher_approval_rolls_back_when_email_delivery_fails(
         assert student_user is None
         assert enrollment is not None
         assert enrollment.status == "pending"
+
+
+def test_teacher_can_archive_restore_and_filter_batches(client, teacher_headers_factory):
+    teacher_headers = teacher_headers_factory("teacher.archive")
+
+    first_batch_response = client.post(
+        "/api/teacher/batches",
+        json={"code": "BATCH-ACTIVE-2026", "name": "Active Batch"},
+        headers=teacher_headers,
+    )
+    assert first_batch_response.status_code == 201
+    first_batch = first_batch_response.json()
+
+    second_batch_response = client.post(
+        "/api/teacher/batches",
+        json={"code": "BATCH-ARCHIVE-2026", "name": "Archive Batch"},
+        headers=teacher_headers,
+    )
+    assert second_batch_response.status_code == 201
+    second_batch = second_batch_response.json()
+
+    archive_response = client.post(
+        f"/api/teacher/batches/{second_batch['id']}/archive",
+        headers=teacher_headers,
+    )
+    assert archive_response.status_code == 200
+    archived_batch = archive_response.json()
+    assert archived_batch["status"] == "archived"
+
+    default_batches_response = client.get("/api/teacher/batches", headers=teacher_headers)
+    assert default_batches_response.status_code == 200
+    assert [batch["id"] for batch in default_batches_response.json()] == [first_batch["id"]]
+
+    archived_batches_response = client.get(
+        "/api/teacher/batches?status=archived",
+        headers=teacher_headers,
+    )
+    assert archived_batches_response.status_code == 200
+    assert [batch["id"] for batch in archived_batches_response.json()] == [second_batch["id"]]
+
+    all_batches_response = client.get("/api/teacher/batches?status=all", headers=teacher_headers)
+    assert all_batches_response.status_code == 200
+    assert [batch["id"] for batch in all_batches_response.json()] == [
+        first_batch["id"],
+        second_batch["id"],
+    ]
+
+    restore_response = client.post(
+        f"/api/teacher/batches/{second_batch['id']}/restore",
+        headers=teacher_headers,
+    )
+    assert restore_response.status_code == 200
+    restored_batch = restore_response.json()
+    assert restored_batch["status"] == "active"
+
+    active_batches_response = client.get("/api/teacher/batches", headers=teacher_headers)
+    assert active_batches_response.status_code == 200
+    assert [batch["id"] for batch in active_batches_response.json()] == [
+        first_batch["id"],
+        second_batch["id"],
+    ]
+
+
+def test_teacher_cannot_approve_into_archived_batch(client, teacher_headers_factory):
+    teacher_headers = teacher_headers_factory("teacher.archived.approval")
+
+    batch_response = client.post(
+        "/api/teacher/batches",
+        json={"code": "BATCH-LOCKED-2026", "name": "Locked Batch"},
+        headers=teacher_headers,
+    )
+    assert batch_response.status_code == 201
+    batch = batch_response.json()
+
+    archive_response = client.post(
+        f"/api/teacher/batches/{batch['id']}/archive",
+        headers=teacher_headers,
+    )
+    assert archive_response.status_code == 200
+
+    registration = _submit_registration(
+        client,
+        email="student.archivedbatch@example.com",
+        reference_number="REF-ARCHIVE-1001",
+    )
+
+    approve_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/approve",
+        json={
+            "batch_id": batch["id"],
+            "issued_username": "student.archivedbatch",
+            "temporary_password": "Student123!",
+            "notes": "Should stay blocked.",
+            "send_email": False,
+        },
+        headers=teacher_headers,
+    )
+
+    assert approve_response.status_code == 409
+    assert (
+        approve_response.json()["detail"]
+        == "Archived batches cannot accept new approvals. Restore the batch first."
+    )
+
+    with SessionLocal() as db:
+        student_user = db.query(User).filter(User.email == "student.archivedbatch@example.com").first()
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
+        assert student_user is None
+        assert enrollment is not None
+        assert enrollment.status == "pending"
+
+
+def test_archived_batch_keeps_student_roster_and_history(client, teacher_headers_factory):
+    registration = _submit_registration(
+        client,
+        email="student.history@example.com",
+        reference_number="REF-ARCHIVE-1002",
+    )
+    teacher_headers = teacher_headers_factory("teacher.history")
+
+    approve_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/approve",
+        json={
+            "batch_code": "BATCH-HISTORY-2026",
+            "batch_name": "History Batch",
+            "issued_username": "student.history",
+            "temporary_password": "Student123!",
+            "notes": "Archive after approval.",
+            "send_email": False,
+        },
+        headers=teacher_headers,
+    )
+    assert approve_response.status_code == 200
+    approved = approve_response.json()["enrollment"]
+
+    archive_response = client.post(
+        f"/api/teacher/batches/{approved['batch']['id']}/archive",
+        headers=teacher_headers,
+    )
+    assert archive_response.status_code == 200
+    archived_batch = archive_response.json()
+    assert archived_batch["status"] == "archived"
+    assert archived_batch["student_count"] == 1
+
+    archived_batches_response = client.get(
+        "/api/teacher/batches?status=archived",
+        headers=teacher_headers,
+    )
+    assert archived_batches_response.status_code == 200
+    assert archived_batches_response.json()[0]["id"] == approved["batch"]["id"]
+    assert archived_batches_response.json()[0]["student_count"] == 1
+
+    students_response = client.get(
+        f"/api/teacher/batches/{approved['batch']['id']}/students",
+        headers=teacher_headers,
+    )
+    assert students_response.status_code == 200
+    assert students_response.json()[0]["username"] == "student.history"

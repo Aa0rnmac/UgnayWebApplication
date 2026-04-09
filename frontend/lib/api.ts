@@ -276,7 +276,7 @@ export type TeacherBatch = {
   id: number;
   code: string;
   name: string;
-  status: string;
+  status: "active" | "archived";
   start_date: string | null;
   end_date: string | null;
   capacity: number | null;
@@ -320,6 +320,8 @@ export type TeacherEnrollment = {
   status: string;
   payment_review_status: string;
   review_notes: string | null;
+  rejection_reason_code: "incorrect_amount_paid" | "incorrect_information" | null;
+  rejection_reason_detail: string | null;
   reviewed_at: string | null;
   approved_at: string | null;
   rejected_at: string | null;
@@ -339,6 +341,13 @@ export type TeacherEnrollmentApprovalResult = {
   recipient_email: string;
 };
 
+export type TeacherEnrollmentRejectionResult = {
+  enrollment: TeacherEnrollment;
+  delivery_status: "sent" | "skipped" | "failed";
+  delivery_message: string;
+  recipient_email: string;
+};
+
 export type TeacherEnrollmentApprovePayload = {
   batch_id?: number | null;
   batch_code?: string | null;
@@ -350,13 +359,15 @@ export type TeacherEnrollmentApprovePayload = {
 };
 
 export type TeacherEnrollmentRejectPayload = {
-  notes: string;
+  internal_note: string | null;
+  rejection_reason_code: "incorrect_amount_paid" | "incorrect_information";
+  rejection_reason_detail?: string | null;
 };
 
 export type TeacherBatchCreatePayload = {
   code: string;
   name: string;
-  status?: string;
+  status?: "active" | "archived";
   start_date?: string | null;
   end_date?: string | null;
   capacity?: number | null;
@@ -437,6 +448,7 @@ export type TeacherConcernAttempt = {
 export type TeacherReportSummary = {
   batch_id: number | null;
   module_id: number | null;
+  registered_student_count: number;
   total_students: number;
   total_attempts: number;
   average_score_percent: number;
@@ -444,6 +456,69 @@ export type TeacherReportSummary = {
   students_needing_attention: TeacherAttentionStudent[];
   recent_concern_attempts: TeacherConcernAttempt[];
 };
+
+export type TeacherBreakdownModuleMetric = {
+  module_id: number;
+  module_title: string;
+  count: number;
+};
+
+export type TeacherBatchBreakdownRow = {
+  student_id: number;
+  student_name: string;
+  average_score_percent: number;
+  attempt_count: number;
+  latest_attempt_at: string;
+  highest_correct_module: TeacherBreakdownModuleMetric | null;
+  highest_incorrect_module: TeacherBreakdownModuleMetric | null;
+};
+
+export type TeacherModuleBreakdownRow = {
+  batch_id: number | null;
+  batch_name: string;
+  average_score_percent: number;
+  attempt_count: number;
+  correct_answers: number;
+  incorrect_answers: number;
+};
+
+export type TeacherBatchBreakdown = {
+  mode: "batch";
+  batch_id: number;
+  batch_name: string | null;
+  rows: TeacherBatchBreakdownRow[];
+};
+
+export type TeacherModuleBreakdown = {
+  mode: "module";
+  module_id: number;
+  module_title: string | null;
+  rows: TeacherModuleBreakdownRow[];
+};
+
+export type TeacherBatchModuleBreakdownRow = {
+  student_id: number;
+  student_name: string;
+  average_score_percent: number;
+  attempt_count: number;
+  correct_answers: number;
+  incorrect_answers: number;
+  latest_attempt_at: string;
+};
+
+export type TeacherBatchModuleBreakdown = {
+  mode: "batch_module";
+  batch_id: number;
+  batch_name: string | null;
+  module_id: number;
+  module_title: string | null;
+  rows: TeacherBatchModuleBreakdownRow[];
+};
+
+export type TeacherReportBreakdownResponse =
+  | TeacherBatchBreakdown
+  | TeacherModuleBreakdown
+  | TeacherBatchModuleBreakdown;
 
 export type ActivityAttemptItemPayload = {
   item_key: string;
@@ -917,14 +992,39 @@ export function generateTeacherStudentReport(
 }
 
 export function getTeacherReportSummary(
-  filters?: { batchId?: number | null; moduleId?: number | null },
+  filters?: {
+    batchId?: number | null;
+    moduleId?: number | null;
+    includeArchivedBatches?: boolean;
+  },
   token?: string
 ): Promise<TeacherReportSummary> {
   const query = buildQuery({
     batch_id: filters?.batchId,
     module_id: filters?.moduleId,
+    include_archived_batches: filters?.includeArchivedBatches,
   });
   return request<TeacherReportSummary>(`/teacher/reports/summary${query}`, undefined, token);
+}
+
+export function getTeacherReportBreakdown(
+  filters?: {
+    batchId?: number | null;
+    moduleId?: number | null;
+    includeArchivedBatches?: boolean;
+  },
+  token?: string
+): Promise<TeacherReportBreakdownResponse> {
+  const query = buildQuery({
+    batch_id: filters?.batchId,
+    module_id: filters?.moduleId,
+    include_archived_batches: filters?.includeArchivedBatches,
+  });
+  return request<TeacherReportBreakdownResponse>(
+    `/teacher/reports/breakdown${query}`,
+    undefined,
+    token
+  );
 }
 
 export function getTeacherEnrollments(
@@ -971,8 +1071,8 @@ export function rejectTeacherEnrollment(
   enrollmentId: number,
   payload: TeacherEnrollmentRejectPayload,
   token?: string
-): Promise<TeacherEnrollment> {
-  return request<TeacherEnrollment>(
+): Promise<TeacherEnrollmentRejectionResult> {
+  return request<TeacherEnrollmentRejectionResult>(
     `/teacher/enrollments/${enrollmentId}/reject`,
     {
       method: "POST",
@@ -982,8 +1082,14 @@ export function rejectTeacherEnrollment(
   );
 }
 
-export function getTeacherBatches(token?: string): Promise<TeacherBatch[]> {
-  return request<TeacherBatch[]>("/teacher/batches", undefined, token);
+export function getTeacherBatches(
+  filters?: { status?: "active" | "archived" | "all" },
+  token?: string
+): Promise<TeacherBatch[]> {
+  const query = buildQuery({
+    status: filters?.status,
+  });
+  return request<TeacherBatch[]>(`/teacher/batches${query}`, undefined, token);
 }
 
 export function createTeacherBatch(
@@ -1005,6 +1111,26 @@ export function getTeacherBatchStudents(
   token?: string
 ): Promise<TeacherUserSummary[]> {
   return request<TeacherUserSummary[]>(`/teacher/batches/${batchId}/students`, undefined, token);
+}
+
+export function archiveTeacherBatch(batchId: number, token?: string): Promise<TeacherBatch> {
+  return request<TeacherBatch>(
+    `/teacher/batches/${batchId}/archive`,
+    {
+      method: "POST",
+    },
+    token
+  );
+}
+
+export function restoreTeacherBatch(batchId: number, token?: string): Promise<TeacherBatch> {
+  return request<TeacherBatch>(
+    `/teacher/batches/${batchId}/restore`,
+    {
+      method: "POST",
+    },
+    token
+  );
 }
 
 export function getTeacherStudent(studentId: number, token?: string): Promise<TeacherStudent> {
