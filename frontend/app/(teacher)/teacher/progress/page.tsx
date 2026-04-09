@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ReactNode, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
   TeacherActivityAttempt,
@@ -468,28 +469,32 @@ function DetailDrawer({
     title = "Modules That Need Attention";
     subtitle = `${weakItems.length} weak item(s) across all active batches and all modules.`;
     content = weakItems.length ? (
-      <div className="space-y-3">
+      <div className="space-y-4">
         {weakItems.map((item) => (
-          <div
+          <article
             key={`${item.activity_key}-${item.item_key}`}
-            className="rounded-2xl border border-white/10 bg-black/20 p-4"
+            className="rounded-[24px] border border-black/10 bg-black/20 px-4 py-4 shadow-sm"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="teacher-card-title text-sm font-black">{item.activity_title}</p>
-                <p className="teacher-card-meta mt-1 text-xs">{item.module_title}</p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="teacher-card-title text-base font-black leading-tight">
+                  {item.activity_title}
+                </p>
+                <p className="teacher-card-meta mt-2 text-sm">
+                  {item.module_title} - {item.attempt_count} attempts
+                </p>
               </div>
-              <div className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+              <div className="shrink-0 rounded-2xl border border-black/10 bg-white/75 px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm">
                 {formatPercent(item.wrong_rate_percent, 2)} wrong rate
               </div>
             </div>
-            <p className="teacher-card-copy mt-3 text-sm">
+            <p className="teacher-card-copy mt-4 text-base">
               {item.prompt ?? item.expected_answer ?? item.item_key}
             </p>
-            <p className="teacher-card-meta mt-3 text-xs">
+            <p className="teacher-card-meta mt-3 text-sm">
               Wrong {item.wrong_count} time(s) across {item.attempt_count} attempts
             </p>
-          </div>
+          </article>
         ))}
       </div>
     ) : (
@@ -503,34 +508,36 @@ function DetailDrawer({
     title = "Students Needing Attention";
     subtitle = `${attentionStudents.length} flagged student(s) across all active batches and all modules.`;
     content = attentionStudents.length ? (
-      <div className="space-y-3">
+      <div className="space-y-4">
         {attentionStudents.map((student) => (
-          <div
+          <article
             key={student.student_id}
-            className="rounded-2xl border border-white/10 bg-black/20 p-4"
+            className="rounded-[24px] border border-black/10 bg-black/20 px-4 py-4 shadow-sm"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="teacher-card-title text-sm font-black">{student.student_name}</p>
-                <p className="teacher-card-meta mt-1 text-xs">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="teacher-card-title text-base font-black leading-tight">
+                  {student.student_name}
+                </p>
+                <p className="teacher-card-meta mt-2 text-sm">
                   {student.batch_name ?? "Unassigned batch"} - {student.attempt_count} attempts
                 </p>
               </div>
               <Link
-                className="inline-flex rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
+                className="inline-flex shrink-0 rounded-xl bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
                 href={`/teacher/students/${student.student_id}`}
                 onClick={onClose}
               >
                 Open Student
               </Link>
             </div>
-            <p className="teacher-card-copy mt-3 text-sm">
+            <p className="teacher-card-copy mt-4 text-base">
               Average {formatPercent(student.average_score_percent, 2)} - {student.low_score_count} low score(s) in the latest five attempts
             </p>
-            <p className="teacher-card-meta mt-2 text-xs">
+            <p className="teacher-card-meta mt-3 text-sm">
               Latest attempt {formatDateTime(student.latest_attempt_at)}
             </p>
-          </div>
+          </article>
         ))}
       </div>
     ) : (
@@ -540,42 +547,40 @@ function DetailDrawer({
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-[220]">
-      <button
-        aria-label="Close details"
-        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]"
-        onClick={onClose}
-        type="button"
-      />
-      <aside
-        aria-label={title}
-        aria-modal="true"
-        className="absolute inset-0 md:left-auto md:w-[560px]"
-        role="dialog"
-      >
-        <div className="flex h-full flex-col border-l border-black/10 bg-[#f7f4ef] shadow-2xl">
-          <div className="flex items-start justify-between gap-4 border-b border-black/10 px-5 py-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandBlue">
-                Detail View
-              </p>
-              <h3 className="teacher-panel-heading mt-2 text-2xl font-black">{title}</h3>
-              <p className="teacher-card-meta mt-2 text-sm">{subtitle}</p>
-            </div>
-            <button
-              className="teacher-card-ghost-button rounded-xl border px-3 py-2 text-sm font-semibold transition"
-              onClick={onClose}
-              type="button"
-            >
-              Close
-            </button>
-          </div>
+  if (typeof document === "undefined") {
+    return null;
+  }
 
-          <div className="flex-1 overflow-y-auto px-5 py-5">{content}</div>
-        </div>
-      </aside>
-    </div>
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[220] overflow-y-auto bg-slate-950/45 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div className="relative flex min-h-full items-start justify-end p-3 md:p-6">
+        <aside
+          aria-label={title}
+          aria-modal="true"
+          className="relative w-full max-w-[560px]"
+          onClick={(event) => event.stopPropagation()}
+          role="dialog"
+        >
+          <div className="flex max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden rounded-[30px] border border-black/10 bg-[#f7f4ef] shadow-2xl md:max-h-[calc(100dvh-3rem)]">
+            <div className="border-b border-black/10 bg-[#f7f4ef] px-5 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandBlue">
+                  Detail View
+                </p>
+                <h3 className="teacher-panel-heading mt-1 text-2xl font-black leading-tight">{title}</h3>
+                <p className="teacher-card-meta mt-2 text-sm">{subtitle}</p>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-5">{content}</div>
+          </div>
+        </aside>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -831,7 +836,7 @@ export default function TeacherProgressPage() {
                     {item.prompt ?? item.expected_answer ?? item.item_key}
                   </p>
                   <p className="teacher-card-meta mt-2 text-xs">
-                    {item.attempt_count} attempts
+                    Wrong {item.wrong_count} time(s) - {item.attempt_count} attempts
                   </p>
                 </div>
               ))}
@@ -848,7 +853,7 @@ export default function TeacherProgressPage() {
                   value: getMostAffectedWeakModule(weakItems),
                 },
               ]}
-              title="MODULE THAT NEEDS ATTENTION"
+              title="MODULES THAT NEED ATTENTION"
             />
 
             <AlertSummaryCard
