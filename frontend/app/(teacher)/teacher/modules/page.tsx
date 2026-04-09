@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { TeacherWorkspaceCard } from "@/components/teacher/workspace-card";
@@ -29,14 +28,6 @@ export default function TeacherModulesPage() {
           Prep lessons and inspect built-in
           activities.
         </p>
-        <div className="mt-5 flex flex-wrap gap-2">
-          <Link
-            className="rounded-full bg-brandBlue px-4 py-2 text-xs font-semibold text-white"
-            href="/teacher/lab"
-          >
-            Open Shared Lab Prep
-          </Link>
-        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">

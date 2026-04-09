@@ -22,6 +22,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const publicRoute = useMemo(() => isPublicRoute(pathname), [pathname]);
   const homeHref = role === "teacher" ? "/teacher" : "/dashboard";
+  const headerGreeting =
+    role === "teacher" ? (
+      <>
+        Welcome, Teacher <span className="text-brandBlue">{displayName}</span>
+      </>
+    ) : (
+      <>
+        Welcome, <span className="text-brandBlue">{displayName}</span>
+      </>
+    );
   const profileImageUrl = useMemo(() => {
     if (!profileImagePath) {
       return null;
@@ -135,7 +145,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
 
               <div className="text-sm font-semibold text-slate-700">
-                Welcome, <span className="text-brandBlue">{displayName}</span>
+                {headerGreeting}
               </div>
             </div>
 

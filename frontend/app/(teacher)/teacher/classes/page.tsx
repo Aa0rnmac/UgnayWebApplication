@@ -219,24 +219,16 @@ export default function TeacherClassesPage() {
   return (
     <section className="space-y-6">
       <div className="panel overflow-hidden">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">
-              Enrollment Operations
-            </p>
-            <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
-              Approve learners, assign batches, and open live student rosters.
-            </h2>
-            <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
-              Review payment proofs, approve or reject registrants, create batches, and open the roster for each group.
-            </p>
-          </div>
-          <Link
-            className="rounded-full bg-brandBlue px-4 py-2 text-xs font-semibold text-white"
-            href="/teacher/progress"
-          >
-            Open Progress View
-          </Link>
+        <div className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">
+            Enrollment Operations
+          </p>
+          <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
+            Approve learners, assign batches, and open live student rosters.
+          </h2>
+          <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
+            Review payment proofs, approve or reject registrants, create batches, and open the roster for each group.
+          </p>
         </div>
       </div>
 

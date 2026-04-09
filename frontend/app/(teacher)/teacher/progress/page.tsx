@@ -110,36 +110,46 @@ export default function TeacherProgressPage() {
           Spot weak items, attention students, and concern attempts from saved activity data.
         </h2>
         <p className="teacher-panel-copy mt-3 max-w-3xl text-sm leading-relaxed">
-          Filter by batch or module to see which activity items need review and which students may need extra teaching support.
+          Filter by enrolled batch or module to see which activity items need review and which students may need extra teaching support.
         </p>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <select
-            className="teacher-card-control"
-            onChange={(event) => setSelectedBatchId(event.target.value)}
-            value={selectedBatchId}
-          >
-            <option value="">All batches</option>
-            {batches.map((batch) => (
-              <option key={batch.id} value={batch.id}>
-                {batch.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="teacher-card-control"
-            onChange={(event) => setSelectedModuleId(event.target.value)}
-            value={selectedModuleId}
-          >
-            <option value="">All modules</option>
-            {modules.map((module) => (
-              <option key={module.id} value={module.id}>
-                Module {module.order_index}: {module.title}
-              </option>
-            ))}
-          </select>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr,1fr,auto]">
+          <label className="space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brandBlue">
+              Enrolled Batch
+            </span>
+            <select
+              className="teacher-card-control"
+              onChange={(event) => setSelectedBatchId(event.target.value)}
+              value={selectedBatchId}
+            >
+              <option value="">All enrolled batches</option>
+              {batches.map((batch) => (
+                <option key={batch.id} value={batch.id}>
+                  {batch.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brandGreen">
+              Module
+            </span>
+            <select
+              className="teacher-card-control"
+              onChange={(event) => setSelectedModuleId(event.target.value)}
+              value={selectedModuleId}
+            >
+              <option value="">All modules</option>
+              {modules.map((module) => (
+                <option key={module.id} value={module.id}>
+                  Module {module.order_index}: {module.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
-            className="teacher-card-ghost-button rounded-xl border px-3 py-2 text-sm font-semibold transition"
+            className="teacher-card-ghost-button rounded-xl border px-3 py-2 text-sm font-semibold transition xl:self-end"
             onClick={() => {
               setSelectedBatchId("");
               setSelectedModuleId("");
@@ -148,12 +158,6 @@ export default function TeacherProgressPage() {
           >
             Clear Filters
           </button>
-          <Link
-            className="rounded-xl bg-brandBlue px-3 py-2 text-center text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-            href="/teacher/classes"
-          >
-            Open Enrollments
-          </Link>
         </div>
       </div>
 
@@ -193,7 +197,7 @@ export default function TeacherProgressPage() {
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="panel">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-            Weak Items
+            MODULE THAT NEEDS ATTENTION
           </p>
           <div className="mt-4 space-y-3">
             {summary?.weak_items.length ? (
@@ -209,7 +213,7 @@ export default function TeacherProgressPage() {
               ))
             ) : (
               <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                No weak items matched the current filter.
+                No weak items matched the current filter yet. Weak items appear after at least 5 attempts and a 40% wrong rate.
               </div>
             )}
           </div>

@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useAuth } from "@/components/auth-context";
 import { TeacherWorkspaceCard } from "@/components/teacher/workspace-card";
 import { TeacherWorkspaceSnapshot, getTeacherWorkspaceSnapshot } from "@/lib/teacher-data";
 
@@ -30,8 +30,10 @@ const WORKFLOW_STEPS = [
 ] as const;
 
 export function TeacherHome() {
+  const { displayName } = useAuth();
   const [snapshot, setSnapshot] = useState<TeacherWorkspaceSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const teacherName = displayName.trim() || "Teacher";
 
   useEffect(() => {
     getTeacherWorkspaceSnapshot()
@@ -85,41 +87,21 @@ export function TeacherHome() {
   return (
     <section className="space-y-6">
       <div className="panel overflow-hidden">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-              Teacher Workspace
-            </p>
-            <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
-              Run enrollment, monitor learning signals, and coach practice from one teacher
-              workspace.
-            </h2>
-            <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
-              The teacher surface is now backed by the real enrollment, batch, reporting, and lab
-              contracts. This home view is your live operations cockpit, not a mock planning board.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Link
-              className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-white"
-              href="/teacher/classes"
-            >
-              Review Enrollments
-            </Link>
-            <Link
-              className="rounded-full bg-brandGreen px-4 py-2 text-xs font-semibold text-white"
-              href="/teacher/progress"
-            >
-              Open Watchlist
-            </Link>
-            <Link
-              className="rounded-full bg-brandBlue px-4 py-2 text-xs font-semibold text-white"
-              href="/teacher/lab"
-            >
-              Open Lab
-            </Link>
-          </div>
+        <div className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
+            Teacher Workspace
+          </p>
+          <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-900">
+            Welcome, Teacher <span className="text-brandBlue">{teacherName}</span>!
+          </h1>
+          <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
+            Run enrollment, monitor learning signals, and coach practice from one teacher
+            workspace.
+          </h2>
+          <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
+            The teacher surface is now backed by the real enrollment, batch, reporting, and lab
+            contracts. This home view is your live operations cockpit, not a mock planning board.
+          </p>
         </div>
       </div>
 

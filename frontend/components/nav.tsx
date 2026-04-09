@@ -12,7 +12,7 @@ const STUDENT_NAV_ITEMS = [
 ] as const;
 
 const TEACHER_NAV_ITEMS = [
-  { href: "/teacher", label: "Workspace", short: "W" },
+  { href: "/teacher", label: "Dashboard", short: "D" },
   { href: "/teacher/modules", label: "Modules", short: "M" },
   { href: "/teacher/lab", label: "Lab", short: "L" },
   { href: "/teacher/progress", label: "Reports", short: "R" },
@@ -107,7 +107,10 @@ export function AppNav({ role }: { role: "student" | "teacher" }) {
 
           <nav className="flex-1 space-y-2 p-3">
             {navItems.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const active =
+                item.href === "/teacher"
+                  ? pathname === item.href
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link
                   key={item.href}
