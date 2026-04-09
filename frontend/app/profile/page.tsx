@@ -413,9 +413,12 @@ export default function ProfilePage() {
                 New Password
                 <input
                   className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                  autoComplete="new-password"
                   minLength={8}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  pattern="^(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}$"
+                  onChange={(event) => {
+                    setNewPassword(event.target.value);
+                    setError(null);
+                  }}
                   required
                   type="password"
                   value={newPassword}
