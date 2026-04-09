@@ -540,6 +540,25 @@ const MODULE8_GESTURE_TARGETS = [
   { id: "m8-g10", label: "FAST" }
 ] as const;
 
+const CUSTOM_ASSESSMENT_IDS_BY_SLUG: Record<string, readonly string[]> = {
+  "fsl-alphabets": MODULE1_ASSESSMENT_OPTIONS.map((item) => item.id),
+  numbers: MODULE2_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "common-words": MODULE3_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "family-members": MODULE4_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "people-description": MODULE5_ASSESSMENT_OPTIONS.map((item) => item.id),
+  days: MODULE6_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "colors-descriptions": MODULE7_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "basic-conversations": MODULE8_ASSESSMENT_OPTIONS.map((item) => item.id),
+};
+
+function getAvailableAssessmentIds(module: ModuleItem): string[] {
+  const customIds = CUSTOM_ASSESSMENT_IDS_BY_SLUG[module.slug];
+  if (customIds && customIds.length > 0) {
+    return [...customIds];
+  }
+  return module.assessments.map((assessment) => assessment.id);
+}
+
 function isValidPredictionToken(value: string) {
   const token = value.trim();
   return token.length > 0 && token !== "No prediction yet." && token !== "UNSURE";
@@ -2416,29 +2435,12 @@ export default function ModuleDetailPage() {
       setSelectedLessonId(selected.lessons[0]?.id ?? null);
     }
 
+    const availableAssessmentIds = getAvailableAssessmentIds(selected);
     const assessmentExists = selectedAssessmentId
-      ? selected.assessments.some((assessment) => assessment.id === selectedAssessmentId)
+      ? availableAssessmentIds.includes(selectedAssessmentId)
       : false;
     if (!assessmentExists) {
-      if (selected.slug === "fsl-alphabets") {
-        setSelectedAssessmentId("m1-assessment-1");
-      } else if (selected.slug === "numbers") {
-        setSelectedAssessmentId("m2-assessment-1");
-      } else if (selected.slug === "common-words") {
-        setSelectedAssessmentId("m3-assessment-1");
-      } else if (selected.slug === "family-members") {
-        setSelectedAssessmentId("m4-assessment-1");
-      } else if (selected.slug === "people-description") {
-        setSelectedAssessmentId("m5-assessment-1");
-      } else if (selected.slug === "days") {
-        setSelectedAssessmentId("m6-assessment-1");
-      } else if (selected.slug === "colors-descriptions") {
-        setSelectedAssessmentId("m7-assessment-1");
-      } else if (selected.slug === "basic-conversations") {
-        setSelectedAssessmentId("m8-assessment-1");
-      } else {
-        setSelectedAssessmentId(selected.assessments[0]?.id ?? null);
-      }
+      setSelectedAssessmentId(availableAssessmentIds[0] ?? null);
     }
   }, [selected, selectedLessonId, selectedAssessmentId, setSelectedLessonId, setSelectedAssessmentId]);
 

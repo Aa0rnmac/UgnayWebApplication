@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
   issueTeacherCredentials,
@@ -476,8 +477,9 @@ export default function LoginPage() {
         </div>
       ) : null}
 
-      {teacherOpen ? (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/45 p-4">
+      {teacherOpen && typeof document !== "undefined"
+        ? createPortal(
+        <div className="fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto bg-slate-900/45 p-4 pt-20 md:pt-24">
           <div className="w-full max-w-xl rounded-2xl border border-brandBorder bg-white p-5 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-900">Teacher Onboarding</h3>
@@ -637,8 +639,10 @@ export default function LoginPage() {
               </p>
             ) : null}
           </div>
-        </div>
-      ) : null}
+        </div>,
+          document.body
+        )
+        : null}
     </section>
   );
 }

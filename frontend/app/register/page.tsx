@@ -223,32 +223,47 @@ export default function RegisterPage() {
         </div>
 
         <div className="rounded-xl border border-brandBorder bg-brandBlueLight/40 p-3">
-          <p className="text-sm font-semibold text-slate-800">Upload Proof of Payment</p>
-          <p className="mt-1 text-xs text-muted">Accepted: JPG, PNG, WEBP (max 6MB)</p>
+          <div className="grid gap-4 md:grid-cols-[1fr_280px] md:items-start">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Upload Proof of Payment</p>
+              <p className="mt-1 text-xs text-muted">Accepted: JPG, PNG, WEBP (max 6MB)</p>
 
-          <label className="mt-3 inline-flex cursor-pointer items-center rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90">
-            Upload Image
-            <input
-              accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-              className="hidden"
-              key={fileInputKey}
-              onChange={onImageChange}
-              required
-              type="file"
-            />
-          </label>
+              <label className="mt-3 inline-flex cursor-pointer items-center rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90">
+                Upload Image
+                <input
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  key={fileInputKey}
+                  onChange={onImageChange}
+                  required
+                  type="file"
+                />
+              </label>
 
-          <div className="mt-2 text-xs text-slate-600">
-            {form.referenceImage ? `Selected: ${form.referenceImage.name}` : "No image selected"}
+              <div className="mt-2 text-xs text-slate-600">
+                {form.referenceImage ? `Selected: ${form.referenceImage.name}` : "No image selected"}
+              </div>
+
+              {imagePreview ? (
+                <img
+                  alt="Reference preview"
+                  className="mt-3 h-44 w-full rounded-lg border border-brandBorder bg-white object-contain"
+                  src={imagePreview}
+                />
+              ) : null}
+            </div>
+
+            <div className="rounded-lg border border-brandBorder bg-white p-2">
+              <p className="mb-2 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                GCash QR
+              </p>
+              <img
+                alt="GCash payment QR code"
+                className="h-[340px] w-full rounded-md object-contain"
+                src="/payments/gcash-qr.jpg"
+              />
+            </div>
           </div>
-
-          {imagePreview ? (
-            <img
-              alt="Reference preview"
-              className="mt-3 h-44 w-full rounded-lg border border-brandBorder bg-white object-contain"
-              src={imagePreview}
-            />
-          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
