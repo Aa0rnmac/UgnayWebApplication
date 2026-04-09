@@ -47,9 +47,10 @@ What it does:
 3. Press `Ctrl+F5`.
 
 Notes:
-- `Ctrl+F5` reuses a healthy backend already running on port `8000`. If nothing is running there, the launcher runs `alembic upgrade head` and then starts Uvicorn.
+- The backend launch profile now runs `uvicorn` directly under VS Code debug.
+- Before backend startup, the prelaunch flow stops any old listener on port `8000` and runs `alembic upgrade head`.
 - `Activate.ps1` is optional. If PowerShell blocks script activation on your machine, the VS Code launch still works because it calls `backend/.venv/Scripts/python.exe` directly.
-- The old stop-port prelaunch task has been retired, so the supported backend run path is only the checked-in launch profile.
+- The supported backend run path is the checked-in launch profile plus its prelaunch tasks.
 
 Available launch profiles:
 - `Backend: FastAPI (Reload)`

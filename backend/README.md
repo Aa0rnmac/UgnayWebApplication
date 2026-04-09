@@ -48,6 +48,7 @@ This creates `backend/.env` from `backend/.env.example`, creates `backend/.venv`
 
 For VS Code debug:
 - The launch profile runs `backend/.venv/Scripts/python.exe` directly, so activating the venv is optional.
+- VS Code now starts `uvicorn` directly and uses the prelaunch tasks to stop any old listener on port `8000` and run `alembic upgrade head` first.
 - If PowerShell blocks `Activate.ps1`, you can still use VS Code debug or run Python directly from `.venv/Scripts/python.exe`.
 - Use a process-scoped bypass only when you specifically want manual activation:
 ```bash

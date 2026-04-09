@@ -77,7 +77,7 @@ export default function TeacherModulesPage() {
               <TeacherWorkspaceCard
                 key={`${module.id}-${module.order_index}`}
                 badge={`M${String(module.order_index).padStart(2, "0")}`}
-                ctaLabel="Open Lesson View"
+                ctaLabel="Open Module Preview"
                 description={
                   practiceGuide
                     ? `${module.description} Prep focus: ${practiceGuide.prepFocus}`
