@@ -3,8 +3,8 @@
   "tasks": [
     {
       "label": "Backend: Stop port 8000",
-      "type": "shell",
-      "command": "powershell",
+      "type": "process",
+      "command": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       "args": [
         "-NoProfile",
         "-ExecutionPolicy",
