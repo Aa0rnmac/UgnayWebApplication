@@ -741,6 +741,9 @@ export default function SigningLabPage() {
           <p className="mt-1 text-xs text-slate-600">
             Top candidates: {topCandidates.length > 0 ? topCandidates.join(" | ") : "N/A"}
           </p>
+          <p className="mt-2 rounded-md border border-brandYellow/35 bg-brandYellowLight px-2 py-1 text-xs font-semibold text-slate-800">
+            Note: In Alphabet mode, show an open palm after a prediction appears to enter that letter.
+          </p>
 
           <label className="mt-4 block text-xs font-semibold uppercase tracking-wider label-accent">
             Recognized Gesture

@@ -925,6 +925,8 @@ function Module1AssessmentThree({
   const [recognizedTrail, setRecognizedTrail] = useState("");
   const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
   const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
+  const [predictionConfidence, setPredictionConfidence] = useState<number | null>(null);
+  const [predictionTopCandidates, setPredictionTopCandidates] = useState<string[]>([]);
   const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
   const [reported, setReported] = useState(false);
@@ -1004,12 +1006,32 @@ function Module1AssessmentThree({
       }
       const result = await predictSignFromImage(frame, "alphabet");
       setHiddenPrediction(result.prediction);
+      setPredictionConfidence(result.confidence);
+      setPredictionTopCandidates(result.top_candidates);
     } catch {
       // Keep UI clean; hidden prediction should not block the assessment flow.
     } finally {
       predictionInFlightRef.current = false;
     }
   }
+
+  useEffect(() => {
+    if (!running) {
+      setHiddenPrediction("No prediction yet.");
+      setPredictionConfidence(null);
+      setPredictionTopCandidates([]);
+      return;
+    }
+
+    void runHiddenPrediction();
+    const interval = window.setInterval(() => {
+      void runHiddenPrediction();
+    }, 1200);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [running]);
 
   useEffect(() => {
     const token = hiddenPrediction.trim();
@@ -1149,6 +1171,8 @@ function Module1AssessmentThree({
     palmRaisedRef.current = false;
     lastPalmCommitAtRef.current = 0;
     setHiddenPrediction("No prediction yet.");
+    setPredictionConfidence(null);
+    setPredictionTopCandidates([]);
     setLastRecognizedToken(null);
   }
 
@@ -1192,18 +1216,8 @@ function Module1AssessmentThree({
                 </span>
               </span>
             </button>
-            <button
-              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!running}
-              onClick={() => {
-                void runHiddenPrediction();
-              }}
-              type="button"
-            >
-              Analyze Sign Now
-            </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-              {running ? "Camera active" : "Camera off"}
+              {running ? "Alphabet mode active (show open palm to enter)" : "Camera off"}
             </span>
           </div>
           {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
@@ -1221,6 +1235,22 @@ function Module1AssessmentThree({
               src={activeStep.imageSrc}
             />
           ) : null}
+
+          <div className="mt-3 rounded-lg border border-brandBorder bg-white p-3">
+            <p className="text-xs uppercase tracking-wider label-accent">Prediction Output</p>
+            <p className="mt-2 text-lg font-bold text-brandBlue">{hiddenPrediction}</p>
+            <p className="mt-1 text-xs text-slate-700">
+              Confidence:{" "}
+              {predictionConfidence !== null ? `${Math.round(predictionConfidence * 100)}%` : "N/A"}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              Top candidates:{" "}
+              {predictionTopCandidates.length > 0 ? predictionTopCandidates.join(" | ") : "N/A"}
+            </p>
+            <p className="mt-2 rounded-md border border-brandYellow/35 bg-brandYellowLight px-2 py-1 text-xs font-semibold text-slate-800">
+              Note: Show an open palm after the prediction appears to enter the letter.
+            </p>
+          </div>
 
           <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
             Recognized Gesture
@@ -1954,6 +1984,16 @@ function GestureCameraAssessment({
                   Stop Camera
                 </span>
               </span>
+            </button>
+            <button
+              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!running}
+              onClick={() => {
+                void runHiddenPrediction();
+              }}
+              type="button"
+            >
+              Analyze Sign Now
             </button>
             <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
               {running ? "Camera active" : "Camera off"}
