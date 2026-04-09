@@ -46,6 +46,43 @@ async function persistAssessmentResult(
   return saved ?? true;
 }
 
+function loadSessionValue<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) {
+      return fallback;
+    }
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function useSessionState<T>(key: string, initial: T) {
+  const initialRef = useRef(initial);
+  const [value, setValue] = useState<T>(() => loadSessionValue(key, initialRef.current));
+
+  useEffect(() => {
+    setValue(loadSessionValue(key, initialRef.current));
+  }, [key]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Ignore storage errors so the page remains usable.
+    }
+  }, [key, value]);
+
+  return [value, setValue] as const;
+}
+
 const MODULE1_AI_SIGN_IMAGES = [
   { letter: "A", src: "/module-assets/m1/ai/a.png" },
   { letter: "B", src: "/module-assets/m1/ai/b.png" },
@@ -513,6 +550,25 @@ const MODULE8_ASSESSMENT_OPTIONS = [
     subtitle: "Camera: Sign at least 7 gestures"
   }
 ] as const;
+
+const CUSTOM_ASSESSMENT_IDS_BY_SLUG: Record<string, readonly string[]> = {
+  "fsl-alphabets": MODULE1_ASSESSMENT_OPTIONS.map((item) => item.id),
+  numbers: MODULE2_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "common-words": MODULE3_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "family-members": MODULE4_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "people-description": MODULE5_ASSESSMENT_OPTIONS.map((item) => item.id),
+  days: MODULE6_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "colors-descriptions": MODULE7_ASSESSMENT_OPTIONS.map((item) => item.id),
+  "basic-conversations": MODULE8_ASSESSMENT_OPTIONS.map((item) => item.id),
+};
+
+function getAvailableAssessmentIds(module: ModuleItem): string[] {
+  const customIds = CUSTOM_ASSESSMENT_IDS_BY_SLUG[module.slug];
+  if (customIds && customIds.length > 0) {
+    return [...customIds];
+  }
+  return module.assessments.map((assessment) => assessment.id);
+}
 
 const MODULE8_GESTURE_TARGETS = [
   { id: "m8-g1", label: "UNDERSTAND" },
@@ -2437,14 +2493,27 @@ function Module7ColorAssessmentTwo({
 export default function ModuleDetailPage() {
   const params = useParams<{ moduleId: string }>();
   const moduleId = Number(params.moduleId);
+  const moduleScopeKey = `module-detail:${Number.isNaN(moduleId) ? "unknown" : moduleId}`;
 
   const [modules, setModules] = useState<ModuleItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"module" | "assessment">("module");
-  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
-  const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null);
-  const [isSelectionCollapsed, setIsSelectionCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useSessionState<"module" | "assessment">(
+    `${moduleScopeKey}:activeTab`,
+    "module"
+  );
+  const [selectedLessonId, setSelectedLessonId] = useSessionState<string | null>(
+    `${moduleScopeKey}:selectedLessonId`,
+    null
+  );
+  const [selectedAssessmentId, setSelectedAssessmentId] = useSessionState<string | null>(
+    `${moduleScopeKey}:selectedAssessmentId`,
+    null
+  );
+  const [isSelectionCollapsed, setIsSelectionCollapsed] = useSessionState<boolean>(
+    `${moduleScopeKey}:isSelectionCollapsed`,
+    false
+  );
   const [assessmentSaveState, setAssessmentSaveState] = useState<{
     status: "idle" | "saving" | "saved" | "error";
     message: string | null;
@@ -2476,10 +2545,21 @@ export default function ModuleDetailPage() {
       return;
     }
 
-    setActiveTab("module");
-    setSelectedLessonId(selected.lessons[0]?.id ?? null);
-    setSelectedAssessmentId(selected.assessments[0]?.id ?? null);
-  }, [selected?.id]);
+    const lessonExists = selectedLessonId
+      ? selected.lessons.some((lesson) => lesson.id === selectedLessonId)
+      : false;
+    if (!lessonExists) {
+      setSelectedLessonId(selected.lessons[0]?.id ?? null);
+    }
+
+    const availableAssessmentIds = getAvailableAssessmentIds(selected);
+    const assessmentExists = selectedAssessmentId
+      ? availableAssessmentIds.includes(selectedAssessmentId)
+      : false;
+    if (!assessmentExists) {
+      setSelectedAssessmentId(availableAssessmentIds[0] ?? null);
+    }
+  }, [selected, selectedLessonId, selectedAssessmentId, setSelectedLessonId, setSelectedAssessmentId]);
 
   useEffect(() => {
     setAssessmentSaveState({ status: "idle", message: null });
