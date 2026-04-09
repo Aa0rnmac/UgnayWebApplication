@@ -1,42 +1,4 @@
 {
   "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "Backend: Stop port 8000",
-      "type": "shell",
-      "command": "powershell",
-      "args": [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "$connections = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue; if ($connections) { $connections | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } }"
-      ],
-      "problemMatcher": []
-    },
-    {
-      "label": "Backend: Alembic upgrade head",
-      "type": "process",
-      "command": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
-      "args": [
-        "-m",
-        "alembic",
-        "upgrade",
-        "head"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}/backend"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "Backend: Prepare run",
-      "dependsOrder": "sequence",
-      "dependsOn": [
-        "Backend: Stop port 8000",
-        "Backend: Alembic upgrade head"
-      ],
-      "problemMatcher": []
-    }
-  ]
+  "tasks": []
 }

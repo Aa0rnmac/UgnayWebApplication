@@ -29,7 +29,7 @@ class TeacherBatchOut(BaseModel):
 
 
 class TeacherBatchCreateRequest(BaseModel):
-    code: str = Field(min_length=2, max_length=60)
+    code: str = Field(min_length=1, max_length=60)
     name: str = Field(min_length=2, max_length=160)
     status: str = Field(default="active", max_length=20)
     start_date: date | None = None

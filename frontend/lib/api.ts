@@ -603,6 +603,39 @@ type TeacherAssessmentReportsResponse = {
   reports: TeacherAssessmentReport[];
 };
 
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => formatApiErrorDetail(item))
+      .filter((item) => item && item !== "Request failed");
+    return parts.length > 0 ? parts.join(" ") : "Request failed";
+  }
+
+  if (detail && typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    const message =
+      (typeof record.msg === "string" && record.msg) ||
+      (typeof record.message === "string" && record.message) ||
+      (typeof record.detail === "string" && record.detail);
+
+    if (message) {
+      const location = Array.isArray(record.loc)
+        ? record.loc
+            .map((part) => String(part))
+            .filter((part) => part !== "body")
+            .join(".")
+        : "";
+      return location ? `${location}: ${message}` : message;
+    }
+  }
+
+  return "Request failed";
+}
+
 async function performRequest(path: string, options?: RequestInit, token?: string): Promise<Response> {
   const apiBase = resolveApiBase();
   const headers = new Headers(options?.headers);
@@ -633,8 +666,11 @@ async function performRequest(path: string, options?: RequestInit, token?: strin
     const fallback = "Request failed";
     let detail = fallback;
     try {
-      const data = (await response.json()) as { detail?: string; message?: string };
-      detail = data.detail ?? data.message ?? fallback;
+      const data = (await response.json()) as { detail?: unknown; message?: unknown };
+      detail =
+        formatApiErrorDetail(data.detail) ||
+        formatApiErrorDetail(data.message) ||
+        fallback;
     } catch {
       try {
         detail = (await response.text()) || fallback;

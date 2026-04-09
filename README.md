@@ -7,9 +7,12 @@ Monorepo scaffold for:
 ## Backend quick start
 1. Open terminal in `backend`.
 2. Create `.env` from `.env.example`.
-3. Install dependencies and run:
-   - `pip install -r requirements.txt`
-   - `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+3. Create a local virtual environment and install dependencies:
+   - `py -m venv .venv`
+   - `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`
+4. Run the backend without relying on PowerShell activation:
+   - `.\.venv\Scripts\python.exe -m alembic upgrade head`
+   - `.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 
 ## Frontend quick start
 1. Open terminal in `frontend`.
@@ -20,12 +23,19 @@ Monorepo scaffold for:
 
 ## VS Code One-Click Run
 1. Open `Run and Debug` in VS Code.
-2. Select `Run Full Stack`.
-3. Press `F5`.
+2. Select `Backend: FastAPI (Reload)` or `Run Full Stack (Reload)`.
+3. Press `Ctrl+F5`.
+
+Notes:
+- `Ctrl+F5` reuses a healthy backend already running on port `8000`. If nothing is running there, the launcher runs `alembic upgrade head` and then starts Uvicorn.
+- `Activate.ps1` is optional. If PowerShell blocks script activation on your machine, the VS Code launch still works because it calls `backend/.venv/Scripts/python.exe` directly.
+- The old stop-port prelaunch task has been retired, so the supported backend run path is only the checked-in launch profile.
 
 Available launch profiles:
+- `Backend: FastAPI (Reload)`
 - `Backend: FastAPI`
-- `Frontend: Next.js`
+- `Frontend: Next.js Dev`
+- `Run Full Stack (Reload)` (starts both)
 - `Run Full Stack` (starts both)
 
 ## Local database (default)
