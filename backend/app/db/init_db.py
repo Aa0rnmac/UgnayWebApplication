@@ -1343,6 +1343,67 @@ def validate_seed_data() -> None:
         if item.get("is_published", True) and not item.get("lessons"):
             raise RuntimeError(f"Published module '{item['slug']}' is missing lessons.")
 
+
+def ensure_schema_updates() -> None:
+    # Users table profile/account lifecycle columns.
+    _add_column_if_missing("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR(120)")
+    _add_column_if_missing("users", "middle_name", "ALTER TABLE users ADD COLUMN middle_name VARCHAR(120)")
+    _add_column_if_missing("users", "last_name", "ALTER TABLE users ADD COLUMN last_name VARCHAR(120)")
+    _add_column_if_missing("users", "email", "ALTER TABLE users ADD COLUMN email VARCHAR(255)")
+    _add_column_if_missing(
+        "users", "phone_number", "ALTER TABLE users ADD COLUMN phone_number VARCHAR(40)"
+    )
+    _add_column_if_missing("users", "address", "ALTER TABLE users ADD COLUMN address TEXT")
+    _add_column_if_missing("users", "birth_date", "ALTER TABLE users ADD COLUMN birth_date DATE")
+    _add_column_if_missing(
+        "users", "profile_image_path", "ALTER TABLE users ADD COLUMN profile_image_path VARCHAR(500)"
+    )
+    _add_column_if_missing(
+        "users",
+        "must_change_password",
+        "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+    _add_column_if_missing(
+        "users",
+        "role",
+        "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_right_count",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_right_count INTEGER",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_wrong_count",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_wrong_count INTEGER",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_total_items",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_total_items INTEGER",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "assessment_label",
+        "ALTER TABLE user_module_progress ADD COLUMN assessment_label VARCHAR(255)",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "completed_assessments",
+        "ALTER TABLE user_module_progress ADD COLUMN completed_assessments JSON NOT NULL DEFAULT '[]'",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "improvement_areas",
+        "ALTER TABLE user_module_progress ADD COLUMN improvement_areas JSON NOT NULL DEFAULT '[]'",
+    )
+    _add_column_if_missing(
+        "user_module_progress",
+        "report_sent_at",
+        "ALTER TABLE user_module_progress ADD COLUMN report_sent_at TIMESTAMP",
+    )
+
     missing_activity_blueprints = sorted(
         slug for slug in published_slugs if not MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.get(slug)
     )

@@ -16,6 +16,21 @@ from app.schemas.progress import ProgressUpdateRequest
 
 router = APIRouter(prefix="/modules", tags=["modules"])
 
+MODULE_ACTIVITY_TOTALS_BY_SLUG: dict[str, int] = {
+    "fsl-alphabets": 3,
+    "numbers": 5,
+    "common-words": 2,
+    "family-members": 2,
+    "people-description": 2,
+    "days": 2,
+    "colors-descriptions": 3,
+    "basic-conversations": 2,
+}
+
+
+def _module_total_activities(module: Module) -> int:
+    return max(1, MODULE_ACTIVITY_TOTALS_BY_SLUG.get(module.slug, len(module.assessments)))
+
 
 def _visible_modules_query(db: Session, current_user: User):
     query = db.query(Module).options(selectinload(Module.activities)).order_by(Module.order_index.asc())
