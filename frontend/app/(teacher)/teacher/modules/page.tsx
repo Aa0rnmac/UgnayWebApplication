@@ -26,9 +26,8 @@ export default function TeacherModulesPage() {
           Review live modules, draft slots, and practice guides from the real backend catalog.
         </h2>
         <p className="teacher-panel-copy mt-3 max-w-3xl text-sm leading-relaxed">
-          Teachers now see the real module catalog, including live modules students can access and
-          draft slots reserved for teacher review. Use this page to prep lessons, inspect built-in
-          activities, and spot unpublished curriculum work before rollout.
+          Prep lessons and inspect built-in
+          activities.
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           <Link

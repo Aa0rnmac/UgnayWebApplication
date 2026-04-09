@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 
 from app.core.config import settings
+from app.services.model_paths import resolve_model_artifact_path
 from app.services.word_motion_features import (
     LANDMARK_DIM,
     extract_sequence_from_frame_bytes,
@@ -30,15 +30,7 @@ class NumbersMotionModelService:
         self._feature_dim: int | None = None
         self._sequence_frames = settings.numbers_motion_sequence_frames
         self._min_sequence_frames = settings.numbers_motion_min_sequence_frames
-        self._model_path = self._resolve_model_path(settings.numbers_motion_model_path)
-
-    @staticmethod
-    def _resolve_model_path(path_value: str) -> Path:
-        path = Path(path_value)
-        if path.is_absolute():
-            return path
-        backend_root = Path(__file__).resolve().parents[2]
-        return (backend_root / path).resolve()
+        self._model_path = resolve_model_artifact_path(settings.numbers_motion_model_path)
 
     @staticmethod
     def _infer_sequence_frames(feature_dim: int | None) -> int | None:
