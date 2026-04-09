@@ -1,4 +1,5 @@
 from app.models.activity_attempt import ActivityAttempt, ActivityAttemptItem
+from app.models.archived_student_account import ArchivedStudentAccount
 from app.models.assessment_report import AssessmentReport
 from app.models.batch import Batch
 from app.models.enrollment import Enrollment
@@ -14,6 +15,7 @@ from app.models.user import User
 __all__ = [
     "ActivityAttempt",
     "ActivityAttemptItem",
+    "ArchivedStudentAccount",
     "Module",
     "Batch",
     "Enrollment",

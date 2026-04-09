@@ -149,6 +149,10 @@ class AuthResponse(BaseModel):
     user: UserOut
 
 
+class UserSelfArchiveResponse(BaseModel):
+    message: str
+
+
 class TeacherInviteVerifyQrRequest(BaseModel):
     qr_payload: str = Field(min_length=1, max_length=2048)
 

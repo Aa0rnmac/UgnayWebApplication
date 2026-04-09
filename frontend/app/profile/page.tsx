@@ -7,6 +7,7 @@ import {
   changeMyPassword,
   getCurrentUser,
   resolveUploadsBase,
+  unenrollMyAccount,
   updateMyProfile,
   uploadMyProfilePhoto
 } from "@/lib/api";
@@ -44,6 +45,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [unenrolling, setUnenrolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
@@ -60,6 +62,8 @@ export default function ProfilePage() {
     const uploadBase = resolveUploadsBase();
     return `${uploadBase}/${user.profile_image_path}`;
   }, [user?.profile_image_path]);
+
+  const canEditNames = user?.role === "teacher";
 
   useEffect(() => {
     const token = window.localStorage.getItem("auth_token");
@@ -187,6 +191,37 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleUnenroll() {
+    if (user?.role !== "student") {
+      return;
+    }
+    if (
+      !window.confirm(
+        "This will unenroll your student account, move it to archive, and log you out. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    setUnenrolling(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await unenrollMyAccount();
+      window.localStorage.removeItem("auth_token");
+      window.localStorage.removeItem("auth_username");
+      window.alert(response.message);
+      window.location.href = "/";
+    } catch (unenrollError) {
+      const message =
+        unenrollError instanceof Error ? unenrollError.message : "Failed to unenroll account.";
+      setError(message);
+    } finally {
+      setUnenrolling(false);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <div className="panel panel-lively">
@@ -243,8 +278,13 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 First Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
+                    canEditNames
+                      ? "bg-white outline-none transition focus:border-brandBlue"
+                      : "bg-brandMutedSurface"
+                  }`}
+                  onChange={(event) => updateField("firstName", event.target.value)}
+                  readOnly={!canEditNames}
                   type="text"
                   value={form.firstName}
                 />
@@ -252,8 +292,13 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Middle Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
+                    canEditNames
+                      ? "bg-white outline-none transition focus:border-brandBlue"
+                      : "bg-brandMutedSurface"
+                  }`}
+                  onChange={(event) => updateField("middleName", event.target.value)}
+                  readOnly={!canEditNames}
                   type="text"
                   value={form.middleName}
                 />
@@ -261,8 +306,13 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Last Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
+                    canEditNames
+                      ? "bg-white outline-none transition focus:border-brandBlue"
+                      : "bg-brandMutedSurface"
+                  }`}
+                  onChange={(event) => updateField("lastName", event.target.value)}
+                  readOnly={!canEditNames}
                   type="text"
                   value={form.lastName}
                 />
@@ -346,6 +396,18 @@ export default function ProfilePage() {
               >
                 Change Password
               </button>
+              {user.role === "student" ? (
+                <button
+                  className="ml-auto rounded-lg border border-brandRed bg-white px-4 py-2 text-sm font-semibold text-brandRed transition hover:bg-brandRedLight disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={unenrolling}
+                  onClick={() => {
+                    void handleUnenroll();
+                  }}
+                  type="button"
+                >
+                  {unenrolling ? "Unenrolling..." : "Unenroll Account"}
+                </button>
+              ) : null}
             </div>
           </form>
         </>
@@ -413,9 +475,12 @@ export default function ProfilePage() {
                 New Password
                 <input
                   className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                  autoComplete="new-password"
                   minLength={8}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  pattern="^(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}$"
+                  onChange={(event) => {
+                    setNewPassword(event.target.value);
+                    setError(null);
+                  }}
                   required
                   type="password"
                   value={newPassword}
