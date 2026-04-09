@@ -57,6 +57,9 @@ export async function fetchBackendUser(token: string): Promise<SessionUser | nul
       headers: {
         Authorization: `Bearer ${token}`,
       },
+    }, {
+      attempts: 1,
+      retryDelayMs: 0,
     });
 
     if (!response.ok) {

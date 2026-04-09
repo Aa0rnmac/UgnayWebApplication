@@ -89,7 +89,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [userMenuOpen]);
 
-  if (loading || (publicRoute && pathname === "/" && id !== 0) || (!publicRoute && id === 0)) {
+  if ((!publicRoute && loading) || (publicRoute && pathname === "/" && id !== 0) || (!publicRoute && id === 0)) {
     return <div className="min-h-screen bg-grid" />;
   }
 
