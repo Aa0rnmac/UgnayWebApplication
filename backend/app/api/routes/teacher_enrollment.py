@@ -17,6 +17,7 @@ from app.schemas.registration import RegistrationOut
 from app.schemas.teacher import (
     TeacherBatchCreateRequest,
     TeacherBatchOut,
+    TeacherEnrollmentApprovalResultOut,
     TeacherEnrollmentApproveRequest,
     TeacherEnrollmentOut,
     TeacherEnrollmentRejectRequest,
@@ -27,6 +28,7 @@ from app.schemas.teacher import (
 from app.schemas.teacher_report import TeacherActivityAttemptItemOut, TeacherActivityAttemptOut
 from app.services.enrollment_service import (
     approve_enrollment,
+    EnrollmentApprovalResult,
     get_or_create_batch,
     normalize_batch_code,
 )
@@ -120,6 +122,17 @@ def _enrollment_out(enrollment: Enrollment) -> TeacherEnrollmentOut:
         registration=_registration_out(registration, enrollment),
         batch=_batch_out(batch, student_count=student_count),
         student=_student_summary(student),
+    )
+
+
+def _approval_result_out(result: EnrollmentApprovalResult) -> TeacherEnrollmentApprovalResultOut:
+    return TeacherEnrollmentApprovalResultOut(
+        enrollment=_enrollment_out(result.enrollment),
+        issued_username=result.issued_username,
+        temporary_password=result.temporary_password,
+        delivery_status=result.delivery_status,
+        delivery_message=result.delivery_message,
+        recipient_email=result.recipient_email,
     )
 
 
@@ -246,13 +259,13 @@ def get_enrollment_payment_proof(
     return FileResponse(path=proof_path)
 
 
-@router.post("/enrollments/{enrollment_id}/approve", response_model=TeacherEnrollmentOut)
+@router.post("/enrollments/{enrollment_id}/approve", response_model=TeacherEnrollmentApprovalResultOut)
 def approve_teacher_enrollment(
     enrollment_id: int,
     payload: TeacherEnrollmentApproveRequest,
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
-) -> TeacherEnrollmentOut:
+) -> TeacherEnrollmentApprovalResultOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
     batch = get_or_create_batch(
         db,
@@ -261,19 +274,23 @@ def approve_teacher_enrollment(
         batch_code=payload.batch_code,
         batch_name=payload.batch_name,
     )
-    approve_enrollment(
-        db,
-        enrollment=enrollment,
-        current_teacher=current_teacher,
-        batch=batch,
-        issued_username=payload.issued_username,
-        temporary_password=payload.temporary_password,
-        notes=payload.notes,
-        send_email=payload.send_email,
-    )
-    db.commit()
+    try:
+        result = approve_enrollment(
+            db,
+            enrollment=enrollment,
+            current_teacher=current_teacher,
+            batch=batch,
+            issued_username=payload.issued_username,
+            temporary_password=payload.temporary_password,
+            notes=payload.notes,
+            send_email=payload.send_email,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(enrollment)
-    return _enrollment_out(enrollment)
+    return _approval_result_out(result)
 
 
 @router.post("/enrollments/{enrollment_id}/reject", response_model=TeacherEnrollmentOut)

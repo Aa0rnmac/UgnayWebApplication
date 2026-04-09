@@ -287,6 +287,15 @@ export type TeacherEnrollment = {
   student: TeacherUserSummary | null;
 };
 
+export type TeacherEnrollmentApprovalResult = {
+  enrollment: TeacherEnrollment;
+  issued_username: string;
+  temporary_password: string;
+  delivery_status: "sent" | "skipped";
+  delivery_message: string;
+  recipient_email: string;
+};
+
 export type TeacherEnrollmentApprovePayload = {
   batch_id?: number | null;
   batch_code?: string | null;
@@ -839,8 +848,8 @@ export function approveTeacherEnrollment(
   enrollmentId: number,
   payload: TeacherEnrollmentApprovePayload,
   token?: string
-): Promise<TeacherEnrollment> {
-  return request<TeacherEnrollment>(
+): Promise<TeacherEnrollmentApprovalResult> {
+  return request<TeacherEnrollmentApprovalResult>(
     `/teacher/enrollments/${enrollmentId}/approve`,
     {
       method: "POST",

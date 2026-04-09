@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_teacher
@@ -94,6 +95,17 @@ async def submit_registration(
         phone_number=phone_number.strip(),
         reference_number=reference_number.strip(),
     )
+
+    existing_user = (
+        db.query(User)
+        .filter(or_(User.email == payload.email, User.username == payload.email))
+        .first()
+    )
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email or username already exists. Please log in instead.",
+        )
 
     if not reference_image.filename:
         raise HTTPException(

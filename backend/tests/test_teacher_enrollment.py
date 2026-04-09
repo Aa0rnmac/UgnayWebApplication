@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import app.services.enrollment_service as enrollment_service
+from app.core.config import settings
 from app.db.session import SessionLocal
+from app.models.enrollment import Enrollment
 from app.models.user import User
 
 
@@ -61,7 +64,12 @@ def test_registration_and_teacher_approval_flow(client, teacher_headers_factory)
         headers=teacher_headers,
     )
     assert approve_response.status_code == 200
-    approved = approve_response.json()
+    approval = approve_response.json()
+    assert approval["delivery_status"] == "skipped"
+    assert approval["delivery_message"] == "Credential email skipped. Share the one-time credentials manually."
+    assert approval["issued_username"] == "student.approved"
+    assert approval["temporary_password"] == "Student123!"
+    approved = approval["enrollment"]
     assert approved["status"] == "approved"
     assert approved["payment_review_status"] == "approved"
     assert approved["batch"]["code"] == "BATCH-APR-2026"
@@ -112,3 +120,192 @@ def test_registration_normalizes_phone_number(client):
     )
 
     assert registration["phone_number"] == "09123456789"
+
+
+def test_registration_rejects_existing_user_email(client, teacher_headers_factory):
+    teacher_headers_factory("existing.student")
+
+    response = client.post(
+        "/api/registrations",
+        data={
+            "first_name": "Ana",
+            "middle_name": "L",
+            "last_name": "Student",
+            "birth_date": "2012-05-01",
+            "address": "Manila",
+            "email": "existing.student@school.test",
+            "phone_number": "09123456789",
+            "reference_number": "REF-DUP-EMAIL",
+        },
+        files={"reference_image": ("proof.png", b"proof-image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "An account with this email or username already exists. Please log in instead."
+
+
+def test_registration_rejects_email_that_matches_existing_username(client, db_session):
+    db_session.add(
+        User(
+            username="student.username@example.com",
+            email="different@example.com",
+            password_hash="hashed-password",
+            role="student",
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/registrations",
+        data={
+            "first_name": "Bia",
+            "middle_name": "L",
+            "last_name": "Student",
+            "birth_date": "2012-05-01",
+            "address": "Cebu",
+            "email": "student.username@example.com",
+            "phone_number": "09123456789",
+            "reference_number": "REF-DUP-USERNAME",
+        },
+        files={"reference_image": ("proof.png", b"proof-image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "An account with this email or username already exists. Please log in instead."
+
+
+def test_teacher_approval_sends_credentials_email_when_smtp_available(
+    client, teacher_headers_factory, monkeypatch
+):
+    registration = _submit_registration(
+        client,
+        email="student.mail@example.com",
+        reference_number="REF-1004",
+    )
+    teacher_headers = teacher_headers_factory("teacher.mail")
+    sent_payload: dict[str, str | None] = {}
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_from_email", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "gmail-app-password")
+
+    def fake_send_student_initial_credentials_email(**kwargs):
+        sent_payload.update(kwargs)
+
+    monkeypatch.setattr(
+        enrollment_service,
+        "send_student_initial_credentials_email",
+        fake_send_student_initial_credentials_email,
+    )
+
+    approve_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/approve",
+        json={
+            "batch_code": "BATCH-MAIL-2026",
+            "batch_name": "Mail Batch",
+            "issued_username": "student.mail",
+            "temporary_password": "Student123!",
+            "notes": "Email should be sent.",
+            "send_email": True,
+        },
+        headers=teacher_headers,
+    )
+
+    assert approve_response.status_code == 200
+    approval = approve_response.json()
+    assert approval["delivery_status"] == "sent"
+    assert approval["recipient_email"] == "student.mail@example.com"
+    assert approval["issued_username"] == "student.mail"
+    assert approval["temporary_password"] == "Student123!"
+    assert sent_payload["to_email"] == "student.mail@example.com"
+    assert sent_payload["username"] == "student.mail"
+    assert sent_payload["temporary_password"] == "Student123!"
+    assert sent_payload["batch_name"] == "Mail Batch"
+
+
+def test_teacher_approval_requires_smtp_when_send_email_is_true(
+    client, teacher_headers_factory, monkeypatch
+):
+    registration = _submit_registration(
+        client,
+        email="student.nosmtp@example.com",
+        reference_number="REF-1005",
+    )
+    teacher_headers = teacher_headers_factory("teacher.nosmtp")
+
+    monkeypatch.setattr(settings, "smtp_host", "")
+    monkeypatch.setattr(settings, "smtp_from_email", "")
+    monkeypatch.setattr(settings, "smtp_username", "")
+    monkeypatch.setattr(settings, "smtp_password", "")
+
+    approve_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/approve",
+        json={
+            "batch_code": "BATCH-NOSMTP-2026",
+            "batch_name": "No SMTP Batch",
+            "issued_username": "student.nosmtp",
+            "temporary_password": "Student123!",
+            "notes": "Should fail without SMTP.",
+            "send_email": True,
+        },
+        headers=teacher_headers,
+    )
+
+    assert approve_response.status_code == 503
+    assert "SMTP is not configured" in approve_response.json()["detail"]
+
+    with SessionLocal() as db:
+        student_user = db.query(User).filter(User.email == "student.nosmtp@example.com").first()
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
+        assert student_user is None
+        assert enrollment is not None
+        assert enrollment.status == "pending"
+
+
+def test_teacher_approval_rolls_back_when_email_delivery_fails(
+    client, teacher_headers_factory, monkeypatch
+):
+    registration = _submit_registration(
+        client,
+        email="student.failmail@example.com",
+        reference_number="REF-1006",
+    )
+    teacher_headers = teacher_headers_factory("teacher.failmail")
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_from_email", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "gmail-app-password")
+
+    def failing_send_student_initial_credentials_email(**_kwargs):
+        raise RuntimeError("SMTP failed")
+
+    monkeypatch.setattr(
+        enrollment_service,
+        "send_student_initial_credentials_email",
+        failing_send_student_initial_credentials_email,
+    )
+
+    approve_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/approve",
+        json={
+            "batch_code": "BATCH-FAIL-2026",
+            "batch_name": "Fail Batch",
+            "issued_username": "student.failmail",
+            "temporary_password": "Student123!",
+            "notes": "Should fail when delivery fails.",
+            "send_email": True,
+        },
+        headers=teacher_headers,
+    )
+
+    assert approve_response.status_code == 503
+    assert approve_response.json()["detail"] == "Approval not completed because the credential email could not be sent."
+
+    with SessionLocal() as db:
+        student_user = db.query(User).filter(User.email == "student.failmail@example.com").first()
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
+        assert student_user is None
+        assert enrollment is not None
+        assert enrollment.status == "pending"

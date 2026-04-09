@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import re
 
@@ -14,6 +15,16 @@ from app.services.email_sender import send_student_initial_credentials_email
 from app.services.teacher_invites import generate_temporary_password
 
 BATCH_CODE_PATTERN = re.compile(r"[^A-Z0-9-]+")
+
+
+@dataclass
+class EnrollmentApprovalResult:
+    enrollment: Enrollment
+    issued_username: str
+    temporary_password: str
+    delivery_status: str
+    delivery_message: str
+    recipient_email: str
 
 
 def teacher_display_name(user: User) -> str:
@@ -102,7 +113,7 @@ def approve_enrollment(
     temporary_password: str | None = None,
     notes: str | None = None,
     send_email: bool = True,
-) -> tuple[Enrollment, str, bool]:
+) -> EnrollmentApprovalResult:
     registration = enrollment.registration
     if registration is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is missing registration data.")
@@ -131,6 +142,34 @@ def approve_enrollment(
         )
 
     raw_password = temporary_password or generate_temporary_password()
+
+    if send_email:
+        if not settings.smtp_host or not settings.smtp_from_email or not settings.smtp_username or not settings.smtp_password:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Approval not completed because SMTP is not configured. "
+                    "Set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, and SMTP_FROM_EMAIL in backend/.env."
+                ),
+            )
+        try:
+            send_student_initial_credentials_email(
+                to_email=normalized_email,
+                username=resolved_username,
+                temporary_password=raw_password,
+                batch_name=batch.name,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Approval not completed because the credential email could not be sent.",
+            ) from exc
+        delivery_status = "sent"
+        delivery_message = f"Initial credentials emailed to {normalized_email}."
+    else:
+        delivery_status = "skipped"
+        delivery_message = "Credential email skipped. Share the one-time credentials manually."
+
     student_user = User(
         username=resolved_username,
         password_hash=hash_password(raw_password),
@@ -146,16 +185,6 @@ def approve_enrollment(
     )
     db.add(student_user)
     db.flush()
-
-    email_sent = False
-    if send_email and settings.smtp_host and settings.smtp_from_email:
-        send_student_initial_credentials_email(
-            to_email=normalized_email,
-            username=resolved_username,
-            temporary_password=raw_password,
-            batch_name=batch.name,
-        )
-        email_sent = True
 
     now = datetime.now(timezone.utc)
     enrollment.user_id = student_user.id
@@ -178,7 +207,14 @@ def approve_enrollment(
     registration.notes = notes.strip() if notes else None
     db.add(registration)
 
-    return enrollment, raw_password, email_sent
+    return EnrollmentApprovalResult(
+        enrollment=enrollment,
+        issued_username=resolved_username,
+        temporary_password=raw_password,
+        delivery_status=delivery_status,
+        delivery_message=delivery_message,
+        recipient_email=normalized_email,
+    )
 
 
 def reject_enrollment(

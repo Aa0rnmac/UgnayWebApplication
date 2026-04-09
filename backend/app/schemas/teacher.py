@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -73,6 +74,15 @@ class TeacherEnrollmentOut(BaseModel):
     registration: RegistrationOut
     batch: TeacherBatchOut | None = None
     student: TeacherUserSummary | None = None
+
+
+class TeacherEnrollmentApprovalResultOut(BaseModel):
+    enrollment: TeacherEnrollmentOut
+    issued_username: str
+    temporary_password: str
+    delivery_status: Literal["sent", "skipped"]
+    delivery_message: str
+    recipient_email: str
 
 
 class TeacherEnrollmentApproveRequest(BaseModel):

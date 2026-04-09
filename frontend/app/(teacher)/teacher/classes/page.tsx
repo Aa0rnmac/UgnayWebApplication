@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   TeacherBatch,
   TeacherEnrollment,
+  TeacherEnrollmentApprovalResult,
   TeacherUserSummary,
   approveTeacherEnrollment,
   createTeacherBatch,
@@ -63,6 +64,7 @@ export default function TeacherClassesPage() {
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [approvalResult, setApprovalResult] = useState<TeacherEnrollmentApprovalResult | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -113,6 +115,7 @@ export default function TeacherClassesPage() {
     setCreatingBatch(true);
     setError(null);
     setMessage(null);
+    setApprovalResult(null);
     try {
       await createTeacherBatch({
         code: batchForm.code.trim(),
@@ -139,15 +142,18 @@ export default function TeacherClassesPage() {
     setBusyId(enrollmentId);
     setError(null);
     setMessage(null);
+    setApprovalResult(null);
     try {
-      await approveTeacherEnrollment(enrollmentId, {
+      const approval = await approveTeacherEnrollment(enrollmentId, {
         batch_id: Number(draft.batchId),
         notes: draft.notes.trim() || null,
         send_email: draft.sendEmail,
       });
-      setMessage("Enrollment approved.");
+      setApprovalResult(approval);
+      setMessage(approval.delivery_message);
       await loadData();
     } catch (requestError) {
+      setApprovalResult(null);
       setError(requestError instanceof Error ? requestError.message : "Unable to approve enrollment.");
     } finally {
       setBusyId(null);
@@ -163,6 +169,7 @@ export default function TeacherClassesPage() {
     setBusyId(enrollmentId);
     setError(null);
     setMessage(null);
+    setApprovalResult(null);
     try {
       await rejectTeacherEnrollment(enrollmentId, { notes: draft.notes.trim() });
       setMessage("Enrollment rejected.");
@@ -255,6 +262,39 @@ export default function TeacherClassesPage() {
       {message ? (
         <div className="rounded-2xl border border-brandGreen/30 bg-brandGreenLight px-4 py-3 text-sm font-semibold text-slate-800">
           {message}
+        </div>
+      ) : null}
+
+      {approvalResult ? (
+        <div
+          className={`rounded-2xl border px-4 py-4 text-sm ${
+            approvalResult.delivery_status === "sent"
+              ? "border-brandGreen/30 bg-brandGreenLight text-slate-900"
+              : "border-accent/30 bg-brandYellowLight text-slate-900"
+          }`}
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.25em]">
+            Student Credentials
+          </p>
+          <p className="mt-3">
+            Recipient Email: <span className="font-semibold">{approvalResult.recipient_email}</span>
+          </p>
+          <p className="mt-2">
+            Delivery Status: <span className="font-semibold uppercase">{approvalResult.delivery_status}</span>
+          </p>
+          <p className="mt-2">
+            Username: <span className="font-semibold">{approvalResult.issued_username}</span>
+          </p>
+          {approvalResult.delivery_status !== "sent" ? (
+            <p className="mt-2">
+              Temporary Password: <span className="font-semibold">{approvalResult.temporary_password}</span>
+            </p>
+          ) : null}
+          <p className="mt-3 text-xs text-slate-700">
+            {approvalResult.delivery_status === "sent"
+              ? "Credentials were emailed successfully. The temporary password is hidden here to avoid unnecessary exposure."
+              : "Share this only with the student if needed. The password is shown here once and should be changed after first login."}
+          </p>
         </div>
       ) : null}
 
@@ -360,7 +400,7 @@ export default function TeacherClassesPage() {
                   </div>
                   <label className="teacher-card-copy mt-3 flex items-center gap-2 text-sm">
                     <input checked={draft.sendEmail} onChange={(event) => updateDraft(enrollment.id, "sendEmail", event.target.checked)} type="checkbox" />
-                    Send initial credentials by email when available
+                    Send initial credentials by email now
                   </label>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button className="teacher-card-ghost-button rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:opacity-60" disabled={proofId === enrollment.id} onClick={() => void handleViewProof(enrollment.id)} type="button">
@@ -408,7 +448,7 @@ export default function TeacherClassesPage() {
 
       {error ? (
         <div className="panel">
-          <p className="text-sm text-red-300">Error: {error}</p>
+          <p className="text-sm text-red-700">Error: {error}</p>
         </div>
       ) : null}
     </section>

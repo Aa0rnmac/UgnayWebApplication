@@ -9,8 +9,18 @@ import {
   getModules,
   ModuleItem,
   predictSignFromImage,
-  updateModuleProgress,
+  submitActivityAttempt,
 } from "@/lib/api";
+
+type AssessmentReportItemPayload = {
+  itemKey: string;
+  prompt?: string | null;
+  expectedAnswer?: string | null;
+  studentAnswer?: string | null;
+  isCorrect?: boolean | null;
+  confidence?: number | null;
+  aiMetadata?: Record<string, unknown>;
+};
 
 type AssessmentReportPayload = {
   assessmentId: string;
@@ -20,7 +30,21 @@ type AssessmentReportPayload = {
   total: number;
   scorePercent: number;
   improvementAreas: string[];
+  items?: AssessmentReportItemPayload[];
+  source?: string;
+  notes?: string | null;
+  markModuleCompleted?: boolean;
 };
+
+type AssessmentSubmitHandler = (payload: AssessmentReportPayload) => Promise<boolean>;
+
+async function persistAssessmentResult(
+  onSubmitResult: AssessmentSubmitHandler | undefined,
+  payload: AssessmentReportPayload
+) {
+  const saved = await onSubmitResult?.(payload);
+  return saved ?? true;
+}
 
 const MODULE1_AI_SIGN_IMAGES = [
   { letter: "A", src: "/module-assets/m1/ai/a.png" },
@@ -622,7 +646,7 @@ function Module1AssessmentOne({
   onSubmitResult
 }: {
   questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+  onSubmitResult?: AssessmentSubmitHandler;
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
@@ -643,7 +667,7 @@ function Module1AssessmentOne({
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
 
-  function submitAssessmentResult() {
+  async function submitAssessmentResult() {
     if (reported) {
       return;
     }
@@ -653,7 +677,7 @@ function Module1AssessmentOne({
     const improvementAreas = questions
       .filter((question) => selectedChoices[question.id] !== question.answer)
       .map((question) => question.question);
-    onSubmitResult?.({
+    const didPersist = await persistAssessmentResult(onSubmitResult, {
       assessmentId: "m1-assessment-1",
       assessmentTitle: "Assessment 1",
       right,
@@ -661,8 +685,21 @@ function Module1AssessmentOne({
       total,
       scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
       improvementAreas,
+      source: "student_module",
+      items: questions.map((question) => {
+        const studentAnswer = selectedChoices[question.id] ?? null;
+        return {
+          itemKey: question.id,
+          prompt: question.question,
+          expectedAnswer: question.answer,
+          studentAnswer,
+          isCorrect: studentAnswer === question.answer,
+        };
+      }),
     });
-    setReported(true);
+    if (didPersist) {
+      setReported(true);
+    }
   }
 
   return (
@@ -716,7 +753,7 @@ function Module1AssessmentOne({
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
           onClick={() => {
             setShowResult(true);
-            submitAssessmentResult();
+            void submitAssessmentResult();
           }}
           type="button"
         >
@@ -739,7 +776,7 @@ function Module1AssessmentOne({
 function Module1AssessmentTwo({
   onSubmitResult
 }: {
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+  onSubmitResult?: AssessmentSubmitHandler;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
@@ -756,7 +793,7 @@ function Module1AssessmentTwo({
     return total + (value === item.answer ? 1 : 0);
   }, 0);
 
-  function submitAssessmentResult() {
+  async function submitAssessmentResult() {
     if (reported) {
       return;
     }
@@ -767,7 +804,7 @@ function Module1AssessmentTwo({
       const value = answers[item.id]?.trim().toUpperCase() ?? "";
       return value !== item.answer;
     }).map((item) => `Hand sign item ${item.answer}`);
-    onSubmitResult?.({
+    const didPersist = await persistAssessmentResult(onSubmitResult, {
       assessmentId: "m1-assessment-2",
       assessmentTitle: "Assessment 2",
       right,
@@ -775,8 +812,21 @@ function Module1AssessmentTwo({
       total,
       scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
       improvementAreas,
+      source: "student_module",
+      items: MODULE1_LABELING_ITEMS.map((item) => {
+        const studentAnswer = answers[item.id]?.trim().toUpperCase() ?? "";
+        return {
+          itemKey: item.id,
+          prompt: `Identify the hand sign for ${item.answer}`,
+          expectedAnswer: item.answer,
+          studentAnswer: studentAnswer || null,
+          isCorrect: studentAnswer === item.answer,
+        };
+      }),
     });
-    setReported(true);
+    if (didPersist) {
+      setReported(true);
+    }
   }
 
   return (
@@ -826,7 +876,7 @@ function Module1AssessmentTwo({
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
           onClick={() => {
             setShowResult(true);
-            submitAssessmentResult();
+            void submitAssessmentResult();
           }}
           type="button"
         >
@@ -845,7 +895,7 @@ function Module1AssessmentTwo({
 function Module1AssessmentThree({
   onSubmitResult
 }: {
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+  onSubmitResult?: AssessmentSubmitHandler;
 }) {
   const ALPHABET_PALM_COOLDOWN_MS = 900;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1031,7 +1081,7 @@ function Module1AssessmentThree({
     };
   }, [running, activeStep.id, lastRecognizedToken]);
 
-  function submitCurrentStep() {
+  async function submitCurrentStep() {
     const value = currentDetectedGesture();
     if (!value) {
       setError("Please wait for a recognized gesture before continuing.");
@@ -1059,7 +1109,8 @@ function Module1AssessmentThree({
       const improvementAreas = MODULE1_SIGNING_CHALLENGE_STEPS.filter(
         (step) => !(step.id === activeStep.id || completedStepIds.includes(step.id))
       ).map((step) => step.prompt);
-      onSubmitResult?.({
+      const successfulStepIds = new Set([...completedStepIds, activeStep.id]);
+      const didPersist = await persistAssessmentResult(onSubmitResult, {
         assessmentId: "m1-assessment-3",
         assessmentTitle: "Assessment 3",
         right,
@@ -1067,8 +1118,21 @@ function Module1AssessmentThree({
         total,
         scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
         improvementAreas,
+        source: "student_module_camera",
+        items: MODULE1_SIGNING_CHALLENGE_STEPS.map((step) => {
+          const studentAnswer = recognizedByStep[step.id]?.trim() ?? "";
+          return {
+            itemKey: step.id,
+            prompt: step.prompt,
+            expectedAnswer: step.prompt.replace("Sign this word/name: ", ""),
+            studentAnswer: studentAnswer || null,
+            isCorrect: successfulStepIds.has(step.id),
+          };
+        }),
       });
-      setReported(true);
+      if (didPersist) {
+        setReported(true);
+      }
     }
   }
 
@@ -1192,7 +1256,9 @@ function Module1AssessmentThree({
             </button>
             <button
               className="rounded bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-              onClick={submitCurrentStep}
+              onClick={() => {
+                void submitCurrentStep();
+              }}
               type="button"
             >
               {activeStepIndex === MODULE1_SIGNING_CHALLENGE_STEPS.length - 1 ? "Submit" : "Next"}
@@ -1232,7 +1298,7 @@ function Module2AssessmentOne({
   moduleLabel: string;
   assessmentId: string;
   assessmentTitle?: string;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+  onSubmitResult?: AssessmentSubmitHandler;
 }) {
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
   const [showResult, setShowResult] = useState(false);
@@ -1253,7 +1319,7 @@ function Module2AssessmentOne({
     return total + (picked === question.answer ? 1 : 0);
   }, 0);
 
-  function submitAssessmentResult() {
+  async function submitAssessmentResult() {
     if (reported) {
       return;
     }
@@ -1263,7 +1329,7 @@ function Module2AssessmentOne({
     const improvementAreas = questions
       .filter((question) => selectedChoices[question.id] !== question.answer)
       .map((question) => question.question);
-    onSubmitResult?.({
+    const didPersist = await persistAssessmentResult(onSubmitResult, {
       assessmentId,
       assessmentTitle,
       right,
@@ -1271,8 +1337,21 @@ function Module2AssessmentOne({
       total,
       scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
       improvementAreas,
+      source: "student_module",
+      items: questions.map((question) => {
+        const studentAnswer = selectedChoices[question.id] ?? null;
+        return {
+          itemKey: question.id,
+          prompt: question.question,
+          expectedAnswer: question.answer,
+          studentAnswer,
+          isCorrect: studentAnswer === question.answer,
+        };
+      }),
     });
-    setReported(true);
+    if (didPersist) {
+      setReported(true);
+    }
   }
 
   return (
@@ -1326,7 +1405,7 @@ function Module2AssessmentOne({
           className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
           onClick={() => {
             setShowResult(true);
-            submitAssessmentResult();
+            void submitAssessmentResult();
           }}
           type="button"
         >
@@ -1359,7 +1438,7 @@ function NumbersCameraAssessment({
   intro: string;
   targets: readonly { id: string; number: number }[];
   minimumRequired?: number;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+  onSubmitResult?: AssessmentSubmitHandler;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1485,7 +1564,7 @@ function NumbersCameraAssessment({
     }
   }
 
-  function finishAssessment() {
+  async function finishAssessment() {
     if (!reachedMinimum) {
       setError(`Please complete at least ${minimumRequired} number signs before submitting.`);
       return;
@@ -1499,7 +1578,7 @@ function NumbersCameraAssessment({
       const improvementAreas = targets
         .filter((step) => !completedStepIds.includes(step.id))
         .map((step) => `Practice number ${step.number}`);
-      onSubmitResult?.({
+      const didPersist = await persistAssessmentResult(onSubmitResult, {
         assessmentId,
         assessmentTitle: title,
         right,
@@ -1507,8 +1586,21 @@ function NumbersCameraAssessment({
         total,
         scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
         improvementAreas,
+        source: "student_module_camera",
+        items: targets.map((step) => {
+          const studentAnswer = recognizedByStep[step.id]?.trim() ?? "";
+          return {
+            itemKey: step.id,
+            prompt: `Sign number ${step.number}`,
+            expectedAnswer: String(step.number),
+            studentAnswer: studentAnswer || null,
+            isCorrect: completedStepIds.includes(step.id),
+          };
+        }),
       });
-      setReported(true);
+      if (didPersist) {
+        setReported(true);
+      }
     }
   }
 
@@ -1636,7 +1728,9 @@ function NumbersCameraAssessment({
             {reachedMinimum ? (
               <button
                 className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-                onClick={finishAssessment}
+                onClick={() => {
+                  void finishAssessment();
+                }}
                 type="button"
               >
                 Finish
@@ -1682,7 +1776,7 @@ function GestureCameraAssessment({
   intro: string;
   targets: readonly { id: string; label: string }[];
   minimumRequired: number;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
+  onSubmitResult?: AssessmentSubmitHandler;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1806,7 +1900,7 @@ function GestureCameraAssessment({
     setActiveStepIndex((index) => Math.min(targets.length - 1, index + 1));
   }
 
-  function finishAssessment() {
+  async function finishAssessment() {
     if (!reachedMinimum) {
       setError(`Please complete at least ${minimumRequired} gestures before submitting.`);
       return;
@@ -1820,7 +1914,7 @@ function GestureCameraAssessment({
       const improvementAreas = targets
         .filter((step) => !completedStepIds.includes(step.id))
         .map((step) => `Practice gesture: ${step.label}`);
-      onSubmitResult?.({
+      const didPersist = await persistAssessmentResult(onSubmitResult, {
         assessmentId,
         assessmentTitle: title,
         right,
@@ -1828,8 +1922,21 @@ function GestureCameraAssessment({
         total,
         scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
         improvementAreas,
+        source: "student_module_camera",
+        items: targets.map((step) => {
+          const studentAnswer = recognizedByStep[step.id]?.trim() ?? "";
+          return {
+            itemKey: step.id,
+            prompt: `Sign gesture: ${step.label}`,
+            expectedAnswer: step.label,
+            studentAnswer: studentAnswer || null,
+            isCorrect: completedStepIds.includes(step.id),
+          };
+        }),
       });
-      setReported(true);
+      if (didPersist) {
+        setReported(true);
+      }
     }
   }
 
@@ -1952,7 +2059,9 @@ function GestureCameraAssessment({
             {reachedMinimum ? (
               <button
                 className="rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90"
-                onClick={finishAssessment}
+                onClick={() => {
+                  void finishAssessment();
+                }}
                 type="button"
               >
                 Finish / Submit
@@ -1995,19 +2104,28 @@ function GestureCameraAssessment({
   );
 }
 
-function Module3AssessmentTwo() {
+function Module3AssessmentTwo({
+  onSubmitResult,
+}: {
+  onSubmitResult?: AssessmentSubmitHandler;
+}) {
   return (
     <GestureCameraAssessment
       assessmentId="m3-assessment-2"
       intro="Use the camera interface and sign at least 7 gestures from this module."
       minimumRequired={7}
+      onSubmitResult={onSubmitResult}
       targets={MODULE3_GESTURE_TARGETS}
       title="Assessment 2"
     />
   );
 }
 
-function Module7ColorAssessmentTwo() {
+function Module7ColorAssessmentTwo({
+  onSubmitResult,
+}: {
+  onSubmitResult?: AssessmentSubmitHandler;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const predictionInFlightRef = useRef(false);
@@ -2020,6 +2138,7 @@ function Module7ColorAssessmentTwo() {
   const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
   const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
+  const [reported, setReported] = useState(false);
 
   const activeColor = MODULE7_COLOR_SIGN_TARGETS[activeStepIndex];
   const allDone = completedStepIds.length >= MODULE7_COLOR_SIGN_TARGETS.length;
@@ -2112,7 +2231,7 @@ function Module7ColorAssessmentTwo() {
     setHiddenPrediction("No prediction yet.");
   }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeColor.id]);
 
-  function submitCurrentStep() {
+  async function submitCurrentStep() {
     const value = currentDetectedGesture;
     if (!value) {
       setError("Please wait for a recognized gesture before continuing.");
@@ -2128,6 +2247,40 @@ function Module7ColorAssessmentTwo() {
       setActiveStepIndex((index) =>
         Math.min(MODULE7_COLOR_SIGN_TARGETS.length - 1, index + 1)
       );
+      return;
+    }
+
+    if (!reported) {
+      const successfulStepIds = new Set([...completedStepIds, activeColor.id]);
+      const total = MODULE7_COLOR_SIGN_TARGETS.length;
+      const right = successfulStepIds.size;
+      const wrong = Math.max(0, total - right);
+      const improvementAreas = MODULE7_COLOR_SIGN_TARGETS
+        .filter((step) => !successfulStepIds.has(step.id))
+        .map((step) => `Practice color sign: ${step.label}`);
+      const didPersist = await persistAssessmentResult(onSubmitResult, {
+        assessmentId: "m7-assessment-2",
+        assessmentTitle: "Assessment 2",
+        right,
+        wrong,
+        total,
+        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
+        improvementAreas,
+        source: "student_module_camera",
+        items: MODULE7_COLOR_SIGN_TARGETS.map((step) => {
+          const studentAnswer = recognizedByStep[step.id]?.trim() ?? "";
+          return {
+            itemKey: step.id,
+            prompt: `Sign displayed color: ${step.label}`,
+            expectedAnswer: step.label,
+            studentAnswer: studentAnswer || null,
+            isCorrect: successfulStepIds.has(step.id),
+          };
+        }),
+      });
+      if (didPersist) {
+        setReported(true);
+      }
     }
   }
 
@@ -2250,7 +2403,9 @@ function Module7ColorAssessmentTwo() {
             </button>
             <button
               className="rounded bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-              onClick={submitCurrentStep}
+              onClick={() => {
+                void submitCurrentStep();
+              }}
               type="button"
             >
               {activeStepIndex === MODULE7_COLOR_SIGN_TARGETS.length - 1 ? "Submit" : "Next"}
@@ -2290,6 +2445,10 @@ export default function ModuleDetailPage() {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null);
   const [isSelectionCollapsed, setIsSelectionCollapsed] = useState(false);
+  const [assessmentSaveState, setAssessmentSaveState] = useState<{
+    status: "idle" | "saving" | "saved" | "error";
+    message: string | null;
+  }>({ status: "idle", message: null });
 
   useEffect(() => {
     setError(null);
@@ -2320,7 +2479,11 @@ export default function ModuleDetailPage() {
     setActiveTab("module");
     setSelectedLessonId(selected.lessons[0]?.id ?? null);
     setSelectedAssessmentId(selected.assessments[0]?.id ?? null);
-  }, [selected]);
+  }, [selected?.id]);
+
+  useEffect(() => {
+    setAssessmentSaveState({ status: "idle", message: null });
+  }, [moduleId, selectedAssessmentId]);
 
   const selectedLesson = useMemo(
     () => selected?.lessons.find((lesson) => lesson.id === selectedLessonId) ?? null,
@@ -2388,6 +2551,62 @@ export default function ModuleDetailPage() {
     }
     return selected.assessments.slice(0, 5);
   }, [isModule8, selected]);
+
+  async function handleAssessmentResult(payload: AssessmentReportPayload) {
+    if (!selected) {
+      setAssessmentSaveState({
+        status: "error",
+        message: "This module is not loaded yet. Please refresh and try again.",
+      });
+      return false;
+    }
+
+    setAssessmentSaveState({
+      status: "saving",
+      message: `Saving ${payload.assessmentTitle}...`,
+    });
+
+    try {
+      const response = await submitActivityAttempt(moduleId, payload.assessmentId, {
+        right_count: payload.right,
+        wrong_count: payload.wrong,
+        total_items: payload.total,
+        score_percent: payload.scorePercent,
+        improvement_areas: payload.improvementAreas,
+        source: payload.source ?? "student_module",
+        notes: payload.notes ?? null,
+        items: (payload.items ?? []).map((item) => ({
+          item_key: item.itemKey,
+          prompt: item.prompt ?? null,
+          expected_answer: item.expectedAnswer ?? null,
+          student_answer: item.studentAnswer ?? null,
+          is_correct: item.isCorrect ?? null,
+          confidence: item.confidence ?? null,
+          ai_metadata: item.aiMetadata ?? {},
+        })),
+        completed_lesson_id: selectedLessonId ?? null,
+        mark_module_completed: payload.markModuleCompleted ?? false,
+      });
+
+      setModules((previous) =>
+        previous.map((module) => (module.id === moduleId ? response.progress : module))
+      );
+      setAssessmentSaveState({
+        status: "saved",
+        message: `${response.activity_title} saved. Teachers can now see this score and progress.`,
+      });
+      return true;
+    } catch (requestError) {
+      setAssessmentSaveState({
+        status: "error",
+        message:
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to save the assessment result.",
+      });
+      return false;
+    }
+  }
 
   function openModuleTab() {
     setActiveTab("module");
@@ -2676,6 +2895,19 @@ export default function ModuleDetailPage() {
             ) : null}
 
             <div className="rounded-xl border border-brandBorder bg-white p-4">
+              {activeTab === "assessment" && assessmentSaveState.message ? (
+                <div
+                  className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+                    assessmentSaveState.status === "error"
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : assessmentSaveState.status === "saved"
+                        ? "border-brandGreen/30 bg-brandGreenLight text-slate-800"
+                        : "border-brandBlue/20 bg-brandBlueLight text-slate-800"
+                  }`}
+                >
+                  {assessmentSaveState.message}
+                </div>
+              ) : null}
               {activeTab === "module" ? (
                 <>
                   <p className="text-sm font-extrabold uppercase tracking-wide text-slate-900">{selected.title}</p>
@@ -2772,14 +3004,18 @@ export default function ModuleDetailPage() {
                   </ul>
                 </div>
               ) : isModule1 && selectedAssessmentId === "m1-assessment-1" ? (
-                <Module1AssessmentOne questions={module1AssessmentQuestions} />
+                <Module1AssessmentOne
+                  onSubmitResult={handleAssessmentResult}
+                  questions={module1AssessmentQuestions}
+                />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-2" ? (
-                <Module1AssessmentTwo />
+                <Module1AssessmentTwo onSubmitResult={handleAssessmentResult} />
               ) : isModule1 && selectedAssessmentId === "m1-assessment-3" ? (
-                <Module1AssessmentThree />
+                <Module1AssessmentThree onSubmitResult={handleAssessmentResult} />
               ) : isModule2 && selectedAssessmentId === "m2-assessment-1" ? (
                 <Module2AssessmentOne
                   assessmentId="m2-assessment-1"
+                  onSubmitResult={handleAssessmentResult}
                   moduleLabel="Numbers"
                   questions={module2AssessmentQuestions}
                 />
@@ -2787,6 +3023,7 @@ export default function ModuleDetailPage() {
                 <NumbersCameraAssessment
                   assessmentId="m2-assessment-2"
                   intro="Use the camera interface and sign each number from 1 to 10."
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_1_TO_10_STEPS}
                   title="Assessment 2"
                 />
@@ -2795,6 +3032,7 @@ export default function ModuleDetailPage() {
                   assessmentId="m2-assessment-3"
                   intro="Use the camera interface and sign numbers from 11 to 20. Complete at least 5."
                   minimumRequired={5}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_11_TO_20_STEPS}
                   title="Assessment 3"
                 />
@@ -2803,6 +3041,7 @@ export default function ModuleDetailPage() {
                   assessmentId="m2-assessment-4"
                   intro="Use the camera interface and sign numbers from 31 to 40. Complete at least 5."
                   minimumRequired={5}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_31_TO_40_STEPS}
                   title="Assessment 4"
                 />
@@ -2811,20 +3050,23 @@ export default function ModuleDetailPage() {
                   assessmentId="m2-assessment-5"
                   intro="Use the camera interface and sign numbers from 91 to 100. Complete at least 5."
                   minimumRequired={5}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE2_SIGN_91_TO_100_STEPS}
                   title="Assessment 5"
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-1" ? (
                 <Module2AssessmentOne
                   assessmentId="m3-assessment-1"
+                  onSubmitResult={handleAssessmentResult}
                   moduleLabel="Greetings & Basic Expressions"
                   questions={module3AssessmentQuestions}
                 />
               ) : isModule3 && selectedAssessmentId === "m3-assessment-2" ? (
-                <Module3AssessmentTwo />
+                <Module3AssessmentTwo onSubmitResult={handleAssessmentResult} />
               ) : isModule4 && selectedAssessmentId === "m4-assessment-1" ? (
                 <Module2AssessmentOne
                   assessmentId="m4-assessment-1"
+                  onSubmitResult={handleAssessmentResult}
                   moduleLabel="Family Members"
                   questions={module4AssessmentQuestions}
                 />
@@ -2833,12 +3075,14 @@ export default function ModuleDetailPage() {
                   assessmentId="m4-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE4_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule5 && selectedAssessmentId === "m5-assessment-1" ? (
                 <Module2AssessmentOne
                   assessmentId="m5-assessment-1"
+                  onSubmitResult={handleAssessmentResult}
                   moduleLabel="People Description"
                   questions={module5AssessmentQuestions}
                 />
@@ -2847,12 +3091,14 @@ export default function ModuleDetailPage() {
                   assessmentId="m5-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE5_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule6 && selectedAssessmentId === "m6-assessment-1" ? (
                 <Module2AssessmentOne
                   assessmentId="m6-assessment-1"
+                  onSubmitResult={handleAssessmentResult}
                   moduleLabel="Days"
                   questions={module6AssessmentQuestions}
                 />
@@ -2861,28 +3107,32 @@ export default function ModuleDetailPage() {
                   assessmentId="m6-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE6_GESTURE_TARGETS}
                   title="Assessment 2"
                 />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-1" ? (
                 <Module2AssessmentOne
                   assessmentId="m7-assessment-1"
+                  onSubmitResult={handleAssessmentResult}
                   moduleLabel="Colors & Descriptions"
                   questions={module7AssessmentQuestions}
                 />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-2" ? (
-                <Module7ColorAssessmentTwo />
+                <Module7ColorAssessmentTwo onSubmitResult={handleAssessmentResult} />
               ) : isModule7 && selectedAssessmentId === "m7-assessment-3" ? (
                 <GestureCameraAssessment
                   assessmentId="m7-assessment-3"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE7_GESTURE_TARGETS}
                   title="Assessment 3"
                 />
               ) : isModule8 && selectedAssessmentId === "m8-assessment-1" ? (
                 <Module2AssessmentOne
                   assessmentId="m8-assessment-1"
+                  onSubmitResult={handleAssessmentResult}
                   moduleLabel="Basic Conversations"
                   questions={module8AssessmentQuestions}
                 />
@@ -2891,6 +3141,7 @@ export default function ModuleDetailPage() {
                   assessmentId="m8-assessment-2"
                   intro="Use the camera interface and sign at least 7 gestures from this module."
                   minimumRequired={7}
+                  onSubmitResult={handleAssessmentResult}
                   targets={MODULE8_GESTURE_TARGETS}
                   title="Assessment 2"
                 />

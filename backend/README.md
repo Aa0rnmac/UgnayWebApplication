@@ -17,9 +17,18 @@
    - `DATASETS_ROOT=datasets` (default, resolved from project root)
    - `ARTIFACTS_ROOT=artifacts` (default, resolved from `backend/`)
    - You can also use an absolute path, for example `DATASETS_ROOT=C:\Users\Marissa\Datasets\FSL`.
-5. Configure SMTP for forgot-password OTP email:
+5. Configure SMTP for forgot-password OTP and student approval credential email:
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
    - TLS/SSL flags: `SMTP_USE_TLS`, `SMTP_USE_SSL`
+   - Gmail starter setup:
+     - `SMTP_HOST=smtp.gmail.com`
+     - `SMTP_PORT=587`
+     - `SMTP_USE_TLS=true`
+     - `SMTP_USE_SSL=false`
+     - `SMTP_USERNAME=<your Gmail address>`
+     - `SMTP_PASSWORD=<Google App Password>`
+     - `SMTP_FROM_EMAIL=<same Gmail address or verified alias>`
+   - Gmail requires 2-Step Verification and an App Password before SMTP login will work.
 6. Configure teacher invite signing:
    - `TEACHER_INVITE_SIGNING_SECRET` (required for QR verification and onboarding tokens)
    - `TEACHER_INVITE_DEFAULT_EXPIRY_DAYS`

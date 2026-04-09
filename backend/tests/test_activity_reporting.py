@@ -43,7 +43,7 @@ def _register_and_approve_student(
         headers=teacher_headers,
     )
     assert approve_response.status_code == 200
-    return approve_response.json()
+    return approve_response.json()["enrollment"]
 
 
 def test_activity_attempts_feed_teacher_review_and_summary(

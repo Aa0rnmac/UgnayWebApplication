@@ -157,7 +157,7 @@ export default function TeacherStudentDetailPage() {
                   <div key={item.module_id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="teacher-card-title text-sm font-black">{item.module_title}</p>
-                      <span className="rounded-full border border-white/15 bg-black/25 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-200">
+                      <span className="rounded-full border border-white/15 bg-black/25 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-900">
                         {item.status}
                       </span>
                     </div>
@@ -232,7 +232,7 @@ export default function TeacherStudentDetailPage() {
                           <p className="teacher-card-title text-sm font-semibold">
                             {item.prompt ?? item.item_key}
                           </p>
-                          <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-200">
+                          <span className="rounded-full border border-white/15 bg-black/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-900">
                             {item.is_correct === true
                               ? "Correct"
                               : item.is_correct === false
@@ -265,7 +265,7 @@ export default function TeacherStudentDetailPage() {
 
       {error ? (
         <div className="panel">
-          <p className="text-sm text-red-300">Error: {error}</p>
+          <p className="text-sm text-red-700">Error: {error}</p>
         </div>
       ) : null}
     </section>

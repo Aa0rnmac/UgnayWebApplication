@@ -90,11 +90,11 @@ export function TeacherHome() {
             <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
               Teacher Workspace
             </p>
-            <h2 className="mt-3 text-4xl font-black tracking-tight text-brandWhite">
+            <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
               Run enrollment, monitor learning signals, and coach practice from one teacher
               workspace.
             </h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted">
+            <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
               The teacher surface is now backed by the real enrollment, batch, reporting, and lab
               contracts. This home view is your live operations cockpit, not a mock planning board.
             </p>
@@ -131,7 +131,7 @@ export function TeacherHome() {
         </div>
       ) : (
         <div className="panel">
-          <p className="text-sm text-slate-300">Loading teacher workspace snapshot...</p>
+          <p className="teacher-panel-copy text-sm">Loading teacher workspace snapshot...</p>
         </div>
       )}
 
@@ -141,7 +141,7 @@ export function TeacherHome() {
             Recommended Next Move
           </p>
           <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-            <p className="text-sm leading-relaxed text-slate-200">
+            <p className="teacher-card-copy text-sm leading-relaxed">
               {snapshot?.nextStep ??
                 "Teacher operations are loading. This card will suggest the highest-impact follow-up next."}
             </p>
@@ -149,14 +149,14 @@ export function TeacherHome() {
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-muted">Tracked Students</p>
-              <p className="mt-2 text-3xl font-black text-brandWhite">
+              <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">Tracked Students</p>
+              <p className="teacher-card-title mt-2 text-3xl font-black">
                 {snapshot?.trackedStudents ?? 0}
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-muted">Saved Attempts</p>
-              <p className="mt-2 text-3xl font-black text-brandWhite">
+              <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">Saved Attempts</p>
+              <p className="teacher-card-title mt-2 text-3xl font-black">
                 {snapshot?.totalAttempts ?? 0}
               </p>
             </div>
@@ -170,10 +170,10 @@ export function TeacherHome() {
           <div className="mt-4 space-y-3">
             {WORKFLOW_STEPS.map((step, index) => (
               <div key={step.label} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <p className="text-sm font-black text-brandWhite">
+                <p className="teacher-card-title text-sm font-black">
                   0{index + 1}. {step.label}
                 </p>
-                <p className="mt-2 text-xs leading-relaxed text-slate-300">{step.detail}</p>
+                <p className="teacher-card-copy mt-2 text-xs leading-relaxed">{step.detail}</p>
               </div>
             ))}
           </div>
@@ -182,7 +182,7 @@ export function TeacherHome() {
 
       {error ? (
         <div className="panel">
-          <p className="text-sm text-red-300">Error: {error}</p>
+          <p className="text-sm text-red-700">Error: {error}</p>
         </div>
       ) : null}
     </section>

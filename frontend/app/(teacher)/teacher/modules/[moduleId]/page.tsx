@@ -234,7 +234,7 @@ export default function TeacherModuleDetailPage() {
 
       {error ? (
         <div className="panel">
-          <p className="text-sm text-red-300">Error: {error}</p>
+          <p className="text-sm text-red-700">Error: {error}</p>
         </div>
       ) : null}
     </section>
