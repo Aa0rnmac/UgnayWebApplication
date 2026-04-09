@@ -98,17 +98,130 @@ def test_teacher_can_reject_pending_enrollment(client, teacher_headers_factory):
 
     reject_response = client.post(
         f"/api/teacher/enrollments/{registration['enrollment_id']}/reject",
-        json={"notes": "Reference number did not match the submitted proof."},
+        json={
+            "internal_note": "Reference number did not match the submitted proof.",
+            "rejection_reason_code": "incorrect_information",
+            "rejection_reason_detail": None,
+        },
         headers=teacher_headers,
     )
     assert reject_response.status_code == 200
     rejected = reject_response.json()
-    assert rejected["status"] == "rejected"
-    assert rejected["payment_review_status"] == "rejected"
+    assert rejected["delivery_status"] == "skipped"
+    assert rejected["recipient_email"] == "student.reject@example.com"
+    assert rejected["enrollment"]["status"] == "rejected"
+    assert rejected["enrollment"]["payment_review_status"] == "rejected"
+    assert rejected["enrollment"]["review_notes"] == "Reference number did not match the submitted proof."
+    assert rejected["enrollment"]["rejection_reason_code"] == "incorrect_information"
+    assert rejected["enrollment"]["rejection_reason_detail"] is None
 
     with SessionLocal() as db:
         student_user = db.query(User).filter(User.email == "student.reject@example.com").first()
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
         assert student_user is None
+        assert enrollment is not None
+        assert enrollment.review_notes == "Reference number did not match the submitted proof."
+        assert enrollment.rejection_reason_code == "incorrect_information"
+
+
+def test_teacher_rejection_sends_reason_email_when_smtp_available(
+    client, teacher_headers_factory, monkeypatch
+):
+    registration = _submit_registration(
+        client,
+        email="student.rejectmail@example.com",
+        reference_number="REF-1002-MAIL",
+    )
+    teacher_headers = teacher_headers_factory("teacher.rejectmail")
+    sent_payload: dict[str, str] = {}
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_from_email", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "gmail-app-password")
+
+    def fake_send_student_rejection_email(**kwargs):
+        sent_payload.update(kwargs)
+
+    monkeypatch.setattr(
+        "app.api.routes.teacher_enrollment.send_student_rejection_email",
+        fake_send_student_rejection_email,
+    )
+
+    reject_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/reject",
+        json={
+            "internal_note": "Payment proof needs teacher follow-up.",
+            "rejection_reason_code": "incorrect_amount_paid",
+            "rejection_reason_detail": None,
+        },
+        headers=teacher_headers,
+    )
+
+    assert reject_response.status_code == 200
+    rejected = reject_response.json()
+    assert rejected["delivery_status"] == "sent"
+    assert rejected["recipient_email"] == "student.rejectmail@example.com"
+    assert rejected["enrollment"]["status"] == "rejected"
+    assert rejected["enrollment"]["review_notes"] == "Payment proof needs teacher follow-up."
+    assert rejected["enrollment"]["rejection_reason_code"] == "incorrect_amount_paid"
+    assert sent_payload["to_email"] == "student.rejectmail@example.com"
+    assert "amount paid did not match the required payment amount" in sent_payload["rejection_reason"]
+    assert sent_payload["student_name"] == "Juan S Dela Cruz"
+
+
+def test_teacher_rejection_keeps_saved_status_when_email_delivery_fails(
+    client, teacher_headers_factory, monkeypatch
+):
+    registration = _submit_registration(
+        client,
+        email="student.rejectfail@example.com",
+        reference_number="REF-1002-FAIL",
+    )
+    teacher_headers = teacher_headers_factory("teacher.rejectfail")
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_from_email", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "teacher@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "gmail-app-password")
+
+    def failing_send_student_rejection_email(**_kwargs):
+        raise RuntimeError("SMTP failed")
+
+    monkeypatch.setattr(
+        "app.api.routes.teacher_enrollment.send_student_rejection_email",
+        failing_send_student_rejection_email,
+    )
+
+    reject_response = client.post(
+        f"/api/teacher/enrollments/{registration['enrollment_id']}/reject",
+        json={
+            "internal_note": "Teacher needs corrected registration details.",
+            "rejection_reason_code": "incorrect_information",
+            "rejection_reason_detail": "The submitted payment details were incomplete.",
+        },
+        headers=teacher_headers,
+    )
+
+    assert reject_response.status_code == 200
+    rejected = reject_response.json()
+    assert rejected["delivery_status"] == "failed"
+    assert rejected["recipient_email"] == "student.rejectfail@example.com"
+    assert rejected["enrollment"]["status"] == "rejected"
+    assert rejected["enrollment"]["review_notes"] == "Teacher needs corrected registration details."
+    assert rejected["enrollment"]["rejection_reason_code"] == "incorrect_information"
+    assert (
+        rejected["enrollment"]["rejection_reason_detail"]
+        == "The submitted payment details were incomplete."
+    )
+
+    with SessionLocal() as db:
+        enrollment = db.query(Enrollment).filter(Enrollment.id == registration["enrollment_id"]).first()
+        assert enrollment is not None
+        assert enrollment.status == "rejected"
+        assert enrollment.review_notes == "Teacher needs corrected registration details."
+        assert enrollment.rejection_reason_code == "incorrect_information"
+        assert enrollment.rejection_reason_detail == "The submitted payment details were incomplete."
 
 
 def test_registration_normalizes_phone_number(client):

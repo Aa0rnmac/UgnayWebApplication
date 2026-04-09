@@ -7,6 +7,7 @@ import {
   TeacherBatch,
   TeacherEnrollment,
   TeacherEnrollmentApprovalResult,
+  TeacherEnrollmentRejectionResult,
   TeacherUserSummary,
   approveTeacherEnrollment,
   archiveTeacherBatch,
@@ -20,9 +21,34 @@ import {
 } from "@/lib/api";
 
 type BatchForm = { code: string; name: string; capacity: string; notes: string };
-type ReviewDraft = { batchId: string; notes: string; sendEmail: boolean };
+type RejectionReasonCode = NonNullable<TeacherEnrollment["rejection_reason_code"]>;
+type ReviewDraft = {
+  batchId: string;
+  internalNote: string;
+  sendEmail: boolean;
+  rejectionReasonCode: RejectionReasonCode | "";
+  rejectionReasonDetail: string;
+  internalNoteManuallyEdited: boolean;
+};
 
 const EMPTY_BATCH: BatchForm = { code: "", name: "", capacity: "", notes: "" };
+type MessageTone = "success" | "warning";
+const REJECTION_REASON_OPTIONS: Array<{
+  value: RejectionReasonCode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "incorrect_amount_paid",
+    label: "Incorrect amount paid",
+    description: "Use when the submitted payment amount does not match the required amount.",
+  },
+  {
+    value: "incorrect_information",
+    label: "Incorrect information",
+    description: "Use when the submitted details are incorrect, incomplete, or cannot be verified.",
+  },
+];
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "Not available";
@@ -53,8 +79,19 @@ function statusLabel(status: TeacherBatch["status"]) {
   return status === "archived" ? "Archived" : "Active";
 }
 
+function rejectionReasonLabel(reasonCode: RejectionReasonCode | "" | null | undefined) {
+  return REJECTION_REASON_OPTIONS.find((option) => option.value === reasonCode)?.label ?? "No email reason selected";
+}
+
 function defaultDraft(batches: TeacherBatch[]): ReviewDraft {
-  return { batchId: batches.length === 1 ? String(batches[0].id) : "", notes: "", sendEmail: true };
+  return {
+    batchId: batches.length === 1 ? String(batches[0].id) : "",
+    internalNote: "",
+    sendEmail: true,
+    rejectionReasonCode: "",
+    rejectionReasonDetail: "",
+    internalNoteManuallyEdited: false,
+  };
 }
 
 export default function TeacherClassesPage() {
@@ -75,6 +112,7 @@ export default function TeacherClassesPage() {
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [batchActionId, setBatchActionId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageTone, setMessageTone] = useState<MessageTone>("success");
   const [error, setError] = useState<string | null>(null);
   const [approvalResult, setApprovalResult] = useState<TeacherEnrollmentApprovalResult | null>(null);
 
@@ -112,8 +150,8 @@ export default function TeacherClassesPage() {
       );
 
       setDrafts((previous) => {
-        const next: Record<number, ReviewDraft> = {};
-        const fallbackDraft = defaultDraft(nextActiveBatches);
+      const next: Record<number, ReviewDraft> = {};
+      const fallbackDraft = defaultDraft(nextActiveBatches);
 
         for (const item of nextPending) {
           const existing = previous[item.id];
@@ -155,6 +193,31 @@ export default function TeacherClassesPage() {
     }));
   }
 
+  function handleInternalNoteChange(enrollmentId: number, value: string) {
+    setDrafts((previous) => ({
+      ...previous,
+      [enrollmentId]: {
+        ...(previous[enrollmentId] ?? defaultDraft(activeBatches)),
+        internalNote: value,
+        internalNoteManuallyEdited: true,
+      },
+    }));
+  }
+
+  function handleRejectionReasonChange(enrollmentId: number, value: RejectionReasonCode) {
+    setDrafts((previous) => {
+      const current = previous[enrollmentId] ?? defaultDraft(activeBatches);
+      return {
+        ...previous,
+        [enrollmentId]: {
+          ...current,
+          rejectionReasonCode: value,
+          internalNote: current.internalNoteManuallyEdited ? current.internalNote : rejectionReasonLabel(value),
+        },
+      };
+    });
+  }
+
   async function handleCreateBatch() {
     if (!batchForm.code.trim() || !batchForm.name.trim()) {
       setError("Batch code and name are required.");
@@ -163,6 +226,7 @@ export default function TeacherClassesPage() {
     setCreatingBatch(true);
     setError(null);
     setMessage(null);
+    setMessageTone("success");
     setApprovalResult(null);
     try {
       await createTeacherBatch({
@@ -172,6 +236,7 @@ export default function TeacherClassesPage() {
         notes: batchForm.notes.trim() || null,
       });
       setBatchForm(EMPTY_BATCH);
+      setMessageTone("success");
       setMessage("Batch created successfully.");
       await loadData();
     } catch (requestError) {
@@ -190,14 +255,16 @@ export default function TeacherClassesPage() {
     setBusyId(enrollmentId);
     setError(null);
     setMessage(null);
+    setMessageTone("success");
     setApprovalResult(null);
     try {
       const approval = await approveTeacherEnrollment(enrollmentId, {
         batch_id: Number(draft.batchId),
-        notes: draft.notes.trim() || null,
+        notes: draft.internalNote.trim() || null,
         send_email: draft.sendEmail,
       });
       setApprovalResult(approval);
+      setMessageTone(approval.delivery_status === "sent" ? "success" : "warning");
       setMessage(approval.delivery_message);
       await loadData();
     } catch (requestError) {
@@ -210,17 +277,23 @@ export default function TeacherClassesPage() {
 
   async function handleReject(enrollmentId: number) {
     const draft = drafts[enrollmentId] ?? defaultDraft(activeBatches);
-    if (!draft.notes.trim()) {
-      setError("Add a teacher note before rejecting this enrollment.");
+    if (!draft.rejectionReasonCode) {
+      setError("Select an applicant email reason before rejecting this enrollment.");
       return;
     }
     setBusyId(enrollmentId);
     setError(null);
     setMessage(null);
+    setMessageTone("success");
     setApprovalResult(null);
     try {
-      await rejectTeacherEnrollment(enrollmentId, { notes: draft.notes.trim() });
-      setMessage("Enrollment rejected.");
+      const rejection: TeacherEnrollmentRejectionResult = await rejectTeacherEnrollment(enrollmentId, {
+        internal_note: draft.internalNote.trim() || null,
+        rejection_reason_code: draft.rejectionReasonCode,
+        rejection_reason_detail: draft.rejectionReasonDetail.trim() || null,
+      });
+      setMessageTone(rejection.delivery_status === "sent" ? "success" : "warning");
+      setMessage(rejection.delivery_message);
       await loadData();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to reject enrollment.");
@@ -270,13 +343,16 @@ export default function TeacherClassesPage() {
     setBatchActionId(batch.id);
     setError(null);
     setMessage(null);
+    setMessageTone("success");
     setApprovalResult(null);
     try {
       if (batch.status === "archived") {
         await restoreTeacherBatch(batch.id);
+        setMessageTone("success");
         setMessage(`${batch.name} restored to active batches.`);
       } else {
         await archiveTeacherBatch(batch.id);
+        setMessageTone("success");
         setMessage(`${batch.name} archived. Historical records remain available.`);
       }
       await loadData();
@@ -327,7 +403,13 @@ export default function TeacherClassesPage() {
       </div>
 
       {message ? (
-        <div className="rounded-2xl border border-brandGreen/30 bg-brandGreenLight px-4 py-3 text-sm font-semibold text-slate-800">
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm font-semibold text-slate-800 ${
+            messageTone === "success"
+              ? "border-brandGreen/30 bg-brandGreenLight"
+              : "border-accent/30 bg-brandYellowLight"
+          }`}
+        >
           {message}
         </div>
       ) : null}
@@ -615,9 +697,44 @@ export default function TeacherClassesPage() {
                       </select>
                       <textarea
                         className="teacher-card-control min-h-24"
-                        placeholder="Teacher notes for approval or rejection"
-                        value={draft.notes}
-                        onChange={(event) => updateDraft(enrollment.id, "notes", event.target.value)}
+                        placeholder="Internal teacher note for approval or rejection (not emailed)"
+                        value={draft.internalNote}
+                        onChange={(event) => handleInternalNoteChange(enrollment.id, event.target.value)}
+                      />
+                    </div>
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.28em] text-brandRed">
+                        Rejection Email Reason
+                      </p>
+                      <div className="mt-3 grid gap-2">
+                        {REJECTION_REASON_OPTIONS.map((option) => (
+                          <label
+                            key={option.value}
+                            className="flex gap-3 rounded-xl border border-black/10 bg-black/5 px-3 py-3 text-sm"
+                          >
+                            <input
+                              checked={draft.rejectionReasonCode === option.value}
+                              name={`rejection-reason-${enrollment.id}`}
+                              onChange={() => handleRejectionReasonChange(enrollment.id, option.value)}
+                              type="radio"
+                              value={option.value}
+                            />
+                            <span>
+                              <span className="block font-semibold text-slate-900">{option.label}</span>
+                              <span className="teacher-card-meta mt-1 block text-xs">
+                                {option.description}
+                              </span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <textarea
+                        className="teacher-card-control mt-3 min-h-20"
+                        placeholder="Optional applicant-facing details to include in the rejection email"
+                        value={draft.rejectionReasonDetail}
+                        onChange={(event) =>
+                          updateDraft(enrollment.id, "rejectionReasonDetail", event.target.value)
+                        }
                       />
                     </div>
                     <label className="teacher-card-copy mt-3 flex items-center gap-2 text-sm">
@@ -649,7 +766,7 @@ export default function TeacherClassesPage() {
                       </button>
                       <button
                         className="rounded-xl bg-brandRed px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandRed/90 disabled:opacity-60"
-                        disabled={busy}
+                        disabled={busy || !draft.rejectionReasonCode}
                         onClick={() => void handleReject(enrollment.id)}
                         type="button"
                       >
@@ -723,8 +840,18 @@ export default function TeacherClassesPage() {
                     Rejected {formatDateTime(enrollment.rejected_at)}
                   </p>
                   <p className="teacher-card-copy mt-3 text-sm">
-                    {enrollment.review_notes?.trim() || "No rejection note was saved."}
+                    <span className="font-semibold">Internal note:</span>{" "}
+                    {enrollment.review_notes?.trim() || "No internal note was saved."}
                   </p>
+                  <p className="teacher-card-copy mt-2 text-sm">
+                    <span className="font-semibold">Email reason:</span>{" "}
+                    {rejectionReasonLabel(enrollment.rejection_reason_code)}
+                  </p>
+                  {enrollment.rejection_reason_detail?.trim() ? (
+                    <p className="teacher-card-meta mt-2 text-xs">
+                      Applicant details: {enrollment.rejection_reason_detail.trim()}
+                    </p>
+                  ) : null}
                 </article>
               ))
             ) : (

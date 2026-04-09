@@ -315,6 +315,8 @@ export type TeacherEnrollment = {
   status: string;
   payment_review_status: string;
   review_notes: string | null;
+  rejection_reason_code: "incorrect_amount_paid" | "incorrect_information" | null;
+  rejection_reason_detail: string | null;
   reviewed_at: string | null;
   approved_at: string | null;
   rejected_at: string | null;
@@ -334,6 +336,13 @@ export type TeacherEnrollmentApprovalResult = {
   recipient_email: string;
 };
 
+export type TeacherEnrollmentRejectionResult = {
+  enrollment: TeacherEnrollment;
+  delivery_status: "sent" | "skipped" | "failed";
+  delivery_message: string;
+  recipient_email: string;
+};
+
 export type TeacherEnrollmentApprovePayload = {
   batch_id?: number | null;
   batch_code?: string | null;
@@ -345,7 +354,9 @@ export type TeacherEnrollmentApprovePayload = {
 };
 
 export type TeacherEnrollmentRejectPayload = {
-  notes: string;
+  internal_note: string | null;
+  rejection_reason_code: "incorrect_amount_paid" | "incorrect_information";
+  rejection_reason_detail?: string | null;
 };
 
 export type TeacherBatchCreatePayload = {
@@ -451,6 +462,8 @@ export type TeacherBatchBreakdownRow = {
   student_id: number;
   student_name: string;
   average_score_percent: number;
+  attempt_count: number;
+  latest_attempt_at: string;
   highest_correct_module: TeacherBreakdownModuleMetric | null;
   highest_incorrect_module: TeacherBreakdownModuleMetric | null;
 };
@@ -459,6 +472,7 @@ export type TeacherModuleBreakdownRow = {
   batch_id: number | null;
   batch_name: string;
   average_score_percent: number;
+  attempt_count: number;
   correct_answers: number;
   incorrect_answers: number;
 };
@@ -477,9 +491,29 @@ export type TeacherModuleBreakdown = {
   rows: TeacherModuleBreakdownRow[];
 };
 
+export type TeacherBatchModuleBreakdownRow = {
+  student_id: number;
+  student_name: string;
+  average_score_percent: number;
+  attempt_count: number;
+  correct_answers: number;
+  incorrect_answers: number;
+  latest_attempt_at: string;
+};
+
+export type TeacherBatchModuleBreakdown = {
+  mode: "batch_module";
+  batch_id: number;
+  batch_name: string | null;
+  module_id: number;
+  module_title: string | null;
+  rows: TeacherBatchModuleBreakdownRow[];
+};
+
 export type TeacherReportBreakdownResponse =
   | TeacherBatchBreakdown
-  | TeacherModuleBreakdown;
+  | TeacherModuleBreakdown
+  | TeacherBatchModuleBreakdown;
 
 export type ActivityAttemptItemPayload = {
   item_key: string;
@@ -1006,8 +1040,8 @@ export function rejectTeacherEnrollment(
   enrollmentId: number,
   payload: TeacherEnrollmentRejectPayload,
   token?: string
-): Promise<TeacherEnrollment> {
-  return request<TeacherEnrollment>(
+): Promise<TeacherEnrollmentRejectionResult> {
+  return request<TeacherEnrollmentRejectionResult>(
     `/teacher/enrollments/${enrollmentId}/reject`,
     {
       method: "POST",

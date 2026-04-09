@@ -162,6 +162,8 @@ class TeacherBatchBreakdownRowOut(BaseModel):
     student_id: int
     student_name: str
     average_score_percent: float
+    attempt_count: int
+    latest_attempt_at: datetime
     highest_correct_module: TeacherBreakdownModuleMetricOut | None = None
     highest_incorrect_module: TeacherBreakdownModuleMetricOut | None = None
 
@@ -170,6 +172,7 @@ class TeacherModuleBreakdownRowOut(BaseModel):
     batch_id: int | None = None
     batch_name: str
     average_score_percent: float
+    attempt_count: int
     correct_answers: int
     incorrect_answers: int
 
@@ -188,4 +191,25 @@ class TeacherModuleBreakdownResponse(BaseModel):
     rows: list[TeacherModuleBreakdownRowOut] = Field(default_factory=list)
 
 
-TeacherReportBreakdownResponse = TeacherBatchBreakdownResponse | TeacherModuleBreakdownResponse
+class TeacherBatchModuleBreakdownRowOut(BaseModel):
+    student_id: int
+    student_name: str
+    average_score_percent: float
+    attempt_count: int
+    correct_answers: int
+    incorrect_answers: int
+    latest_attempt_at: datetime
+
+
+class TeacherBatchModuleBreakdownResponse(BaseModel):
+    mode: Literal["batch_module"]
+    batch_id: int
+    batch_name: str | None = None
+    module_id: int
+    module_title: str | None = None
+    rows: list[TeacherBatchModuleBreakdownRowOut] = Field(default_factory=list)
+
+
+TeacherReportBreakdownResponse = (
+    TeacherBatchBreakdownResponse | TeacherModuleBreakdownResponse | TeacherBatchModuleBreakdownResponse
+)

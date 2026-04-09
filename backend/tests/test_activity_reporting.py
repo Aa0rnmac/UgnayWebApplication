@@ -132,7 +132,11 @@ def test_activity_attempts_feed_teacher_review_and_summary(
     rejected_enrollment_id = rejected_registration_response.json()["registration"]["enrollment_id"]
     reject_response = client.post(
         f"/api/teacher/enrollments/{rejected_enrollment_id}/reject",
-        json={"notes": "Rejected for activity reporting coverage."},
+        json={
+            "internal_note": "Rejected for activity reporting coverage.",
+            "rejection_reason_code": "incorrect_information",
+            "rejection_reason_detail": None,
+        },
         headers=teacher_headers,
     )
     assert reject_response.status_code == 200
@@ -391,6 +395,8 @@ def test_activity_attempts_feed_teacher_review_and_summary(
     assert batch_breakdown["batch_name"] == approved_student_one["batch"]["name"]
     assert [row["student_id"] for row in batch_breakdown["rows"]] == [student_one.id, student_two.id]
     assert batch_breakdown["rows"][0]["average_score_percent"] == 40
+    assert batch_breakdown["rows"][0]["attempt_count"] == 3
+    assert batch_breakdown["rows"][0]["latest_attempt_at"]
     assert batch_breakdown["rows"][0]["highest_correct_module"] == {
         "module_id": module_id,
         "module_title": module["title"],
@@ -415,6 +421,7 @@ def test_activity_attempts_feed_teacher_review_and_summary(
             "batch_id": approved_student_one["batch"]["id"],
             "batch_name": approved_student_one["batch"]["name"],
             "average_score_percent": 56.0,
+            "attempt_count": 5,
             "correct_answers": 14,
             "incorrect_answers": 11,
         },
@@ -422,8 +429,39 @@ def test_activity_attempts_feed_teacher_review_and_summary(
             "batch_id": approved_student_three["batch"]["id"],
             "batch_name": approved_student_three["batch"]["name"],
             "average_score_percent": 60.0,
+            "attempt_count": 1,
             "correct_answers": 3,
             "incorrect_answers": 2,
+        },
+    ]
+
+    batch_module_breakdown_response = client.get(
+        f"/api/teacher/reports/breakdown?batch_id={batch_id}&module_id={module_id}",
+        headers=teacher_headers,
+    )
+    assert batch_module_breakdown_response.status_code == 200
+    batch_module_breakdown = batch_module_breakdown_response.json()
+    assert batch_module_breakdown["mode"] == "batch_module"
+    assert batch_module_breakdown["batch_name"] == approved_student_one["batch"]["name"]
+    assert batch_module_breakdown["module_title"] == module["title"]
+    assert batch_module_breakdown["rows"] == [
+        {
+            "student_id": student_one.id,
+            "student_name": "Student T One",
+            "average_score_percent": 40.0,
+            "attempt_count": 3,
+            "correct_answers": 6,
+            "incorrect_answers": 9,
+            "latest_attempt_at": batch_module_breakdown["rows"][0]["latest_attempt_at"],
+        },
+        {
+            "student_id": student_two.id,
+            "student_name": "Student T Two",
+            "average_score_percent": 80.0,
+            "attempt_count": 2,
+            "correct_answers": 8,
+            "incorrect_answers": 2,
+            "latest_attempt_at": batch_module_breakdown["rows"][1]["latest_attempt_at"],
         },
     ]
 
@@ -475,6 +513,7 @@ def test_activity_attempts_feed_teacher_review_and_summary(
             "batch_id": approved_student_one["batch"]["id"],
             "batch_name": approved_student_one["batch"]["name"],
             "average_score_percent": 56.0,
+            "attempt_count": 5,
             "correct_answers": 14,
             "incorrect_answers": 11,
         }
@@ -491,6 +530,7 @@ def test_activity_attempts_feed_teacher_review_and_summary(
             "batch_id": approved_student_one["batch"]["id"],
             "batch_name": approved_student_one["batch"]["name"],
             "average_score_percent": 56.0,
+            "attempt_count": 5,
             "correct_answers": 14,
             "incorrect_answers": 11,
         },
@@ -498,6 +538,7 @@ def test_activity_attempts_feed_teacher_review_and_summary(
             "batch_id": approved_student_three["batch"]["id"],
             "batch_name": approved_student_three["batch"]["name"],
             "average_score_percent": 60.0,
+            "attempt_count": 1,
             "correct_answers": 3,
             "incorrect_answers": 2,
         },
@@ -524,6 +565,8 @@ def test_activity_attempts_feed_teacher_review_and_summary(
             "student_id": student_three.id,
             "student_name": "Student T Three",
             "average_score_percent": 60.0,
+            "attempt_count": 1,
+            "latest_attempt_at": included_archived_batch_breakdown["rows"][0]["latest_attempt_at"],
             "highest_correct_module": {
                 "module_id": module_id,
                 "module_title": module["title"],
@@ -537,16 +580,9 @@ def test_activity_attempts_feed_teacher_review_and_summary(
         }
     ]
 
-    invalid_both_filters_response = client.get(
-        f"/api/teacher/reports/breakdown?batch_id={batch_id}&module_id={module_id}",
-        headers=teacher_headers,
-    )
-    assert invalid_both_filters_response.status_code == 422
-    assert invalid_both_filters_response.json()["detail"] == "Select either batch_id or module_id, but not both."
-
     invalid_missing_filters_response = client.get(
         "/api/teacher/reports/breakdown",
         headers=teacher_headers,
     )
     assert invalid_missing_filters_response.status_code == 422
-    assert invalid_missing_filters_response.json()["detail"] == "Select either batch_id or module_id, but not both."
+    assert invalid_missing_filters_response.json()["detail"] == "Select at least one of batch_id or module_id."

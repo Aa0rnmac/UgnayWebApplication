@@ -66,6 +66,8 @@ class TeacherEnrollmentOut(BaseModel):
     status: str
     payment_review_status: str
     review_notes: str | None = None
+    rejection_reason_code: Literal["incorrect_amount_paid", "incorrect_information"] | None = None
+    rejection_reason_detail: str | None = None
     reviewed_at: datetime | None = None
     approved_at: datetime | None = None
     rejected_at: datetime | None = None
@@ -85,6 +87,13 @@ class TeacherEnrollmentApprovalResultOut(BaseModel):
     recipient_email: str
 
 
+class TeacherEnrollmentRejectionResultOut(BaseModel):
+    enrollment: TeacherEnrollmentOut
+    delivery_status: Literal["sent", "skipped", "failed"]
+    delivery_message: str
+    recipient_email: str
+
+
 class TeacherEnrollmentApproveRequest(BaseModel):
     batch_id: int | None = Field(default=None, ge=1)
     batch_code: str | None = Field(default=None, max_length=60)
@@ -96,4 +105,6 @@ class TeacherEnrollmentApproveRequest(BaseModel):
 
 
 class TeacherEnrollmentRejectRequest(BaseModel):
-    notes: str = Field(min_length=1, max_length=2000)
+    internal_note: str | None = Field(default=None, max_length=2000)
+    rejection_reason_code: Literal["incorrect_amount_paid", "incorrect_information"]
+    rejection_reason_detail: str | None = Field(default=None, max_length=2000)

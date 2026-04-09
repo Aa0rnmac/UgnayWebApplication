@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.deps import get_current_teacher
+from app.core.config import settings
 from app.models.activity_attempt import ActivityAttempt
 from app.core.config import PROJECT_ROOT
 from app.db.session import get_db
@@ -22,16 +23,19 @@ from app.schemas.teacher import (
     TeacherEnrollmentApproveRequest,
     TeacherEnrollmentOut,
     TeacherEnrollmentRejectRequest,
+    TeacherEnrollmentRejectionResultOut,
     TeacherStudentModuleProgressOut,
     TeacherStudentOut,
     TeacherUserSummary,
 )
 from app.schemas.teacher_report import TeacherActivityAttemptItemOut, TeacherActivityAttemptOut
+from app.services.email_sender import send_student_rejection_email
 from app.services.enrollment_service import (
     approve_enrollment,
     EnrollmentApprovalResult,
     get_or_create_batch,
     normalize_batch_code,
+    registration_display_name,
 )
 
 router = APIRouter(prefix="/teacher", tags=["teacher-enrollment"])
@@ -122,6 +126,8 @@ def _enrollment_out(enrollment: Enrollment) -> TeacherEnrollmentOut:
         status=enrollment.status,
         payment_review_status=enrollment.payment_review_status,
         review_notes=enrollment.review_notes,
+        rejection_reason_code=enrollment.rejection_reason_code,
+        rejection_reason_detail=enrollment.rejection_reason_detail,
         reviewed_at=enrollment.reviewed_at,
         approved_at=enrollment.approved_at,
         rejected_at=enrollment.rejected_at,
@@ -142,6 +148,79 @@ def _approval_result_out(result: EnrollmentApprovalResult) -> TeacherEnrollmentA
         delivery_message=result.delivery_message,
         recipient_email=result.recipient_email,
     )
+
+
+def _rejection_result_out(
+    enrollment: Enrollment,
+    *,
+    delivery_status: Literal["sent", "skipped", "failed"],
+    delivery_message: str,
+    recipient_email: str,
+) -> TeacherEnrollmentRejectionResultOut:
+    return TeacherEnrollmentRejectionResultOut(
+        enrollment=_enrollment_out(enrollment),
+        delivery_status=delivery_status,
+        delivery_message=delivery_message,
+        recipient_email=recipient_email,
+    )
+
+
+def _send_rejection_notice(
+    *,
+    enrollment: Enrollment,
+    rejection_reason: str,
+) -> tuple[Literal["sent", "skipped", "failed"], str, str]:
+    registration = enrollment.registration
+    if registration is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is missing registration data.")
+
+    recipient_email = registration.email.strip().lower()
+    if not settings.smtp_host or not settings.smtp_from_email:
+        return (
+            "skipped",
+            (
+                "Enrollment rejected. Rejection email was not sent because SMTP is not configured. "
+                "The rejection record was still saved."
+            ),
+            recipient_email,
+        )
+
+    try:
+        send_student_rejection_email(
+            to_email=recipient_email,
+            student_name=registration_display_name(registration),
+            rejection_reason=rejection_reason,
+        )
+    except RuntimeError:
+        return (
+            "failed",
+            (
+                f"Enrollment rejected, but the rejection email could not be sent to {recipient_email}. "
+                "The rejection record was still saved."
+            ),
+            recipient_email,
+        )
+
+    return (
+        "sent",
+        f"Enrollment rejected and the reason was emailed to {recipient_email}.",
+        recipient_email,
+    )
+
+
+def _rejection_reason_summary(
+    reason_code: Literal["incorrect_amount_paid", "incorrect_information"],
+    reason_detail: str | None,
+) -> str:
+    if reason_code == "incorrect_amount_paid":
+        base_reason = "The amount paid did not match the required payment amount."
+    else:
+        base_reason = "Some of the submitted information could not be validated because it was incorrect or incomplete."
+
+    normalized_detail = reason_detail.strip() if reason_detail and reason_detail.strip() else None
+    if not normalized_detail:
+        return base_reason
+    return f"{base_reason}\n\nAdditional details:\n{normalized_detail}"
 
 
 def _activity_attempt_out(attempt: ActivityAttempt) -> TeacherActivityAttemptOut:
@@ -308,20 +387,44 @@ def approve_teacher_enrollment(
     return _approval_result_out(result)
 
 
-@router.post("/enrollments/{enrollment_id}/reject", response_model=TeacherEnrollmentOut)
+@router.post("/enrollments/{enrollment_id}/reject", response_model=TeacherEnrollmentRejectionResultOut)
 def reject_teacher_enrollment(
     enrollment_id: int,
     payload: TeacherEnrollmentRejectRequest,
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
-) -> TeacherEnrollmentOut:
+) -> TeacherEnrollmentRejectionResultOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
     from app.services.enrollment_service import reject_enrollment
 
-    reject_enrollment(db, enrollment=enrollment, current_teacher=current_teacher, notes=payload.notes)
-    db.commit()
+    rejection_reason = _rejection_reason_summary(
+        payload.rejection_reason_code,
+        payload.rejection_reason_detail,
+    )
+    try:
+        reject_enrollment(
+            db,
+            enrollment=enrollment,
+            current_teacher=current_teacher,
+            internal_note=payload.internal_note,
+            rejection_reason_code=payload.rejection_reason_code,
+            rejection_reason_detail=payload.rejection_reason_detail,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(enrollment)
-    return _enrollment_out(enrollment)
+    delivery_status, delivery_message, recipient_email = _send_rejection_notice(
+        enrollment=enrollment,
+        rejection_reason=rejection_reason,
+    )
+    return _rejection_result_out(
+        enrollment,
+        delivery_status=delivery_status,
+        delivery_message=delivery_message,
+        recipient_email=recipient_email,
+    )
 
 
 @router.get("/batches", response_model=list[TeacherBatchOut])

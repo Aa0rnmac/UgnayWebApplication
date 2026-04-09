@@ -1402,6 +1402,16 @@ def ensure_schema_updates() -> None:
         "archived_at",
         "ALTER TABLE users ADD COLUMN archived_at TIMESTAMP",
     )
+    _add_column_if_missing(
+        "enrollments",
+        "rejection_reason_code",
+        "ALTER TABLE enrollments ADD COLUMN rejection_reason_code VARCHAR(40)",
+    )
+    _add_column_if_missing(
+        "enrollments",
+        "rejection_reason_detail",
+        "ALTER TABLE enrollments ADD COLUMN rejection_reason_detail TEXT",
+    )
     _create_table_if_missing(
         "archived_student_accounts",
         """

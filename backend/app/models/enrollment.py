@@ -25,6 +25,8 @@ class Enrollment(Base):
         String(20), nullable=False, default="submitted", server_default="submitted"
     )
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rejection_reason_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    rejection_reason_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

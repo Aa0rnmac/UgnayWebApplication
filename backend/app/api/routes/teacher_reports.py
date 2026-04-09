@@ -20,6 +20,8 @@ from app.schemas.teacher_report import (
     TeacherAssessmentReportsResponse,
     TeacherAttentionStudentOut,
     TeacherBatchBreakdownResponse,
+    TeacherBatchModuleBreakdownResponse,
+    TeacherBatchModuleBreakdownRowOut,
     TeacherBatchBreakdownRowOut,
     TeacherBreakdownModuleMetricOut,
     TeacherConcernAttemptOut,
@@ -428,15 +430,15 @@ def get_teacher_report_breakdown(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_teacher),
 ) -> TeacherReportBreakdownResponse:
-    if (batch_id is None) == (module_id is None):
+    if batch_id is None and module_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Select either batch_id or module_id, but not both.",
+            detail="Select at least one of batch_id or module_id.",
         )
 
     enrollment_by_user = _approved_enrollments_by_user(db)
 
-    if batch_id is not None:
+    if batch_id is not None and module_id is None:
         batch = db.query(Batch).filter(Batch.id == batch_id).first()
         if not batch:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
@@ -467,6 +469,11 @@ def get_teacher_report_breakdown(
                     student_id=student_id,
                     student_name=_display_name(reference_attempt.user),
                     average_score_percent=round(mean(attempt.score_percent for attempt in student_attempts), 2),
+                    attempt_count=len(student_attempts),
+                    latest_attempt_at=max(
+                        student_attempts,
+                        key=lambda item: (item.submitted_at, item.id),
+                    ).submitted_at,
                     highest_correct_module=_top_module_metric(module_totals, "right_count"),
                     highest_incorrect_module=_top_module_metric(module_totals, "wrong_count"),
                 )
@@ -476,6 +483,7 @@ def get_teacher_report_breakdown(
             key=lambda item: (
                 item.average_score_percent,
                 -(item.highest_incorrect_module.count if item.highest_incorrect_module else 0),
+                -item.latest_attempt_at.timestamp(),
                 item.student_name.lower(),
                 item.student_id,
             )
@@ -485,6 +493,60 @@ def get_teacher_report_breakdown(
             mode="batch",
             batch_id=batch.id,
             batch_name=batch.name,
+            rows=rows,
+        )
+
+    if batch_id is not None and module_id is not None:
+        batch = db.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+        module = db.query(Module).filter(Module.id == module_id).first()
+        if not module:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
+
+        attempts = _filtered_attempts(
+            db,
+            batch_id=batch_id,
+            module_id=module_id,
+            include_archived_batches=include_archived_batches,
+        )
+        attempts_by_student: dict[int, list[ActivityAttempt]] = defaultdict(list)
+
+        for attempt in attempts:
+            attempts_by_student[attempt.user_id].append(attempt)
+
+        rows: list[TeacherBatchModuleBreakdownRowOut] = []
+        for student_id, student_attempts in attempts_by_student.items():
+            latest_attempt = max(student_attempts, key=lambda item: (item.submitted_at, item.id))
+            rows.append(
+                TeacherBatchModuleBreakdownRowOut(
+                    student_id=student_id,
+                    student_name=_display_name(latest_attempt.user),
+                    average_score_percent=round(mean(attempt.score_percent for attempt in student_attempts), 2),
+                    attempt_count=len(student_attempts),
+                    correct_answers=sum(int(attempt.right_count or 0) for attempt in student_attempts),
+                    incorrect_answers=sum(int(attempt.wrong_count or 0) for attempt in student_attempts),
+                    latest_attempt_at=latest_attempt.submitted_at,
+                )
+            )
+
+        rows.sort(
+            key=lambda item: (
+                item.average_score_percent,
+                -item.incorrect_answers,
+                -item.latest_attempt_at.timestamp(),
+                item.student_name.lower(),
+                item.student_id,
+            )
+        )
+
+        return TeacherBatchModuleBreakdownResponse(
+            mode="batch_module",
+            batch_id=batch.id,
+            batch_name=batch.name,
+            module_id=module.id,
+            module_title=module.title,
             rows=rows,
         )
 
@@ -514,6 +576,7 @@ def get_teacher_report_breakdown(
                 batch_id=group_batch_id,
                 batch_name=batch_name,
                 average_score_percent=round(mean(attempt.score_percent for attempt in batch_attempts), 2),
+                attempt_count=len(batch_attempts),
                 correct_answers=sum(int(attempt.right_count or 0) for attempt in batch_attempts),
                 incorrect_answers=sum(int(attempt.wrong_count or 0) for attempt in batch_attempts),
             )
