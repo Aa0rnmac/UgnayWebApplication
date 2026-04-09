@@ -94,14 +94,16 @@ def _batch_out(batch: Batch | None, *, student_count: int = 0) -> TeacherBatchOu
     )
 
 
-def _batch_student_count(batch: Batch) -> int:
-    return sum(
-        1
-        for enrollment in batch.enrollments
-        if enrollment.status == "approved"
-        and enrollment.user_id is not None
-        and enrollment.user is not None
-        and enrollment.user.archived_at is None
+def _batch_student_count(db: Session, batch_id: int) -> int:
+    return (
+        db.query(Enrollment)
+        .join(User, User.id == Enrollment.user_id)
+        .filter(
+            Enrollment.batch_id == batch_id,
+            Enrollment.status == "approved",
+            User.archived_at.is_(None),
+        )
+        .count()
     )
 
 
@@ -116,11 +118,11 @@ def _student_summary(user: User | None) -> TeacherUserSummary | None:
     )
 
 
-def _enrollment_out(enrollment: Enrollment) -> TeacherEnrollmentOut:
+def _enrollment_out(db: Session, enrollment: Enrollment) -> TeacherEnrollmentOut:
     registration = enrollment.registration
     batch = enrollment.batch
     student = enrollment.user
-    student_count = _batch_student_count(batch) if batch else 0
+    student_count = _batch_student_count(db, batch.id) if batch else 0
     return TeacherEnrollmentOut(
         id=enrollment.id,
         status=enrollment.status,
@@ -139,9 +141,12 @@ def _enrollment_out(enrollment: Enrollment) -> TeacherEnrollmentOut:
     )
 
 
-def _approval_result_out(result: EnrollmentApprovalResult) -> TeacherEnrollmentApprovalResultOut:
+def _approval_result_out(
+    db: Session,
+    result: EnrollmentApprovalResult,
+) -> TeacherEnrollmentApprovalResultOut:
     return TeacherEnrollmentApprovalResultOut(
-        enrollment=_enrollment_out(result.enrollment),
+        enrollment=_enrollment_out(db, result.enrollment),
         issued_username=result.issued_username,
         temporary_password=result.temporary_password,
         delivery_status=result.delivery_status,
@@ -151,6 +156,7 @@ def _approval_result_out(result: EnrollmentApprovalResult) -> TeacherEnrollmentA
 
 
 def _rejection_result_out(
+    db: Session,
     enrollment: Enrollment,
     *,
     delivery_status: Literal["sent", "skipped", "failed"],
@@ -158,7 +164,7 @@ def _rejection_result_out(
     recipient_email: str,
 ) -> TeacherEnrollmentRejectionResultOut:
     return TeacherEnrollmentRejectionResultOut(
-        enrollment=_enrollment_out(enrollment),
+        enrollment=_enrollment_out(db, enrollment),
         delivery_status=delivery_status,
         delivery_message=delivery_message,
         recipient_email=recipient_email,
@@ -329,7 +335,7 @@ def list_teacher_enrollments(
         query = query.filter(Enrollment.status == status_filter)
     if batch_id is not None:
         query = query.filter(Enrollment.batch_id == batch_id)
-    return [_enrollment_out(enrollment) for enrollment in query.all()]
+    return [_enrollment_out(db, enrollment) for enrollment in query.all()]
 
 
 @router.get("/enrollments/{enrollment_id}", response_model=TeacherEnrollmentOut)
@@ -339,7 +345,7 @@ def get_teacher_enrollment(
     _: User = Depends(get_current_teacher),
 ) -> TeacherEnrollmentOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
-    return _enrollment_out(enrollment)
+    return _enrollment_out(db, enrollment)
 
 
 @router.get("/enrollments/{enrollment_id}/payment-proof")
@@ -384,7 +390,7 @@ def approve_teacher_enrollment(
         db.rollback()
         raise
     db.refresh(enrollment)
-    return _approval_result_out(result)
+    return _approval_result_out(db, result)
 
 
 @router.post("/enrollments/{enrollment_id}/reject", response_model=TeacherEnrollmentRejectionResultOut)
@@ -420,6 +426,7 @@ def reject_teacher_enrollment(
         rejection_reason=rejection_reason,
     )
     return _rejection_result_out(
+        db,
         enrollment,
         delivery_status=delivery_status,
         delivery_message=delivery_message,
@@ -440,7 +447,7 @@ def list_teacher_batches(
     return [
         _batch_out(
             batch,
-            student_count=_batch_student_count(batch),
+            student_count=_batch_student_count(db, batch.id),
         )
         for batch in batches
     ]
@@ -488,7 +495,7 @@ def archive_teacher_batch(
         db.add(batch)
         db.commit()
         db.refresh(batch)
-    return _batch_out(batch, student_count=_batch_student_count(batch))
+    return _batch_out(batch, student_count=_batch_student_count(db, batch.id))
 
 
 @router.post("/batches/{batch_id}/restore", response_model=TeacherBatchOut)
@@ -503,7 +510,7 @@ def restore_teacher_batch(
         db.add(batch)
         db.commit()
         db.refresh(batch)
-    return _batch_out(batch, student_count=_batch_student_count(batch))
+    return _batch_out(batch, student_count=_batch_student_count(db, batch.id))
 
 
 @router.get("/batches/{batch_id}/students", response_model=list[TeacherUserSummary])
@@ -514,13 +521,16 @@ def list_batch_students(
 ) -> list[TeacherUserSummary]:
     batch = _get_batch_or_404(db, batch_id)
 
-    students = [
-        enrollment.user
-        for enrollment in batch.enrollments
-        if enrollment.status == "approved"
-        and enrollment.user is not None
-        and enrollment.user.archived_at is None
-    ]
+    students = (
+        db.query(User)
+        .join(Enrollment, Enrollment.user_id == User.id)
+        .filter(
+            Enrollment.batch_id == batch.id,
+            Enrollment.status == "approved",
+            User.archived_at.is_(None),
+        )
+        .all()
+    )
     students.sort(key=lambda item: (_full_name(item), item.username))
     return [_student_summary(student) for student in students if student is not None]
 

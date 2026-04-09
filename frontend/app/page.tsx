@@ -351,6 +351,7 @@ export default function LoginPage() {
             className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
             onChange={(event) => setUsername(event.target.value)}
             required
+            suppressHydrationWarning
             type="text"
             value={username}
           />
@@ -363,12 +364,14 @@ export default function LoginPage() {
               className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
               onChange={(event) => setPassword(event.target.value)}
               required
+              suppressHydrationWarning
               type={showLoginPassword ? "text" : "password"}
               value={password}
             />
             <button
               className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
               onClick={() => setShowLoginPassword((value) => !value)}
+              suppressHydrationWarning
               type="button"
             >
               {showLoginPassword ? "Hide" : "Show"}
@@ -380,6 +383,7 @@ export default function LoginPage() {
           <button
             className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={submitting}
+            suppressHydrationWarning
             type="submit"
           >
             {submitting ? "Logging in..." : "Login"}
@@ -403,6 +407,7 @@ export default function LoginPage() {
                 setForgotMessage(null);
               }
             }}
+            suppressHydrationWarning
             type="button"
           >
             {forgotOpen ? "Close Forgot Password" : "Forgot Password?"}
@@ -411,6 +416,7 @@ export default function LoginPage() {
           <button
             className="ml-auto rounded-lg border border-brandBlue bg-brandBlueLight px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight/70"
             onClick={openTeacherFlow}
+            suppressHydrationWarning
             type="button"
           >
             Scan QR
@@ -449,6 +455,7 @@ export default function LoginPage() {
                 disabled={forgotStep !== "request"}
                 onChange={(event) => setForgotIdentity(event.target.value)}
                 required
+                suppressHydrationWarning
                 type="text"
                 value={forgotIdentity}
               />
@@ -463,6 +470,7 @@ export default function LoginPage() {
                   maxLength={6}
                   onChange={(event) => setOtpCode(event.target.value)}
                   required
+                  suppressHydrationWarning
                   type="text"
                   value={otpCode}
                 />
@@ -478,12 +486,14 @@ export default function LoginPage() {
                       className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
                       onChange={(event) => setNewPassword(event.target.value)}
                       required
+                      suppressHydrationWarning
                       type={showForgotNewPassword ? "text" : "password"}
                       value={newPassword}
                     />
                     <button
                       className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
                       onClick={() => setShowForgotNewPassword((value) => !value)}
+                      suppressHydrationWarning
                       type="button"
                     >
                       {showForgotNewPassword ? "Hide" : "Show"}
@@ -498,12 +508,14 @@ export default function LoginPage() {
                       className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
                       onChange={(event) => setConfirmPassword(event.target.value)}
                       required
+                      suppressHydrationWarning
                       type={showForgotConfirmPassword ? "text" : "password"}
                       value={confirmPassword}
                     />
                     <button
                       className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
                       onClick={() => setShowForgotConfirmPassword((value) => !value)}
+                      suppressHydrationWarning
                       type="button"
                     >
                       {showForgotConfirmPassword ? "Hide" : "Show"}
@@ -517,6 +529,7 @@ export default function LoginPage() {
               <button
                 className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={forgotSubmitting}
+                suppressHydrationWarning
                 type="submit"
               >
                 {forgotSubmitting
@@ -551,6 +564,7 @@ export default function LoginPage() {
                     setForgotError(null);
                     setForgotMessage(null);
                   }}
+                  suppressHydrationWarning
                   type="button"
                 >
                   Back

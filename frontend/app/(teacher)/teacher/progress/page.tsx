@@ -4,17 +4,21 @@ import Link from "next/link";
 import { ReactNode, useEffect, useState } from "react";
 
 import {
+  TeacherActivityAttempt,
   ModuleItem,
   TeacherAttentionStudent,
   TeacherBatch,
   TeacherBreakdownModuleMetric,
+  TeacherEnrollment,
   TeacherReportBreakdownResponse,
   TeacherReportSummary,
   TeacherWeakItem,
   getModules,
   getTeacherBatches,
+  getTeacherEnrollments,
   getTeacherReportBreakdown,
   getTeacherReportSummary,
+  getTeacherStudentActivityAttempts,
 } from "@/lib/api";
 
 const PREVIEW_LIMIT = 5;
@@ -68,6 +72,253 @@ function formatModuleMetric(metric: TeacherBreakdownModuleMetric | null | undefi
     return "No module data";
   }
   return `${metric.module_title} (${metric.count})`;
+}
+
+function averageScore(attempts: TeacherActivityAttempt[]) {
+  if (!attempts.length) {
+    return null;
+  }
+  const total = attempts.reduce((sum, attempt) => sum + attempt.score_percent, 0);
+  return Number((total / attempts.length).toFixed(2));
+}
+
+function latestAttemptAt(attempts: TeacherActivityAttempt[]) {
+  if (!attempts.length) {
+    return null;
+  }
+  return [...attempts]
+    .sort((left, right) => {
+      const rightTime = new Date(right.submitted_at).getTime();
+      const leftTime = new Date(left.submitted_at).getTime();
+      return rightTime - leftTime || right.id - left.id;
+    })[0]
+    .submitted_at;
+}
+
+function topModuleMetricFromAttempts(
+  attempts: TeacherActivityAttempt[],
+  metric: "right_count" | "wrong_count"
+): TeacherBreakdownModuleMetric | null {
+  if (!attempts.length) {
+    return null;
+  }
+
+  const totals = new Map<number, { module_title: string; count: number }>();
+  for (const attempt of attempts) {
+    const current = totals.get(attempt.module_id) ?? {
+      module_title: attempt.module_title,
+      count: 0,
+    };
+    current.count += attempt[metric];
+    totals.set(attempt.module_id, current);
+  }
+
+  const topEntry = [...totals.entries()].sort((left, right) => {
+    if (right[1].count !== left[1].count) {
+      return right[1].count - left[1].count;
+    }
+    if (left[1].module_title !== right[1].module_title) {
+      return left[1].module_title.localeCompare(right[1].module_title);
+    }
+    return left[0] - right[0];
+  })[0];
+
+  if (!topEntry) {
+    return null;
+  }
+
+  return {
+    module_id: topEntry[0],
+    module_title: topEntry[1].module_title,
+    count: topEntry[1].count,
+  };
+}
+
+type StudentAttemptBundle = {
+  enrollment: TeacherEnrollment;
+  attempts: TeacherActivityAttempt[];
+};
+
+async function buildFallbackBreakdown(
+  batchId: number | null,
+  moduleId: number | null,
+  includeArchivedBatches: boolean,
+  modules: ModuleItem[]
+): Promise<TeacherReportBreakdownResponse> {
+  const approvedEnrollments = await getTeacherEnrollments({ status: "approved" });
+  const visibleEnrollments = approvedEnrollments.filter(
+    (enrollment) =>
+      enrollment.student &&
+      (includeArchivedBatches || enrollment.batch?.status !== "archived")
+  );
+
+  const bundles: StudentAttemptBundle[] = await Promise.all(
+    visibleEnrollments.map(async (enrollment) => ({
+      enrollment,
+      attempts: await getTeacherStudentActivityAttempts(enrollment.student!.id),
+    }))
+  );
+
+  if (batchId === null && moduleId === null) {
+    return {
+      mode: "all",
+      rows: bundles
+        .map(({ enrollment, attempts }) => ({
+          student_id: enrollment.student!.id,
+          student_name: enrollment.student!.full_name,
+          batch_id: enrollment.batch?.id ?? null,
+          batch_name: enrollment.batch?.name ?? "Unassigned batch",
+          average_score_percent: averageScore(attempts),
+          attempt_count: attempts.length,
+          latest_attempt_at: latestAttemptAt(attempts),
+        }))
+        .sort((left, right) => {
+          if (left.attempt_count !== right.attempt_count) {
+            return right.attempt_count - left.attempt_count;
+          }
+          const leftAverage = left.average_score_percent ?? -1;
+          const rightAverage = right.average_score_percent ?? -1;
+          if (leftAverage !== rightAverage) {
+            return rightAverage - leftAverage;
+          }
+          return left.student_name.localeCompare(right.student_name);
+        }),
+    };
+  }
+
+  if (batchId !== null && moduleId === null) {
+    const batchBundles = bundles.filter((bundle) => bundle.enrollment.batch?.id === batchId);
+    const batchName = batchBundles[0]?.enrollment.batch?.name ?? null;
+
+    return {
+      mode: "batch",
+      batch_id: batchId,
+      batch_name: batchName,
+      rows: batchBundles
+        .map(({ enrollment, attempts }) => ({
+          student_id: enrollment.student!.id,
+          student_name: enrollment.student!.full_name,
+          average_score_percent: averageScore(attempts) ?? 0,
+          attempt_count: attempts.length,
+          latest_attempt_at: latestAttemptAt(attempts) ?? new Date(0).toISOString(),
+          highest_correct_module: topModuleMetricFromAttempts(attempts, "right_count"),
+          highest_incorrect_module: topModuleMetricFromAttempts(attempts, "wrong_count"),
+        }))
+        .filter((row) => row.attempt_count > 0)
+        .sort((left, right) => {
+          if (left.attempt_count !== right.attempt_count) {
+            return right.attempt_count - left.attempt_count;
+          }
+          return right.average_score_percent - left.average_score_percent;
+        }),
+    };
+  }
+
+  if (batchId !== null && moduleId !== null) {
+    const batchBundles = bundles.filter((bundle) => bundle.enrollment.batch?.id === batchId);
+    const moduleTitle = modules.find((module) => module.id === moduleId)?.title ?? null;
+    const batchName = batchBundles[0]?.enrollment.batch?.name ?? null;
+
+    return {
+      mode: "batch_module",
+      batch_id: batchId,
+      batch_name: batchName,
+      module_id: moduleId,
+      module_title: moduleTitle,
+      rows: batchBundles
+        .map(({ enrollment, attempts }) => {
+          const filteredAttempts = attempts.filter((attempt) => attempt.module_id === moduleId);
+          return {
+            student_id: enrollment.student!.id,
+            student_name: enrollment.student!.full_name,
+            average_score_percent: averageScore(filteredAttempts) ?? 0,
+            attempt_count: filteredAttempts.length,
+            correct_answers: filteredAttempts.reduce(
+              (sum, attempt) => sum + attempt.right_count,
+              0
+            ),
+            incorrect_answers: filteredAttempts.reduce(
+              (sum, attempt) => sum + attempt.wrong_count,
+              0
+            ),
+            latest_attempt_at: latestAttemptAt(filteredAttempts) ?? new Date(0).toISOString(),
+          };
+        })
+        .filter((row) => row.attempt_count > 0)
+        .sort((left, right) => {
+          if (left.attempt_count !== right.attempt_count) {
+            return right.attempt_count - left.attempt_count;
+          }
+          return right.average_score_percent - left.average_score_percent;
+        }),
+    };
+  }
+
+  const moduleTitle = modules.find((module) => module.id === moduleId)?.title ?? null;
+  const rows = new Map<
+    string,
+    {
+      batch_id: number | null;
+      batch_name: string;
+      averageValues: number[];
+      attempt_count: number;
+      correct_answers: number;
+      incorrect_answers: number;
+    }
+  >();
+
+  for (const { enrollment, attempts } of bundles) {
+    const filteredAttempts = attempts.filter((attempt) => attempt.module_id === moduleId);
+    if (!filteredAttempts.length) {
+      continue;
+    }
+
+    const key = `${enrollment.batch?.id ?? "unassigned"}:${enrollment.batch?.name ?? "Unassigned batch"}`;
+    const current = rows.get(key) ?? {
+      batch_id: enrollment.batch?.id ?? null,
+      batch_name: enrollment.batch?.name ?? "Unassigned batch",
+      averageValues: [],
+      attempt_count: 0,
+      correct_answers: 0,
+      incorrect_answers: 0,
+    };
+    const score = averageScore(filteredAttempts);
+    if (score !== null) {
+      current.averageValues.push(score);
+    }
+    current.attempt_count += filteredAttempts.length;
+    current.correct_answers += filteredAttempts.reduce((sum, attempt) => sum + attempt.right_count, 0);
+    current.incorrect_answers += filteredAttempts.reduce((sum, attempt) => sum + attempt.wrong_count, 0);
+    rows.set(key, current);
+  }
+
+  return {
+    mode: "module",
+    module_id: moduleId!,
+    module_title: moduleTitle,
+    rows: [...rows.values()]
+      .map((row) => ({
+        batch_id: row.batch_id,
+        batch_name: row.batch_name,
+        average_score_percent: row.averageValues.length
+          ? Number(
+              (
+                row.averageValues.reduce((sum, value) => sum + value, 0) /
+                row.averageValues.length
+              ).toFixed(2)
+            )
+          : 0,
+        attempt_count: row.attempt_count,
+        correct_answers: row.correct_answers,
+        incorrect_answers: row.incorrect_answers,
+      }))
+      .sort((left, right) => {
+        if (left.attempt_count !== right.attempt_count) {
+          return right.attempt_count - left.attempt_count;
+        }
+        return right.average_score_percent - left.average_score_percent;
+      }),
+  };
 }
 
 function getMostAffectedWeakModule(weakItems: TeacherWeakItem[]) {
@@ -357,7 +608,73 @@ export default function TeacherProgressPage() {
 
   const weakItems = overviewSummary?.weak_items ?? [];
   const attentionStudents = overviewSummary?.students_needing_attention ?? [];
-  const registeredStudentCount = overviewSummary?.registered_student_count ?? 0;
+  const registeredStudentCount =
+    overviewSummary?.registered_student_count ??
+    batches
+      .filter((batch) => batch.status !== "archived")
+      .reduce((sum, batch) => sum + batch.student_count, 0);
+
+  async function loadOverviewSummary() {
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      const nextSummary = await getTeacherReportSummary();
+      setOverviewSummary(nextSummary);
+    } catch (requestError) {
+      setSummaryError(
+        requestError instanceof Error ? requestError.message : "Unable to load teacher summary."
+      );
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
+
+  async function loadBreakdown(
+    nextBatchId: number | null,
+    nextModuleId: number | null,
+    nextShowArchivedBatches: boolean
+  ) {
+    setBreakdownLoading(true);
+    setBreakdownError(null);
+    try {
+      const nextBreakdown = await getTeacherReportBreakdown({
+        batchId: nextBatchId,
+        moduleId: nextModuleId,
+        includeArchivedBatches: nextShowArchivedBatches,
+      });
+      setBreakdown(nextBreakdown);
+    } catch (requestError) {
+      const errorMessage =
+        requestError instanceof Error ? requestError.message : "Unable to load breakdown table.";
+
+      if (errorMessage.toLowerCase().includes("not found")) {
+        try {
+          const fallbackBreakdown = await buildFallbackBreakdown(
+            nextBatchId,
+            nextModuleId,
+            nextShowArchivedBatches,
+            modules
+          );
+          setBreakdown(fallbackBreakdown);
+          setBreakdownError(null);
+          return;
+        } catch (fallbackError) {
+          setBreakdown(null);
+          setBreakdownError(
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Unable to load breakdown table."
+          );
+          return;
+        }
+      }
+
+      setBreakdown(null);
+      setBreakdownError(errorMessage);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  }
 
   useEffect(() => {
     let isActive = true;
@@ -401,71 +718,24 @@ export default function TeacherProgressPage() {
   }, [batches, selectedBatchId, showArchivedBatches]);
 
   useEffect(() => {
-    let isActive = true;
-
-    void (async () => {
-      try {
-        setSummaryLoading(true);
-        setSummaryError(null);
-        const nextSummary = await getTeacherReportSummary();
-        if (!isActive) {
-          return;
-        }
-        setOverviewSummary(nextSummary);
-      } catch (requestError) {
-        if (!isActive) {
-          return;
-        }
-        setSummaryError(
-          requestError instanceof Error ? requestError.message : "Unable to load teacher summary."
-        );
-      } finally {
-        if (isActive) {
-          setSummaryLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      isActive = false;
-    };
+    void loadOverviewSummary();
   }, []);
 
   useEffect(() => {
-    let isActive = true;
+    void loadBreakdown(batchId, moduleId, showArchivedBatches);
+  }, [batchId, moduleId, modules, showArchivedBatches]);
 
-    void (async () => {
-      try {
-        setBreakdownLoading(true);
-        setBreakdownError(null);
-        const nextBreakdown = await getTeacherReportBreakdown({
-          batchId,
-          moduleId,
-          includeArchivedBatches: showArchivedBatches,
-        });
-        if (!isActive) {
-          return;
-        }
-        setBreakdown(nextBreakdown);
-      } catch (requestError) {
-        if (!isActive) {
-          return;
-        }
-        setBreakdown(null);
-        setBreakdownError(
-          requestError instanceof Error ? requestError.message : "Unable to load breakdown table."
-        );
-      } finally {
-        if (isActive) {
-          setBreakdownLoading(false);
-        }
-      }
-    })();
+  useEffect(() => {
+    function handleFocus() {
+      void loadOverviewSummary();
+      void loadBreakdown(batchId, moduleId, showArchivedBatches);
+    }
 
+    window.addEventListener("focus", handleFocus);
     return () => {
-      isActive = false;
+      window.removeEventListener("focus", handleFocus);
     };
-  }, [batchId, moduleId, showArchivedBatches]);
+  }, [batchId, moduleId, modules, showArchivedBatches]);
 
   useEffect(() => {
     if (!activePanel) {

@@ -119,7 +119,10 @@ def _filtered_attempts(
     if student_id is not None:
         query = query.filter(ActivityAttempt.user_id == student_id)
     attempts = query.all()
-    enrollment_by_user = _approved_enrollments_by_user(db)
+    enrollment_by_user = _approved_enrollments_by_user(
+        db,
+        include_archived_batches=include_archived_batches,
+    )
 
     if batch_id is not None:
         return [
@@ -484,7 +487,10 @@ def get_teacher_report_breakdown(
             rows=rows,
         )
 
-    enrollment_by_user = _approved_enrollments_by_user(db)
+    enrollment_by_user = _approved_enrollments_by_user(
+        db,
+        include_archived_batches=include_archived_batches,
+    )
 
     if batch_id is not None and module_id is None:
         batch = db.query(Batch).filter(Batch.id == batch_id).first()

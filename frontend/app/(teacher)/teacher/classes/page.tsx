@@ -143,6 +143,16 @@ export default function TeacherClassesPage() {
       setPending(nextPending);
       setApproved(nextApproved);
       setRejected(nextRejected);
+      setStudentsByBatch((previous) => {
+        const next: Record<number, TeacherUserSummary[]> = {};
+        for (const batch of [...nextActiveBatches, ...nextArchivedBatches]) {
+          const cachedStudents = previous[batch.id];
+          if (cachedStudents && cachedStudents.length === batch.student_count) {
+            next[batch.id] = cachedStudents;
+          }
+        }
+        return next;
+      });
 
       const activeBatchIds = new Set(nextActiveBatches.map((batch) => String(batch.id)));
       const visibleBatchIds = new Set(
