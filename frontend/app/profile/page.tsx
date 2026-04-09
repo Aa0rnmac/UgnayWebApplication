@@ -61,6 +61,8 @@ export default function ProfilePage() {
     return `${uploadBase}/${user.profile_image_path}`;
   }, [user?.profile_image_path]);
 
+  const canEditNames = user?.role === "teacher";
+
   useEffect(() => {
     const token = window.localStorage.getItem("auth_token");
     if (!token) {
@@ -243,8 +245,13 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 First Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
+                    canEditNames
+                      ? "bg-white outline-none transition focus:border-brandBlue"
+                      : "bg-brandMutedSurface"
+                  }`}
+                  onChange={(event) => updateField("firstName", event.target.value)}
+                  readOnly={!canEditNames}
                   type="text"
                   value={form.firstName}
                 />
@@ -252,8 +259,13 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Middle Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
+                    canEditNames
+                      ? "bg-white outline-none transition focus:border-brandBlue"
+                      : "bg-brandMutedSurface"
+                  }`}
+                  onChange={(event) => updateField("middleName", event.target.value)}
+                  readOnly={!canEditNames}
                   type="text"
                   value={form.middleName}
                 />
@@ -261,8 +273,13 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Last Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
+                    canEditNames
+                      ? "bg-white outline-none transition focus:border-brandBlue"
+                      : "bg-brandMutedSurface"
+                  }`}
+                  onChange={(event) => updateField("lastName", event.target.value)}
+                  readOnly={!canEditNames}
                   type="text"
                   value={form.lastName}
                 />
