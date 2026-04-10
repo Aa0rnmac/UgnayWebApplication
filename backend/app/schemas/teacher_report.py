@@ -3,12 +3,19 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.teacher import TeacherUserSummary
+
 
 class TeacherAssessmentReportOut(BaseModel):
     id: int
     student_id: int
     module_id: int
     module_title: str
+    module_kind: str = "system"
+    module_owner_teacher: TeacherUserSummary | None = None
+    handled_by_teacher: TeacherUserSummary | None = None
+    handling_session_id: int | None = None
+    handling_started_at: datetime | None = None
     assessment_id: str
     assessment_title: str
     right_count: int
@@ -86,6 +93,11 @@ class TeacherActivityAttemptOut(BaseModel):
     student_name: str
     module_id: int
     module_title: str
+    module_kind: str = "system"
+    module_owner_teacher: TeacherUserSummary | None = None
+    handled_by_teacher: TeacherUserSummary | None = None
+    handling_session_id: int | None = None
+    handling_started_at: datetime | None = None
     activity_id: int
     activity_key: str
     activity_title: str

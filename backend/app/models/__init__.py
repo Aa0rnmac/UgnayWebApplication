@@ -9,6 +9,9 @@ from app.models.password_reset_otp import PasswordResetOtp
 from app.models.progress import UserModuleProgress
 from app.models.registration import Registration
 from app.models.session import UserSession
+from app.models.student_certificate import StudentCertificate
+from app.models.teacher_handling_session import TeacherHandlingSession
+from app.models.teacher_presence import TeacherPresence
 from app.models.teacher_invite import TeacherInvite
 from app.models.user import User
 
@@ -23,6 +26,9 @@ __all__ = [
     "AssessmentReport",
     "PasswordResetOtp",
     "Registration",
+    "StudentCertificate",
+    "TeacherHandlingSession",
+    "TeacherPresence",
     "TeacherInvite",
     "User",
     "UserModuleProgress",

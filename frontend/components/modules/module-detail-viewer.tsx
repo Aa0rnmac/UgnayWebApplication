@@ -3299,6 +3299,52 @@ export function ModuleDetailViewer({
 
       {selected ? (
         <article className="panel">
+          {!readOnly ? (
+            <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-black/10 bg-black/5 px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Session
+                </p>
+                <p className="mt-2 text-sm font-black text-slate-900">
+                  {selected.module_kind === "system"
+                    ? `Week ${selected.order_index} of 12`
+                    : "Teacher Module"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-black/10 bg-black/5 px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Time Guide
+                </p>
+                <p className="mt-2 text-sm font-black text-slate-900">Up to 2 hours</p>
+              </div>
+              <div className="rounded-xl border border-black/10 bg-black/5 px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Saved Progress
+                </p>
+                <p className="mt-2 text-sm font-black text-slate-900">
+                  {selected.progress_percent}% complete
+                </p>
+              </div>
+              <div className="rounded-xl border border-black/10 bg-black/5 px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Latest Score
+                </p>
+                <p className="mt-2 text-sm font-black text-slate-900">
+                  {selected.assessment_score === null
+                    ? "No score yet"
+                    : `${selected.assessment_score.toFixed(0)}%`}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {!readOnly ? (
+            <div className="mb-4 rounded-xl border border-brandBlue/20 bg-brandBlueLight px-4 py-3 text-sm text-slate-700">
+              Saved assessment attempts update your module progress immediately, and your teacher
+              can review the score you submit for this session.
+            </div>
+          ) : null}
+
           <div className="mb-3 flex justify-start">
             <button
               className="rounded border border-brandBlue bg-brandBlue px-3 py-1 text-xs font-semibold text-white transition hover:bg-brandBlue/90"

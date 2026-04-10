@@ -1018,7 +1018,10 @@ REQUIRED_TABLES = {
     "modules",
     "password_reset_otps",
     "registrations",
+    "student_certificates",
+    "teacher_handling_sessions",
     "teacher_invites",
+    "teacher_presences",
     "user_module_progress",
     "user_sessions",
     "users",
@@ -1053,22 +1056,42 @@ def _create_table_if_missing(table_name: str, ddl: str) -> None:
 
 def seed_modules(db: Session) -> None:
     for item in SEED_MODULES:
-        existing = db.query(Module).filter(Module.order_index == item["order_index"]).first()
+        existing = db.query(Module).filter(Module.slug == item["slug"]).first()
         if not existing:
-            db.add(Module(**item))
+            db.add(
+                Module(
+                    **item,
+                    module_kind="system",
+                    owner_teacher_id=None,
+                    source_module_id=None,
+                    is_shared_pool=False,
+                    cover_image_path=None,
+                    archived_at=None,
+                )
+            )
             continue
 
         existing.slug = item["slug"]
         existing.title = item["title"]
         existing.description = item["description"]
+        existing.order_index = item["order_index"]
         existing.lessons = item["lessons"]
         existing.assessments = item["assessments"]
+        existing.module_kind = "system"
+        existing.owner_teacher_id = None
+        existing.source_module_id = None
+        existing.is_shared_pool = False
+        existing.cover_image_path = None
         existing.is_published = item.get("is_published", True)
+        existing.archived_at = None
     db.commit()
 
 
 def seed_module_activities(db: Session) -> None:
-    modules_by_slug = {module.slug: module for module in db.query(Module).all()}
+    modules_by_slug = {
+        module.slug: module
+        for module in db.query(Module).filter(Module.module_kind == "system").all()
+    }
     for slug, activities in MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.items():
         module = modules_by_slug.get(slug)
         if not module:
@@ -1403,6 +1426,41 @@ def ensure_schema_updates() -> None:
         "ALTER TABLE users ADD COLUMN archived_at TIMESTAMP",
     )
     _add_column_if_missing(
+        "modules",
+        "module_kind",
+        "ALTER TABLE modules ADD COLUMN module_kind VARCHAR(20) NOT NULL DEFAULT 'system'",
+    )
+    _add_column_if_missing(
+        "modules",
+        "owner_teacher_id",
+        "ALTER TABLE modules ADD COLUMN owner_teacher_id INTEGER REFERENCES users(id)",
+    )
+    _add_column_if_missing(
+        "modules",
+        "source_module_id",
+        "ALTER TABLE modules ADD COLUMN source_module_id INTEGER REFERENCES modules(id)",
+    )
+    _add_column_if_missing(
+        "modules",
+        "is_shared_pool",
+        "ALTER TABLE modules ADD COLUMN is_shared_pool BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+    _add_column_if_missing(
+        "modules",
+        "cover_image_path",
+        "ALTER TABLE modules ADD COLUMN cover_image_path VARCHAR(500)",
+    )
+    _add_column_if_missing(
+        "modules",
+        "archived_at",
+        "ALTER TABLE modules ADD COLUMN archived_at TIMESTAMP",
+    )
+    _add_column_if_missing(
+        "batches",
+        "primary_teacher_id",
+        "ALTER TABLE batches ADD COLUMN primary_teacher_id INTEGER REFERENCES users(id)",
+    )
+    _add_column_if_missing(
         "enrollments",
         "rejection_reason_code",
         "ALTER TABLE enrollments ADD COLUMN rejection_reason_code VARCHAR(40)",
@@ -1436,6 +1494,89 @@ def ensure_schema_updates() -> None:
             FOREIGN KEY(original_user_id) REFERENCES users(id)
         )
         """,
+    )
+    _create_table_if_missing(
+        "student_certificates",
+        """
+        CREATE TABLE student_certificates (
+            id INTEGER PRIMARY KEY,
+            student_id INTEGER NOT NULL UNIQUE,
+            status VARCHAR(20) NOT NULL,
+            certificate_reference VARCHAR(80) NOT NULL UNIQUE,
+            decision_note TEXT,
+            decided_by_user_id INTEGER NOT NULL,
+            decided_at TIMESTAMP NOT NULL,
+            issued_at TIMESTAMP,
+            snapshot_target_required_modules INTEGER NOT NULL DEFAULT 12,
+            snapshot_effective_required_modules INTEGER NOT NULL DEFAULT 0,
+            snapshot_completed_required_modules INTEGER NOT NULL DEFAULT 0,
+            snapshot_average_best_score FLOAT NOT NULL DEFAULT 0,
+            snapshot_module_details JSON NOT NULL DEFAULT '[]',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(decided_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """,
+    )
+    _create_table_if_missing(
+        "teacher_presences",
+        """
+        CREATE TABLE teacher_presences (
+            id INTEGER PRIMARY KEY,
+            teacher_id INTEGER NOT NULL UNIQUE,
+            status VARCHAR(20) NOT NULL DEFAULT 'offline',
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(teacher_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """,
+    )
+    _create_table_if_missing(
+        "teacher_handling_sessions",
+        """
+        CREATE TABLE teacher_handling_sessions (
+            id INTEGER PRIMARY KEY,
+            teacher_id INTEGER NOT NULL,
+            batch_id INTEGER,
+            student_id INTEGER,
+            status VARCHAR(20) NOT NULL DEFAULT 'active',
+            started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            ended_at TIMESTAMP,
+            FOREIGN KEY(teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(batch_id) REFERENCES batches(id),
+            FOREIGN KEY(student_id) REFERENCES users(id)
+        )
+        """,
+    )
+    _add_column_if_missing(
+        "activity_attempts",
+        "module_owner_teacher_id",
+        "ALTER TABLE activity_attempts ADD COLUMN module_owner_teacher_id INTEGER REFERENCES users(id)",
+    )
+    _add_column_if_missing(
+        "activity_attempts",
+        "handled_by_teacher_id",
+        "ALTER TABLE activity_attempts ADD COLUMN handled_by_teacher_id INTEGER REFERENCES users(id)",
+    )
+    _add_column_if_missing(
+        "activity_attempts",
+        "handling_session_id",
+        "ALTER TABLE activity_attempts ADD COLUMN handling_session_id INTEGER REFERENCES teacher_handling_sessions(id)",
+    )
+    _add_column_if_missing(
+        "assessment_reports",
+        "module_owner_teacher_id",
+        "ALTER TABLE assessment_reports ADD COLUMN module_owner_teacher_id INTEGER REFERENCES users(id)",
+    )
+    _add_column_if_missing(
+        "assessment_reports",
+        "handled_by_teacher_id",
+        "ALTER TABLE assessment_reports ADD COLUMN handled_by_teacher_id INTEGER REFERENCES users(id)",
+    )
+    _add_column_if_missing(
+        "assessment_reports",
+        "handling_session_id",
+        "ALTER TABLE assessment_reports ADD COLUMN handling_session_id INTEGER REFERENCES teacher_handling_sessions(id)",
     )
     _add_column_if_missing(
         "user_module_progress",
@@ -1480,6 +1621,17 @@ def ensure_schema_updates() -> None:
         raise RuntimeError(
             "Published modules are missing activity blueprints: "
             + ", ".join(missing_activity_blueprints)
+        )
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE batches
+                SET primary_teacher_id = created_by_user_id
+                WHERE primary_teacher_id IS NULL AND created_by_user_id IS NOT NULL
+                """
+            )
         )
 
 

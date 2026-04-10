@@ -20,6 +20,7 @@ class Batch(Base):
     capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    primary_teacher_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -28,4 +29,10 @@ class Batch(Base):
     )
 
     created_by = relationship("User", back_populates="created_batches", foreign_keys=[created_by_user_id])
+    primary_teacher = relationship(
+        "User",
+        back_populates="primary_batches",
+        foreign_keys=[primary_teacher_id],
+    )
     enrollments = relationship("Enrollment", back_populates="batch")
+    handling_sessions = relationship("TeacherHandlingSession", back_populates="batch")

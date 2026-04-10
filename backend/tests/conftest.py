@@ -89,6 +89,15 @@ def create_teacher_headers(username: str = "teacher.main") -> dict[str, str]:
     )
 
 
+def create_admin_headers(username: str = "admin.main") -> dict[str, str]:
+    return create_user_with_session(
+        username=username,
+        password="Admin123!",
+        role="admin",
+        email=f"{username}@school.test",
+    )
+
+
 def create_student_headers(username: str) -> dict[str, str]:
     return create_user_with_session(
         username=username,
@@ -123,6 +132,11 @@ def create_teacher_invite(
 @pytest.fixture
 def teacher_headers_factory():
     return create_teacher_headers
+
+
+@pytest.fixture
+def admin_headers_factory():
+    return create_admin_headers
 
 
 @pytest.fixture

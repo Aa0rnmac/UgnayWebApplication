@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_learning_user, has_teacher_access
@@ -7,6 +8,7 @@ from app.models.module import Module
 from app.models.progress import UserModuleProgress
 from app.models.user import User
 from app.schemas.progress import ProgressSummaryOut
+from app.services.teacher_context import resolve_teacher_context_for_student
 
 router = APIRouter(prefix="/progress", tags=["progress"])
 
@@ -15,9 +17,22 @@ router = APIRouter(prefix="/progress", tags=["progress"])
 def progress_summary(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_learning_user)
 ) -> ProgressSummaryOut:
-    module_query = db.query(Module)
+    module_query = db.query(Module).filter(Module.archived_at.is_(None))
     if not has_teacher_access(current_user):
-        module_query = module_query.filter(Module.is_published.is_(True))
+        teacher_context = resolve_teacher_context_for_student(db, current_user)
+        visible_filters = [
+            and_(Module.module_kind == "system", Module.is_published.is_(True)),
+        ]
+        if teacher_context.teacher is not None:
+            visible_filters.append(
+                and_(
+                    Module.module_kind == "teacher_custom",
+                    Module.owner_teacher_id == teacher_context.teacher.id,
+                    Module.is_published.is_(True),
+                    Module.is_shared_pool.is_(False),
+                )
+            )
+        module_query = module_query.filter(or_(*visible_filters))
     total_modules = module_query.count()
     progress_entries = (
         db.query(UserModuleProgress)

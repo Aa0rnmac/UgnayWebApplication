@@ -15,6 +15,7 @@ from app.api.routes import (
     progress,
     registrations,
     teacher_enrollment,
+    teacher_modules,
     teacher_reports,
 )
 from app.db.init_db import init_db
@@ -83,8 +84,12 @@ app.include_router(progress.router, prefix="/api")
 app.include_router(lab.router, prefix="/api")
 app.include_router(registrations.router, prefix="/api")
 app.include_router(teacher_enrollment.router, prefix="/api")
+app.include_router(teacher_modules.router, prefix="/api")
 app.include_router(teacher_reports.router, prefix="/api")
 
 profiles_path = (Path(__file__).resolve().parents[1] / "uploads" / "profiles").resolve()
 profiles_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads/profiles", StaticFiles(directory=profiles_path), name="profile-uploads")
+module_covers_path = (Path(__file__).resolve().parents[1] / "uploads" / "module-covers").resolve()
+module_covers_path.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads/module-covers", StaticFiles(directory=module_covers_path), name="module-cover-uploads")

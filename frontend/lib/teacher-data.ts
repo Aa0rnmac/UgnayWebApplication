@@ -244,6 +244,10 @@ function buildTeacherModulePracticeGuides(modules: ModuleItem[]): TeacherModuleP
   return modules.map((module) => buildTeacherModulePracticeGuide(module));
 }
 
+function getBaselineSystemModules(modules: ModuleItem[]) {
+  return modules.filter((module) => module.module_kind === "system");
+}
+
 function summarizeModules(modules: ModuleItem[]) {
   return {
     totalLessons: modules.reduce((total, module) => total + module.lessons.length, 0),
@@ -344,7 +348,8 @@ function deriveNextStep(
 }
 
 export async function getTeacherModuleCatalogData(): Promise<TeacherModuleCatalogData> {
-  const modules = await sharedModulesLoader.load();
+  const allModules = await sharedModulesLoader.load();
+  const modules = getBaselineSystemModules(allModules);
   const moduleSummary = summarizeModules(modules);
 
   return {
@@ -372,11 +377,12 @@ export async function getTeacherModuleDetailData(
 }
 
 export async function getTeacherLabData(): Promise<TeacherLabWorkspaceData> {
-  const [{ alphabetStatus, numbersStatus, wordsStatus }, modules] = await Promise.all([
+  const [{ alphabetStatus, numbersStatus, wordsStatus }, allModules] = await Promise.all([
     teacherLabLoader.load(),
     sharedModulesLoader.load(),
   ]);
 
+  const modules = getBaselineSystemModules(allModules);
   const guides = buildTeacherModulePracticeGuides(modules);
   const statuses = buildTeacherLabStatuses(alphabetStatus, numbersStatus, wordsStatus);
 
@@ -389,7 +395,7 @@ export async function getTeacherLabData(): Promise<TeacherLabWorkspaceData> {
 }
 
 export async function getTeacherWorkspaceSnapshot(): Promise<TeacherWorkspaceSnapshot> {
-  const [modules, batches, pendingEnrollments, approvedEnrollments, reportSummary, labData] =
+  const [allModules, batches, pendingEnrollments, approvedEnrollments, reportSummary, labData] =
     await Promise.all([
       sharedModulesLoader.load(),
       getTeacherBatches(),
@@ -399,6 +405,7 @@ export async function getTeacherWorkspaceSnapshot(): Promise<TeacherWorkspaceSna
       getTeacherLabData(),
     ]);
 
+  const modules = getBaselineSystemModules(allModules);
   const moduleSummary = summarizeModules(modules);
 
   return {

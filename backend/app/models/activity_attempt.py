@@ -19,6 +19,15 @@ class ActivityAttempt(Base):
     module_activity_id: Mapped[int] = mapped_column(
         ForeignKey("module_activities.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    module_owner_teacher_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    handled_by_teacher_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    handling_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("teacher_handling_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     activity_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     activity_title: Mapped[str] = mapped_column(String(255), nullable=False)
     activity_type: Mapped[str] = mapped_column(String(60), nullable=False)
@@ -36,9 +45,20 @@ class ActivityAttempt(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    user = relationship("User", back_populates="activity_attempts")
+    user = relationship("User", back_populates="activity_attempts", foreign_keys=[user_id])
     module = relationship("Module", back_populates="activity_attempts")
     module_activity = relationship("ModuleActivity", back_populates="attempts")
+    module_owner_teacher = relationship(
+        "User",
+        back_populates="module_owned_activity_attempts",
+        foreign_keys=[module_owner_teacher_id],
+    )
+    handled_by_teacher = relationship(
+        "User",
+        back_populates="handled_activity_attempts",
+        foreign_keys=[handled_by_teacher_id],
+    )
+    handling_session = relationship("TeacherHandlingSession", back_populates="attempts")
     items = relationship(
         "ActivityAttemptItem",
         back_populates="attempt",

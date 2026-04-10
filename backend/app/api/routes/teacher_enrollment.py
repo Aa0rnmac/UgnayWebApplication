@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.deps import get_current_teacher
 from app.core.config import settings
+from app.core.datetime_utils import utc_now
 from app.models.activity_attempt import ActivityAttempt
 from app.core.config import PROJECT_ROOT
 from app.db.session import get_db
@@ -14,18 +15,23 @@ from app.models.batch import Batch
 from app.models.enrollment import Enrollment
 from app.models.progress import UserModuleProgress
 from app.models.registration import Registration
+from app.models.student_certificate import StudentCertificate
 from app.models.user import User
 from app.schemas.registration import RegistrationOut
 from app.schemas.teacher import (
     TeacherBatchCreateRequest,
     TeacherBatchOut,
+    TeacherCertificateHistoryItemOut,
     TeacherEnrollmentApprovalResultOut,
     TeacherEnrollmentApproveRequest,
     TeacherEnrollmentOut,
     TeacherEnrollmentRejectRequest,
     TeacherEnrollmentRejectionResultOut,
+    TeacherStudentCertificateDecisionRequest,
+    TeacherStudentCertificateOut,
     TeacherStudentModuleProgressOut,
     TeacherStudentOut,
+    TeacherHandlingSessionOut,
     TeacherUserSummary,
 )
 from app.schemas.teacher_report import TeacherActivityAttemptItemOut, TeacherActivityAttemptOut
@@ -36,6 +42,18 @@ from app.services.enrollment_service import (
     get_or_create_batch,
     normalize_batch_code,
     registration_display_name,
+)
+from app.services.student_certificate import build_student_certificate_status, certificate_reference
+from app.services.teacher_context import approved_enrollment_for_student, resolve_teacher_context_for_student
+from app.services.teacher_scope import (
+    ensure_teacher_can_access_batch,
+    ensure_teacher_can_access_enrollment,
+    ensure_teacher_can_decide_certificate,
+    ensure_teacher_can_view_student,
+    resolve_teacher_student_scope,
+    teacher_can_access_enrollment,
+    teacher_can_access_performance_record,
+    teacher_has_global_access,
 )
 
 router = APIRouter(prefix="/teacher", tags=["teacher-enrollment"])
@@ -50,6 +68,17 @@ def _full_name(user: User) -> str:
         if part and part.strip()
     ).strip()
     return full_name or user.username
+
+
+def _get_student_or_404(db: Session, student_id: int) -> User:
+    student = (
+        db.query(User)
+        .filter(User.id == student_id, User.role == "student", User.archived_at.is_(None))
+        .first()
+    )
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
+    return student
 
 
 def _registration_out(registration: Registration, enrollment: Enrollment | None = None) -> RegistrationOut:
@@ -90,6 +119,7 @@ def _batch_out(batch: Batch | None, *, student_count: int = 0) -> TeacherBatchOu
         capacity=batch.capacity,
         notes=batch.notes,
         student_count=student_count,
+        primary_teacher=_student_summary(batch.primary_teacher),
         created_at=batch.created_at,
     )
 
@@ -230,6 +260,11 @@ def _activity_attempt_out(attempt: ActivityAttempt) -> TeacherActivityAttemptOut
         student_name=_full_name(attempt.user),
         module_id=attempt.module_id,
         module_title=attempt.module.title,
+        module_kind=attempt.module.module_kind,
+        module_owner_teacher=_student_summary(attempt.module_owner_teacher),
+        handled_by_teacher=_student_summary(attempt.handled_by_teacher),
+        handling_session_id=attempt.handling_session_id,
+        handling_started_at=attempt.handling_session.started_at if attempt.handling_session else None,
         activity_id=attempt.module_activity_id,
         activity_key=attempt.activity_key,
         activity_title=attempt.activity_title,
@@ -258,17 +293,60 @@ def _activity_attempt_out(attempt: ActivityAttempt) -> TeacherActivityAttemptOut
 
 
 def _get_enrollment_or_404(db: Session, enrollment_id: int) -> Enrollment:
-    enrollment = db.query(Enrollment).filter(Enrollment.id == enrollment_id).first()
+    enrollment = (
+        db.query(Enrollment)
+        .options(
+            joinedload(Enrollment.registration),
+            joinedload(Enrollment.user),
+            joinedload(Enrollment.batch).joinedload(Batch.primary_teacher),
+        )
+        .filter(Enrollment.id == enrollment_id)
+        .first()
+    )
     if not enrollment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enrollment not found.")
     return enrollment
 
 
 def _get_batch_or_404(db: Session, batch_id: int) -> Batch:
-    batch = db.query(Batch).filter(Batch.id == batch_id).first()
+    batch = (
+        db.query(Batch)
+        .options(
+            joinedload(Batch.primary_teacher),
+            selectinload(Batch.enrollments).joinedload(Enrollment.user),
+        )
+        .filter(Batch.id == batch_id)
+        .first()
+    )
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
     return batch
+
+
+def _latest_approved_enrollments_for_students(
+    db: Session,
+    student_ids: list[int],
+) -> dict[int, Enrollment]:
+    if not student_ids:
+        return {}
+
+    enrollments = (
+        db.query(Enrollment)
+        .options(joinedload(Enrollment.batch).joinedload(Batch.primary_teacher))
+        .filter(
+            Enrollment.user_id.in_(student_ids),
+            Enrollment.status == "approved",
+        )
+        .order_by(Enrollment.user_id.asc(), Enrollment.approved_at.desc(), Enrollment.id.desc())
+        .all()
+    )
+
+    latest_by_student: dict[int, Enrollment] = {}
+    for enrollment in enrollments:
+        if enrollment.user_id is None or enrollment.user_id in latest_by_student:
+            continue
+        latest_by_student[enrollment.user_id] = enrollment
+    return latest_by_student
 
 
 def _resolve_payment_proof_path(registration: Registration) -> Path:
@@ -294,6 +372,9 @@ def _student_attempts_query(db: Session, student_id: int):
         .options(
             joinedload(ActivityAttempt.user),
             joinedload(ActivityAttempt.module),
+            joinedload(ActivityAttempt.module_owner_teacher),
+            joinedload(ActivityAttempt.handled_by_teacher),
+            joinedload(ActivityAttempt.handling_session),
             selectinload(ActivityAttempt.items),
         )
         .filter(ActivityAttempt.user_id == student_id)
@@ -307,6 +388,9 @@ def _get_activity_attempt_or_404(db: Session, attempt_id: int) -> ActivityAttemp
         .options(
             joinedload(ActivityAttempt.user),
             joinedload(ActivityAttempt.module),
+            joinedload(ActivityAttempt.module_owner_teacher),
+            joinedload(ActivityAttempt.handled_by_teacher),
+            joinedload(ActivityAttempt.handling_session),
             selectinload(ActivityAttempt.items),
         )
         .filter(ActivityAttempt.id == attempt_id)
@@ -317,28 +401,69 @@ def _get_activity_attempt_or_404(db: Session, attempt_id: int) -> ActivityAttemp
     return attempt
 
 
+def _certificate_history_out(
+    record: StudentCertificate,
+    *,
+    enrollment: Enrollment | None,
+) -> TeacherCertificateHistoryItemOut:
+    batch = enrollment.batch if enrollment is not None else None
+    student = _student_summary(record.student)
+    if student is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
+
+    return TeacherCertificateHistoryItemOut(
+        id=record.id,
+        student=student,
+        batch=_batch_out(batch, student_count=0) if batch is not None else None,
+        status=record.status,
+        certificate_reference=record.certificate_reference,
+        decision_note=record.decision_note,
+        decided_at=record.decided_at,
+        decided_by_name=_full_name(record.decided_by) if record.decided_by is not None else "Unknown Teacher",
+        issued_at=record.issued_at,
+    )
+
+
 @router.get("/enrollments", response_model=list[TeacherEnrollmentOut])
 def list_teacher_enrollments(
     status_filter: str | None = Query(default=None, alias="status"),
     batch_id: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> list[TeacherEnrollmentOut]:
-    query = db.query(Enrollment).order_by(Enrollment.created_at.desc(), Enrollment.id.desc())
+    if batch_id is not None:
+        batch = _get_batch_or_404(db, batch_id)
+        ensure_teacher_can_access_batch(current_teacher=current_teacher, batch=batch)
+
+    query = (
+        db.query(Enrollment)
+        .options(
+            joinedload(Enrollment.registration),
+            joinedload(Enrollment.user),
+            joinedload(Enrollment.batch).joinedload(Batch.primary_teacher),
+        )
+        .order_by(Enrollment.created_at.desc(), Enrollment.id.desc())
+    )
     if status_filter:
         query = query.filter(Enrollment.status == status_filter)
     if batch_id is not None:
         query = query.filter(Enrollment.batch_id == batch_id)
-    return [_enrollment_out(enrollment) for enrollment in query.all()]
+    enrollments = [
+        enrollment
+        for enrollment in query.all()
+        if teacher_can_access_enrollment(current_teacher, enrollment)
+    ]
+    return [_enrollment_out(enrollment) for enrollment in enrollments]
 
 
 @router.get("/enrollments/{enrollment_id}", response_model=TeacherEnrollmentOut)
 def get_teacher_enrollment(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> TeacherEnrollmentOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
     return _enrollment_out(enrollment)
 
 
@@ -346,9 +471,10 @@ def get_teacher_enrollment(
 def get_enrollment_payment_proof(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ):
     enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
     proof_path = _resolve_payment_proof_path(enrollment.registration)
     return FileResponse(path=proof_path)
 
@@ -361,6 +487,7 @@ def approve_teacher_enrollment(
     current_teacher: User = Depends(get_current_teacher),
 ) -> TeacherEnrollmentApprovalResultOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
     batch = get_or_create_batch(
         db,
         current_teacher=current_teacher,
@@ -395,6 +522,7 @@ def reject_teacher_enrollment(
     current_teacher: User = Depends(get_current_teacher),
 ) -> TeacherEnrollmentRejectionResultOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
     from app.services.enrollment_service import reject_enrollment
 
     rejection_reason = _rejection_reason_summary(
@@ -431,12 +559,21 @@ def reject_teacher_enrollment(
 def list_teacher_batches(
     status_filter: Literal["active", "archived", "all"] = Query(default="active", alias="status"),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> list[TeacherBatchOut]:
-    query = db.query(Batch).order_by(Batch.name.asc(), Batch.id.asc())
+    query = (
+        db.query(Batch)
+        .options(
+            joinedload(Batch.primary_teacher),
+            selectinload(Batch.enrollments).joinedload(Enrollment.user),
+        )
+        .order_by(Batch.name.asc(), Batch.id.asc())
+    )
     if status_filter != "all":
         query = query.filter(Batch.status == status_filter)
     batches = query.all()
+    if not teacher_has_global_access(current_teacher):
+        batches = [batch for batch in batches if batch.primary_teacher_id == current_teacher.id]
     return [
         _batch_out(
             batch,
@@ -469,6 +606,7 @@ def create_teacher_batch(
         capacity=payload.capacity,
         notes=payload.notes.strip() if payload.notes else None,
         created_by_user_id=current_teacher.id,
+        primary_teacher_id=current_teacher.id,
     )
     db.add(batch)
     db.commit()
@@ -480,9 +618,10 @@ def create_teacher_batch(
 def archive_teacher_batch(
     batch_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> TeacherBatchOut:
     batch = _get_batch_or_404(db, batch_id)
+    ensure_teacher_can_access_batch(current_teacher=current_teacher, batch=batch)
     if batch.status != "archived":
         batch.status = "archived"
         db.add(batch)
@@ -495,9 +634,10 @@ def archive_teacher_batch(
 def restore_teacher_batch(
     batch_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> TeacherBatchOut:
     batch = _get_batch_or_404(db, batch_id)
+    ensure_teacher_can_access_batch(current_teacher=current_teacher, batch=batch)
     if batch.status != "active":
         batch.status = "active"
         db.add(batch)
@@ -510,9 +650,10 @@ def restore_teacher_batch(
 def list_batch_students(
     batch_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> list[TeacherUserSummary]:
     batch = _get_batch_or_404(db, batch_id)
+    ensure_teacher_can_access_batch(current_teacher=current_teacher, batch=batch)
 
     students = [
         enrollment.user
@@ -529,22 +670,13 @@ def list_batch_students(
 def get_teacher_student(
     student_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> TeacherStudentOut:
-    student = (
-        db.query(User)
-        .filter(User.id == student_id, User.role == "student", User.archived_at.is_(None))
-        .first()
-    )
-    if not student:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
-
-    active_enrollment = (
-        db.query(Enrollment)
-        .filter(Enrollment.user_id == student.id, Enrollment.status == "approved")
-        .order_by(Enrollment.approved_at.desc(), Enrollment.id.desc())
-        .first()
-    )
+    student = _get_student_or_404(db, student_id)
+    access_scope = resolve_teacher_student_scope(db, current_teacher=current_teacher, student=student)
+    ensure_teacher_can_view_student(current_teacher=current_teacher, scope=access_scope)
+    teacher_context = resolve_teacher_context_for_student(db, student)
+    active_enrollment = teacher_context.enrollment
     progress_rows = (
         db.query(UserModuleProgress)
         .filter(UserModuleProgress.user_id == student.id)
@@ -558,6 +690,10 @@ def get_teacher_student(
             TeacherStudentModuleProgressOut(
                 module_id=row.module_id,
                 module_title=module_title,
+                module_kind=row.module.module_kind if getattr(row, "module", None) else "system",
+                owner_teacher=_student_summary(
+                    row.module.owner_teacher if getattr(row, "module", None) else None
+                ),
                 status=row.status,
                 progress_percent=row.progress_percent,
                 assessment_score=row.assessment_score,
@@ -576,7 +712,23 @@ def get_teacher_student(
         role=student.role,
         enrollment_status=active_enrollment.status if active_enrollment else None,
         batch=_batch_out(active_enrollment.batch, student_count=0) if active_enrollment else None,
+        resolved_teacher=_student_summary(teacher_context.teacher),
+        active_handling_session=_session_out_for_student_detail(teacher_context.session),
         module_progress=module_progress,
+    )
+
+
+def _session_out_for_student_detail(session) -> TeacherHandlingSessionOut | None:
+    if session is None:
+        return None
+    return TeacherHandlingSessionOut(
+        id=session.id,
+        status=session.status,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        teacher=_student_summary(session.teacher),
+        batch=_batch_out(session.batch, student_count=0) if session.batch is not None else None,
+        student=_student_summary(session.student),
     )
 
 
@@ -584,22 +736,146 @@ def get_teacher_student(
 def list_teacher_student_activity_attempts(
     student_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> list[TeacherActivityAttemptOut]:
-    student = (
-        db.query(User)
-        .filter(User.id == student_id, User.role == "student", User.archived_at.is_(None))
+    student = _get_student_or_404(db, student_id)
+    access_scope = resolve_teacher_student_scope(db, current_teacher=current_teacher, student=student)
+    ensure_teacher_can_view_student(current_teacher=current_teacher, scope=access_scope)
+    return [_activity_attempt_out(attempt) for attempt in _student_attempts_query(db, student_id).all()]
+
+
+@router.get("/certificates", response_model=list[TeacherCertificateHistoryItemOut])
+def list_teacher_certificate_history(
+    status_filter: Literal["issued", "all"] = Query(default="issued", alias="status"),
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> list[TeacherCertificateHistoryItemOut]:
+    records = (
+        db.query(StudentCertificate)
+        .options(
+            joinedload(StudentCertificate.student),
+            joinedload(StudentCertificate.decided_by),
+        )
+        .order_by(
+            StudentCertificate.issued_at.is_(None).asc(),
+            StudentCertificate.issued_at.desc(),
+            StudentCertificate.decided_at.desc(),
+            StudentCertificate.id.desc(),
+        )
+        .all()
+    )
+
+    enrollment_map = _latest_approved_enrollments_for_students(
+        db,
+        [record.student_id for record in records],
+    )
+
+    history: list[TeacherCertificateHistoryItemOut] = []
+    for record in records:
+        if status_filter == "issued" and record.issued_at is None:
+            continue
+
+        enrollment = enrollment_map.get(record.student_id)
+        batch = enrollment.batch if enrollment is not None else None
+        owns_current_batch = batch is not None and batch.primary_teacher_id == current_teacher.id
+        if (
+            not teacher_has_global_access(current_teacher)
+            and record.decided_by_user_id != current_teacher.id
+            and not owns_current_batch
+        ):
+            continue
+
+        history.append(_certificate_history_out(record, enrollment=enrollment))
+
+    return history
+
+
+@router.get("/students/{student_id}/certificate", response_model=TeacherStudentCertificateOut)
+def get_teacher_student_certificate(
+    student_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherStudentCertificateOut:
+    student = _get_student_or_404(db, student_id)
+    access_scope = resolve_teacher_student_scope(db, current_teacher=current_teacher, student=student)
+    ensure_teacher_can_view_student(current_teacher=current_teacher, scope=access_scope)
+    return build_student_certificate_status(
+        db,
+        student=student,
+        preview_teacher=current_teacher,
+        allow_preview_template=True,
+    )
+
+
+@router.post("/students/{student_id}/certificate/decision", response_model=TeacherStudentCertificateOut)
+def decide_teacher_student_certificate(
+    student_id: int,
+    payload: TeacherStudentCertificateDecisionRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherStudentCertificateOut:
+    student = _get_student_or_404(db, student_id)
+    access_scope = resolve_teacher_student_scope(db, current_teacher=current_teacher, student=student)
+    ensure_teacher_can_decide_certificate(current_teacher=current_teacher, scope=access_scope)
+    certificate = build_student_certificate_status(
+        db,
+        student=student,
+        preview_teacher=current_teacher,
+        allow_preview_template=True,
+    )
+    if not certificate.summary.eligible:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Student does not currently meet the certificate criteria.",
+        )
+
+    record = (
+        db.query(StudentCertificate)
+        .filter(StudentCertificate.student_id == student.id)
         .first()
     )
-    if not student:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
-    return [_activity_attempt_out(attempt) for attempt in _student_attempts_query(db, student_id).all()]
+    if record is None:
+        record = StudentCertificate(
+            student_id=student.id,
+            certificate_reference=certificate_reference(student.id),
+        )
+
+    now = utc_now()
+    normalized_note = payload.note.strip() if payload.note and payload.note.strip() else None
+    record.status = "approved" if payload.decision == "approve" else "rejected"
+    record.decision_note = normalized_note
+    record.decided_by_user_id = current_teacher.id
+    record.decided_at = now
+    record.issued_at = now if payload.decision == "approve" else None
+    record.snapshot_target_required_modules = certificate.summary.target_required_modules
+    record.snapshot_effective_required_modules = certificate.summary.effective_required_modules
+    record.snapshot_completed_required_modules = certificate.summary.completed_required_modules
+    record.snapshot_average_best_score = certificate.summary.average_best_score
+    record.snapshot_module_details = [item.model_dump() for item in certificate.modules]
+
+    db.add(record)
+    db.commit()
+
+    return build_student_certificate_status(
+        db,
+        student=student,
+        preview_teacher=current_teacher,
+        allow_preview_template=True,
+    )
 
 
 @router.get("/activity-attempts/{attempt_id}", response_model=TeacherActivityAttemptOut)
 def get_teacher_activity_attempt(
     attempt_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_teacher),
+    current_teacher: User = Depends(get_current_teacher),
 ) -> TeacherActivityAttemptOut:
-    return _activity_attempt_out(_get_activity_attempt_or_404(db, attempt_id))
+    attempt = _get_activity_attempt_or_404(db, attempt_id)
+    enrollment = approved_enrollment_for_student(db, attempt.user_id)
+    if not teacher_can_access_performance_record(
+        current_teacher=current_teacher,
+        enrollment=enrollment,
+        handled_by_teacher_id=attempt.handled_by_teacher_id,
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity attempt not found.")
+    return _activity_attempt_out(attempt)

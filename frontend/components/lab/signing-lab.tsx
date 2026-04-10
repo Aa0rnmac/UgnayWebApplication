@@ -18,8 +18,20 @@ import {
 
 type SigningLabVariant = "student" | "teacher";
 
+export type SigningLabTeacherFocus = {
+  title: string;
+  description: string;
+  selectorHint: string;
+  prepFocus?: string;
+  readiness?: "ready" | "attention";
+};
+
 type SigningLabProps = {
   variant?: SigningLabVariant;
+  preferredMode?: RecognitionMode;
+  preferredNumbersCategory?: NumbersCategory;
+  preferredWordsCategory?: WordsCategory;
+  teacherFocus?: SigningLabTeacherFocus | null;
 };
 
 type CaptureOptions = {
@@ -43,7 +55,99 @@ function formatResultTime(value: number | null) {
   }
 }
 
-export function SigningLab({ variant = "student" }: SigningLabProps) {
+const MODE_OPTIONS: { value: RecognitionMode; label: string }[] = [
+  { value: "alphabet", label: "Alphabet" },
+  { value: "numbers", label: "Numbers" },
+  { value: "words", label: "Words" },
+];
+
+const NUMBER_OPTIONS: { value: NumbersCategory; label: string }[] = [
+  { value: "0-10", label: "0-10" },
+  { value: "11-20", label: "11-20" },
+  { value: "21-30", label: "21-30" },
+  { value: "31-40", label: "31-40" },
+  { value: "41-50", label: "41-50" },
+  { value: "51-60", label: "51-60" },
+  { value: "61-70", label: "61-70" },
+  { value: "71-80", label: "71-80" },
+  { value: "81-90", label: "81-90" },
+  { value: "91-100", label: "91-100" },
+];
+
+const WORD_OPTIONS: { value: WordsCategory; label: string }[] = [
+  { value: "greeting", label: "Greeting" },
+  { value: "responses", label: "Responses" },
+  { value: "date", label: "Days" },
+  { value: "family", label: "Family" },
+  { value: "relationship", label: "People" },
+  { value: "color", label: "Color" },
+];
+
+function formatModeTitle(mode: RecognitionMode) {
+  if (mode === "numbers") {
+    return "Numbers";
+  }
+  if (mode === "words") {
+    return "Words";
+  }
+  return "Alphabet";
+}
+
+function formatWordsCategoryLabel(category: WordsCategory) {
+  return WORD_OPTIONS.find((option) => option.value === category)?.label ?? "Words";
+}
+
+function currentLaneLabel(
+  mode: RecognitionMode,
+  numbersCategory: NumbersCategory,
+  wordsCategory: WordsCategory
+) {
+  if (mode === "numbers") {
+    return `Numbers ${numbersCategory}`;
+  }
+  if (mode === "words") {
+    return `Words · ${formatWordsCategoryLabel(wordsCategory)}`;
+  }
+  return "Alphabet";
+}
+
+function buildTeacherChecklist(
+  mode: RecognitionMode,
+  numbersCategory: NumbersCategory,
+  wordsCategory: WordsCategory
+) {
+  if (mode === "alphabet") {
+    return [
+      "Keep one hand centered and hold the final letter shape for a short beat before checking the result.",
+      "Use repeated quick tries to compare similar letters and confirm consistency before scoring learners.",
+      "Clear the result between attempts when you want a clean teacher-only rehearsal log.",
+    ];
+  }
+
+  if (mode === "numbers") {
+    return [
+      numbersCategory === "0-10"
+        ? "For 0-10, prioritize a stable handshape and good framing over speed."
+        : `For ${numbersCategory}, let the motion finish fully before reviewing the capture result.`,
+      "Ask the learner to repeat the sign with the same tempo if the model returns an unsure or weak result.",
+      "Use manual capture after the countdown so the teacher can control exactly when the sequence starts.",
+    ];
+  }
+
+  return [
+    `Match the lesson lane to ${formatWordsCategoryLabel(wordsCategory)} before recording the gesture sequence.`,
+    "Keep the whole movement inside the frame from start to finish so the sequence model sees the transition.",
+    "Run one more pass when a phrase starts or ends out of frame, or when the top candidates are too close together.",
+  ];
+}
+
+export function SigningLab({
+  variant = "student",
+  preferredMode,
+  preferredNumbersCategory,
+  preferredWordsCategory,
+  teacherFocus,
+}: SigningLabProps) {
   const REPEAT_TOKEN_COOLDOWN_MS = 1400;
   const ALPHABET_PALM_COOLDOWN_MS = 900;
   const isTeacherTester = variant === "teacher";
@@ -82,6 +186,27 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
   const [lastTestedAt, setLastTestedAt] = useState<number | null>(null);
 
   const isSequenceMode = mode === "numbers" || mode === "words";
+
+  useEffect(() => {
+    if (!preferredMode) {
+      return;
+    }
+    setMode(preferredMode);
+  }, [preferredMode]);
+
+  useEffect(() => {
+    if (!preferredNumbersCategory) {
+      return;
+    }
+    setNumbersCategory(preferredNumbersCategory);
+  }, [preferredNumbersCategory]);
+
+  useEffect(() => {
+    if (!preferredWordsCategory) {
+      return;
+    }
+    setWordsCategory(preferredWordsCategory);
+  }, [preferredWordsCategory]);
 
   useEffect(() => {
     predictionRef.current = prediction;
@@ -821,6 +946,364 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     : isSequenceMode
       ? "Analyzing gesture sequence..."
       : "Live mode active";
+  const confidencePercent = confidence !== null ? Math.round(confidence * 100) : null;
+  const confidenceLabel =
+    confidencePercent === null
+      ? "Awaiting capture"
+      : confidencePercent >= 85
+        ? "High confidence"
+        : confidencePercent >= 65
+          ? "Moderate confidence"
+          : "Low confidence";
+  const confidenceBarTone =
+    confidencePercent === null
+      ? "bg-slate-300"
+      : confidencePercent >= 85
+        ? "bg-brandGreen"
+        : confidencePercent >= 65
+          ? "bg-amber-400"
+          : "bg-brandRed";
+  const teacherTitle = teacherFocus?.title ?? `${formatModeTitle(mode)} teacher check`;
+  const teacherDescription =
+    teacherFocus?.description ??
+    "Use this workspace to rehearse the live recognition lane, verify readiness, and compare model output before using the activity in class.";
+  const teacherHint =
+    teacherFocus?.selectorHint ??
+    (mode === "numbers"
+      ? "Match the numbers range before recording the gesture."
+      : mode === "words"
+        ? "Match the lesson category before recording the sequence."
+        : "Use alphabet for single-letter checks and quick repetition drills.");
+  const teacherPrepFocus =
+    teacherFocus?.prepFocus ??
+    (mode === "numbers"
+      ? "Coach the learner to finish the gesture cleanly before reviewing the capture."
+      : mode === "words"
+        ? "Keep the whole sequence inside the frame and retry if the start or end is clipped."
+        : "Use repeated short checks to compare similar handshapes and verify consistency.");
+  const teacherChecklist = buildTeacherChecklist(mode, numbersCategory, wordsCategory);
+  const selectedLaneLabel = currentLaneLabel(mode, numbersCategory, wordsCategory);
+  const teacherStatusTone =
+    modeReady === false || teacherFocus?.readiness === "attention"
+      ? "border-brandYellow/40 bg-brandYellowLight text-brandNavy"
+      : modeReady
+        ? "border-brandGreen/40 bg-brandGreenLight text-brandGreen"
+        : "border-brandBlue/20 bg-brandBlue/10 text-brandBlue";
+
+  if (isTeacherTester) {
+    return (
+      <section className="space-y-4">
+        <div className="panel overflow-hidden">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
+                Teacher Check Workspace
+              </p>
+              <h2 className="teacher-panel-heading mt-3 text-3xl font-black tracking-tight">
+                {teacherTitle}
+              </h2>
+              <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
+                {teacherDescription}
+              </p>
+            </div>
+            <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${teacherStatusTone}`}>
+              {modeReady === false || teacherFocus?.readiness === "attention"
+                ? "Selected lane needs teacher caution."
+                : modeReady
+                  ? "Selected lane is ready for guided checks."
+                  : "Select a lane and warm the model."}
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">
+                Active Lane
+              </p>
+              <p className="teacher-card-title mt-2 text-lg font-black">{selectedLaneLabel}</p>
+              <p className="teacher-card-copy mt-2 text-xs leading-relaxed">{teacherHint}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">
+                Model Status
+              </p>
+              <p className="teacher-card-title mt-2 text-lg font-black">
+                {modeReady === false
+                  ? "Needs attention"
+                  : modeReady
+                    ? "Ready to test"
+                    : "Waiting for warm-up"}
+              </p>
+              <p className="teacher-card-copy mt-2 text-xs leading-relaxed">
+                {modeStatusMessage ?? "Start the camera to warm the selected model lane."}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">
+                Best Practice
+              </p>
+              <p className="teacher-card-title mt-2 text-lg font-black">Coach with intent</p>
+              <p className="teacher-card-copy mt-2 text-xs leading-relaxed">
+                {teacherPrepFocus}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+          <div className="panel panel-lively overflow-hidden">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandGreen">
+                  Live Camera Preview
+                </p>
+                <p className="teacher-card-title mt-2 text-lg font-black">
+                  Frame the signer before you capture.
+                </p>
+              </div>
+              <span className="rounded-full border border-brandBorder bg-brandYellowLight px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-brandNavy">
+                {captureStatus ?? (predicting ? activeStatus : running ? idleStatus : "Camera is off")}
+              </span>
+            </div>
+
+            <div className="relative mt-4 overflow-hidden rounded-[1.6rem] border border-slate-300 bg-slate-950">
+              <video
+                autoPlay
+                className="aspect-video w-full object-cover"
+                muted
+                playsInline
+                ref={videoRef}
+              />
+              {!running ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/78 px-6 text-center text-white">
+                  <p className="text-xs font-semibold uppercase tracking-[0.32em] text-white/70">
+                    Camera Off
+                  </p>
+                  <p className="mt-3 text-2xl font-black">
+                    Start the camera to preview the signing space.
+                  </p>
+                  <p className="mt-3 max-w-md text-sm leading-relaxed text-white/75">
+                    Use even lighting, keep hands inside frame, and make sure the final gesture can
+                    be seen clearly before you run a teacher check.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                className={`rounded-lg px-4 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 ${
+                  running ? "bg-brandRed hover:bg-brandRed/90" : "bg-brandBlue hover:bg-brandBlue/90"
+                }`}
+                onClick={() => {
+                  void toggleCamera();
+                }}
+                type="button"
+              >
+                <span className="inline-grid min-w-[112px] place-items-center">
+                  <span
+                    className={`col-start-1 row-start-1 transition-all duration-300 ${
+                      running ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"
+                    }`}
+                  >
+                    Start Camera
+                  </span>
+                  <span
+                    className={`col-start-1 row-start-1 transition-all duration-300 ${
+                      running ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
+                    }`}
+                  >
+                    Stop Camera
+                  </span>
+                </span>
+              </button>
+              <button
+                className="rounded-lg bg-brandRed px-4 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!running || predicting || warmingModel || modeReady === false}
+                onClick={() => {
+                  void runPrediction();
+                }}
+                type="button"
+              >
+                {warmingModel ? "Preparing Model..." : actionLabel}
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs leading-relaxed text-slate-600">
+              {isSequenceMode
+                ? "Use the teacher-controlled capture to compare repeat attempts and review the clearest sequence."
+                : "Alphabet checks can be repeated quickly to compare similar letters and confirm stable handshape output."}
+            </p>
+          </div>
+
+          <aside className="space-y-4">
+            <div className="panel panel-lively">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accentWarm">
+                Lane Setup
+              </p>
+
+              <label
+                className="mt-4 block text-xs uppercase tracking-wider label-accent"
+                htmlFor="recognition-mode"
+              >
+                {modeLabel}
+              </label>
+              <select
+                className="teacher-card-control mt-2 w-full"
+                id="recognition-mode"
+                onChange={(event) => setMode(event.target.value as RecognitionMode)}
+                value={mode}
+              >
+                {MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              {mode === "numbers" ? (
+                <div className="mt-4">
+                  <label
+                    className="text-xs uppercase tracking-wider label-accent"
+                    htmlFor="numbers-category"
+                  >
+                    Numbers Range
+                  </label>
+                  <select
+                    className="teacher-card-control mt-2 w-full"
+                    id="numbers-category"
+                    onChange={(event) => setNumbersCategory(event.target.value as NumbersCategory)}
+                    value={numbersCategory}
+                  >
+                    {NUMBER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
+              {mode === "words" ? (
+                <div className="mt-4">
+                  <label
+                    className="text-xs uppercase tracking-wider label-accent"
+                    htmlFor="words-category"
+                  >
+                    Words Category
+                  </label>
+                  <select
+                    className="teacher-card-control mt-2 w-full"
+                    id="words-category"
+                    onChange={(event) => setWordsCategory(event.target.value as WordsCategory)}
+                    value={wordsCategory}
+                  >
+                    {WORD_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="teacher-card-kicker text-[11px] uppercase tracking-[0.2em]">
+                  Teacher Reminder
+                </p>
+                <p className="teacher-card-copy mt-2 text-sm leading-relaxed">{teacherHint}</p>
+              </div>
+            </div>
+
+            <div className="panel panel-lively">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandGreen">
+                {outputLabel}
+              </p>
+              <div className="mt-4 rounded-2xl border border-brandBlue/20 bg-gradient-to-br from-brandBlue/10 via-white to-white p-4">
+                <p className="text-sm font-semibold text-slate-600">
+                  {prediction === "No prediction yet."
+                    ? "Waiting for a teacher capture"
+                    : "Latest prediction"}
+                </p>
+                <p className="mt-2 text-3xl font-black text-brandBlue">{prediction}</p>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-600">
+                    <span>{confidenceLabel}</span>
+                    <span>{confidencePercent !== null ? `${confidencePercent}%` : "N/A"}</span>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-slate-200">
+                    <div
+                      className={`h-2 rounded-full transition-all ${confidenceBarTone}`}
+                      style={{ width: confidencePercent !== null ? `${confidencePercent}%` : "0%" }}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {topCandidates.length > 0 ? (
+                    topCandidates.map((candidate) => (
+                      <span
+                        key={candidate}
+                        className="rounded-full border border-brandBorder bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        {candidate}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rounded-full border border-brandBorder bg-white/80 px-3 py-1 text-xs font-semibold text-slate-500">
+                      No alternate candidates yet
+                    </span>
+                  )}
+                </div>
+
+                <p className="mt-4 text-xs text-slate-600">
+                  Last result: {formatResultTime(lastTestedAt)}
+                </p>
+              </div>
+
+              <button
+                className="mt-4 rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                onClick={() => {
+                  setPrediction("No prediction yet.");
+                  setConfidence(null);
+                  setTopCandidates([]);
+                  setLastTestedAt(null);
+                  setError(null);
+                }}
+                type="button"
+              >
+                Clear Result
+              </button>
+            </div>
+
+            <div className="panel panel-lively">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accentWarm">
+                Teacher Checklist
+              </p>
+              <div className="mt-4 space-y-3">
+                {teacherChecklist.map((item, index) => (
+                  <div key={`${mode}-${index}`} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <p className="teacher-card-title text-sm font-black">0{index + 1}</p>
+                    <p className="teacher-card-copy mt-2 text-sm leading-relaxed">{item}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {error ? (
+              <div className="panel border-brandRed/20 bg-brandRedLight">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandRed">
+                  Teacher Attention Needed
+                </p>
+                <p className="mt-3 text-sm leading-relaxed text-brandRed">{error}</p>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">

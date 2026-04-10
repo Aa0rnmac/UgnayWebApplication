@@ -8,19 +8,13 @@ import {
   TeacherEnrollment,
   TeacherEnrollmentApprovalResult,
   TeacherEnrollmentRejectionResult,
-  TeacherUserSummary,
   approveTeacherEnrollment,
-  archiveTeacherBatch,
-  createTeacherBatch,
-  getTeacherBatchStudents,
   getTeacherBatches,
   getTeacherEnrollmentPaymentProof,
   getTeacherEnrollments,
   rejectTeacherEnrollment,
-  restoreTeacherBatch,
 } from "@/lib/api";
 
-type BatchForm = { code: string; name: string; capacity: string; notes: string };
 type RejectionReasonCode = NonNullable<TeacherEnrollment["rejection_reason_code"]>;
 type ReviewDraft = {
   batchId: string;
@@ -31,7 +25,6 @@ type ReviewDraft = {
   internalNoteManuallyEdited: boolean;
 };
 
-const EMPTY_BATCH: BatchForm = { code: "", name: "", capacity: "", notes: "" };
 type MessageTone = "success" | "warning";
 const REJECTION_REASON_OPTIONS: Array<{
   value: RejectionReasonCode;
@@ -75,10 +68,6 @@ function tone(status: string) {
   return "border-accent/30 bg-brandYellowLight text-brandNavy";
 }
 
-function statusLabel(status: TeacherBatch["status"]) {
-  return status === "archived" ? "Archived" : "Active";
-}
-
 function rejectionReasonLabel(reasonCode: RejectionReasonCode | "" | null | undefined) {
   return REJECTION_REASON_OPTIONS.find((option) => option.value === reasonCode)?.label ?? "No email reason selected";
 }
@@ -96,30 +85,17 @@ function defaultDraft(batches: TeacherBatch[]): ReviewDraft {
 
 export default function TeacherClassesPage() {
   const [activeBatches, setActiveBatches] = useState<TeacherBatch[]>([]);
-  const [archivedBatches, setArchivedBatches] = useState<TeacherBatch[]>([]);
   const [pending, setPending] = useState<TeacherEnrollment[]>([]);
   const [approved, setApproved] = useState<TeacherEnrollment[]>([]);
   const [rejected, setRejected] = useState<TeacherEnrollment[]>([]);
-  const [studentsByBatch, setStudentsByBatch] = useState<Record<number, TeacherUserSummary[]>>({});
   const [drafts, setDrafts] = useState<Record<number, ReviewDraft>>({});
-  const [batchForm, setBatchForm] = useState<BatchForm>(EMPTY_BATCH);
-  const [expandedBatchId, setExpandedBatchId] = useState<number | null>(null);
-  const [showArchivedBatches, setShowArchivedBatches] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [loadingBatchId, setLoadingBatchId] = useState<number | null>(null);
   const [proofId, setProofId] = useState<number | null>(null);
-  const [creatingBatch, setCreatingBatch] = useState(false);
-  const [batchActionId, setBatchActionId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<MessageTone>("success");
   const [error, setError] = useState<string | null>(null);
   const [approvalResult, setApprovalResult] = useState<TeacherEnrollmentApprovalResult | null>(null);
-
-  const visibleBatches = useMemo(
-    () => [...activeBatches, ...(showArchivedBatches ? archivedBatches : [])],
-    [activeBatches, archivedBatches, showArchivedBatches]
-  );
   const recentApproved = useMemo(() => approved.slice(0, 4), [approved]);
   const recentRejected = useMemo(() => rejected.slice(0, 4), [rejected]);
 
@@ -127,31 +103,23 @@ export default function TeacherClassesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [nextActiveBatches, nextArchivedBatches, nextPending, nextApproved, nextRejected] =
+      const [nextActiveBatches, nextPending, nextApproved, nextRejected] =
         await Promise.all([
           getTeacherBatches({ status: "active" }),
-          showArchivedBatches
-            ? getTeacherBatches({ status: "archived" })
-            : Promise.resolve([] as TeacherBatch[]),
           getTeacherEnrollments({ status: "pending" }),
           getTeacherEnrollments({ status: "approved" }),
           getTeacherEnrollments({ status: "rejected" }),
         ]);
 
       setActiveBatches(nextActiveBatches);
-      setArchivedBatches(nextArchivedBatches);
       setPending(nextPending);
       setApproved(nextApproved);
       setRejected(nextRejected);
-
       const activeBatchIds = new Set(nextActiveBatches.map((batch) => String(batch.id)));
-      const visibleBatchIds = new Set(
-        [...nextActiveBatches, ...nextArchivedBatches].map((batch) => batch.id)
-      );
 
       setDrafts((previous) => {
-      const next: Record<number, ReviewDraft> = {};
-      const fallbackDraft = defaultDraft(nextActiveBatches);
+        const next: Record<number, ReviewDraft> = {};
+        const fallbackDraft = defaultDraft(nextActiveBatches);
 
         for (const item of nextPending) {
           const existing = previous[item.id];
@@ -167,10 +135,6 @@ export default function TeacherClassesPage() {
         }
         return next;
       });
-
-      if (expandedBatchId !== null && !visibleBatchIds.has(expandedBatchId)) {
-        setExpandedBatchId(null);
-      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load enrollments.");
     } finally {
@@ -180,7 +144,7 @@ export default function TeacherClassesPage() {
 
   useEffect(() => {
     void loadData();
-  }, [showArchivedBatches]);
+  }, []);
 
   function updateDraft<K extends keyof ReviewDraft>(
     enrollmentId: number,
@@ -216,34 +180,6 @@ export default function TeacherClassesPage() {
         },
       };
     });
-  }
-
-  async function handleCreateBatch() {
-    if (!batchForm.code.trim() || !batchForm.name.trim()) {
-      setError("Batch code and name are required.");
-      return;
-    }
-    setCreatingBatch(true);
-    setError(null);
-    setMessage(null);
-    setMessageTone("success");
-    setApprovalResult(null);
-    try {
-      await createTeacherBatch({
-        code: batchForm.code.trim(),
-        name: batchForm.name.trim(),
-        capacity: batchForm.capacity ? Number(batchForm.capacity) : null,
-        notes: batchForm.notes.trim() || null,
-      });
-      setBatchForm(EMPTY_BATCH);
-      setMessageTone("success");
-      setMessage("Batch created successfully.");
-      await loadData();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to create batch.");
-    } finally {
-      setCreatingBatch(false);
-    }
   }
 
   async function handleApprove(enrollmentId: number) {
@@ -319,52 +255,6 @@ export default function TeacherClassesPage() {
     }
   }
 
-  async function toggleBatch(batchId: number) {
-    if (expandedBatchId === batchId) {
-      setExpandedBatchId(null);
-      return;
-    }
-
-    setExpandedBatchId(batchId);
-    if (studentsByBatch[batchId]) return;
-
-    setLoadingBatchId(batchId);
-    try {
-      const students = await getTeacherBatchStudents(batchId);
-      setStudentsByBatch((previous) => ({ ...previous, [batchId]: students }));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load batch roster.");
-    } finally {
-      setLoadingBatchId(null);
-    }
-  }
-
-  async function handleBatchStatusChange(batch: TeacherBatch) {
-    setBatchActionId(batch.id);
-    setError(null);
-    setMessage(null);
-    setMessageTone("success");
-    setApprovalResult(null);
-    try {
-      if (batch.status === "archived") {
-        await restoreTeacherBatch(batch.id);
-        setMessageTone("success");
-        setMessage(`${batch.name} restored to active batches.`);
-      } else {
-        await archiveTeacherBatch(batch.id);
-        setMessageTone("success");
-        setMessage(`${batch.name} archived. Historical records remain available.`);
-      }
-      await loadData();
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error ? requestError.message : "Unable to update batch status."
-      );
-    } finally {
-      setBatchActionId(null);
-    }
-  }
-
   return (
     <section className="space-y-6">
       <div className="panel overflow-hidden">
@@ -373,11 +263,12 @@ export default function TeacherClassesPage() {
             Enrollment Operations
           </p>
           <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
-            Approve learners, assign batches, and manage live or archived rosters.
+            Approve learners, assign active batches, and review enrollment decisions.
           </h2>
           <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
-            Review payment proofs, approve or reject registrants, create batches, and archive old
-            groups without losing their student history.
+            Review payment proofs, approve or reject registrants, and place approved learners into
+            the correct active batch. Batch creation and roster management now live in Class
+            Management.
           </p>
         </div>
       </div>
@@ -453,202 +344,7 @@ export default function TeacherClassesPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[0.92fr,1.08fr]">
-        <div className="space-y-4">
-          <div className="panel">
-            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandBlue">
-              Create Batch
-            </p>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <input
-                className="teacher-card-control"
-                placeholder="Batch code"
-                value={batchForm.code}
-                onChange={(event) =>
-                  setBatchForm((previous) => ({ ...previous, code: event.target.value }))
-                }
-              />
-              <input
-                className="teacher-card-control"
-                placeholder="Batch name"
-                value={batchForm.name}
-                onChange={(event) =>
-                  setBatchForm((previous) => ({ ...previous, name: event.target.value }))
-                }
-              />
-              <input
-                className="teacher-card-control"
-                min="1"
-                placeholder="Capacity"
-                type="number"
-                value={batchForm.capacity}
-                onChange={(event) =>
-                  setBatchForm((previous) => ({ ...previous, capacity: event.target.value }))
-                }
-              />
-              <input
-                className="teacher-card-control"
-                placeholder="Notes"
-                value={batchForm.notes}
-                onChange={(event) =>
-                  setBatchForm((previous) => ({ ...previous, notes: event.target.value }))
-                }
-              />
-            </div>
-            <button
-              className="mt-4 rounded-xl bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:opacity-60"
-              disabled={creatingBatch}
-              onClick={() => void handleCreateBatch()}
-              type="button"
-            >
-              {creatingBatch ? "Creating..." : "Create Batch"}
-            </button>
-          </div>
-
-          <div className="panel">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-                  Batch Roster
-                </p>
-                <p className="teacher-card-meta mt-2 text-xs">
-                  {showArchivedBatches
-                    ? `${activeBatches.length} active batch(es) and ${archivedBatches.length} archived batch(es) in view.`
-                    : `${activeBatches.length} active batch(es) ready for approvals.`}
-                </p>
-              </div>
-              <label className="teacher-card-copy flex items-center gap-2 text-sm font-semibold">
-                <input
-                  checked={showArchivedBatches}
-                  onChange={(event) => setShowArchivedBatches(event.target.checked)}
-                  type="checkbox"
-                />
-                Show Archived
-              </label>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {visibleBatches.length ? (
-                visibleBatches.map((batch) => {
-                  const expanded = expandedBatchId === batch.id;
-                  const students = studentsByBatch[batch.id] ?? [];
-                  const batchActionBusy = batchActionId === batch.id;
-
-                  return (
-                    <article
-                      key={batch.id}
-                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="teacher-card-title text-lg font-black">{batch.name}</p>
-                            {batch.status === "archived" ? (
-                              <span className="rounded-full border border-black/10 bg-brandYellowLight px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-brandNavy">
-                                Archived
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="teacher-card-meta mt-1 text-xs uppercase tracking-[0.2em]">
-                            {batch.code}
-                          </p>
-                        </div>
-                        <button
-                          className="teacher-card-ghost-button rounded-lg border px-3 py-2 text-xs font-semibold transition"
-                          onClick={() => void toggleBatch(batch.id)}
-                          type="button"
-                        >
-                          {expanded ? "Hide Roster" : "Open Roster"}
-                        </button>
-                      </div>
-
-                      <p className="teacher-card-copy mt-3 text-sm">
-                        {batch.student_count} student(s) - {statusLabel(batch.status)}
-                      </p>
-
-                      {expanded ? (
-                        <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="teacher-card-title text-sm font-black">
-                                {batch.status === "archived"
-                                  ? "Archived batches stay read-only for new approvals."
-                                  : "Active batches can accept new approvals."}
-                              </p>
-                              <p className="teacher-card-meta mt-1 text-xs">
-                                {batch.status === "archived"
-                                  ? "Restore this batch if you want to assign new students to it again."
-                                  : "Archive this batch when you want to preserve history without keeping it available for new approvals."}
-                              </p>
-                            </div>
-                            <button
-                              className={`rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-60 ${
-                                batch.status === "archived"
-                                  ? "bg-brandBlue hover:bg-brandBlue/90"
-                                  : "bg-brandRed hover:bg-brandRed/90"
-                              }`}
-                              disabled={batchActionBusy}
-                              onClick={() => void handleBatchStatusChange(batch)}
-                              type="button"
-                            >
-                              {batchActionBusy
-                                ? "Saving..."
-                                : batch.status === "archived"
-                                  ? "Restore Batch"
-                                  : "Archive Batch"}
-                            </button>
-                          </div>
-
-                          <div className="mt-4">
-                            {loadingBatchId === batch.id ? (
-                              <p className="teacher-card-copy text-sm">Loading roster...</p>
-                            ) : students.length ? (
-                              <div className="space-y-3">
-                                {students.map((student) => (
-                                  <div
-                                    key={student.id}
-                                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-3 py-3"
-                                  >
-                                    <div>
-                                      <p className="teacher-card-title text-sm font-black">
-                                        {student.full_name}
-                                      </p>
-                                      <p className="teacher-card-meta mt-1 text-xs">
-                                        {student.email ?? student.username}
-                                      </p>
-                                    </div>
-                                    <Link
-                                      className="rounded-lg bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90"
-                                      href={`/teacher/students/${student.id}`}
-                                    >
-                                      Open Student
-                                    </Link>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="teacher-card-copy text-sm">
-                                No approved students in this batch yet.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ) : null}
-                    </article>
-                  );
-                })
-              ) : (
-                <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                  {showArchivedBatches
-                    ? "No active or archived batches yet. Create one first so pending students can be assigned."
-                    : "No active batches yet. Create one first so pending students can be assigned."}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="panel">
+      <div className="panel">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brandGreen">
             Pending Queue
           </p>
@@ -782,7 +478,6 @@ export default function TeacherClassesPage() {
               </div>
             )}
           </div>
-        </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">

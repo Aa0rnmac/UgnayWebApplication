@@ -235,6 +235,30 @@ body {
   }
 }
 
+@media print {
+  body:has(.certificate-print-page) aside,
+  body:has(.certificate-print-page) header,
+  body:has(.certificate-print-page) footer,
+  body:has(.certificate-print-page) .print\:hidden {
+    display: none !important;
+  }
+
+  body:has(.certificate-print-page) .certificate-print-page {
+    padding: 0 !important;
+  }
+
+  body:has(.certificate-print-page) main,
+  body:has(.certificate-print-page) .page-transition-enter,
+  body:has(.certificate-print-page) .certificate-print-page {
+    margin: 0 !important;
+    max-width: none !important;
+  }
+
+  body:has(.certificate-print-page) {
+    background: #ffffff !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bg-grid,
   .card-hand {

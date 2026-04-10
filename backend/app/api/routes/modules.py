@@ -1,9 +1,10 @@
 from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.api.deps import get_current_learning_user, has_teacher_access
+from app.api.deps import get_current_learning_user, get_current_student, has_teacher_access
 from app.db.session import get_db
 from app.models.activity_attempt import ActivityAttempt, ActivityAttemptItem
 from app.models.assessment_report import AssessmentReport
@@ -11,8 +12,17 @@ from app.models.module import Module
 from app.models.module_activity import ModuleActivity
 from app.models.progress import UserModuleProgress
 from app.models.user import User
-from app.schemas.module import ActivityAttemptCreate, ActivityAttemptOut, ModuleActivityOut, ModuleOut
+from app.schemas.module import (
+    ActivityAttemptCreate,
+    ActivityAttemptOut,
+    ModuleActivityOut,
+    ModuleOut,
+    ModuleTeacherSummaryOut,
+)
 from app.schemas.progress import ProgressUpdateRequest
+from app.schemas.teacher import TeacherStudentCertificateOut
+from app.services.student_certificate import build_student_certificate_status
+from app.services.teacher_context import resolve_teacher_context_for_student
 
 router = APIRouter(prefix="/modules", tags=["modules"])
 
@@ -33,10 +43,28 @@ def _module_total_activities(module: Module) -> int:
 
 
 def _visible_modules_query(db: Session, current_user: User):
-    query = db.query(Module).options(selectinload(Module.activities)).order_by(Module.order_index.asc())
+    query = (
+        db.query(Module)
+        .options(selectinload(Module.activities), joinedload(Module.owner_teacher))
+        .filter(Module.archived_at.is_(None))
+    )
     if has_teacher_access(current_user):
-        return query
-    return query.filter(Module.is_published.is_(True))
+        return query.order_by(Module.order_index.asc(), Module.id.asc())
+
+    teacher_context = resolve_teacher_context_for_student(db, current_user)
+    visible_filters = [
+        and_(Module.module_kind == "system", Module.is_published.is_(True)),
+    ]
+    if teacher_context.teacher is not None:
+        visible_filters.append(
+            and_(
+                Module.module_kind == "teacher_custom",
+                Module.owner_teacher_id == teacher_context.teacher.id,
+                Module.is_published.is_(True),
+                Module.is_shared_pool.is_(False),
+            )
+        )
+    return query.filter(or_(*visible_filters)).order_by(Module.order_index.asc(), Module.id.asc())
 
 
 def _published_activities(module: Module, current_user: User | None = None) -> list[ModuleActivity]:
@@ -81,6 +109,11 @@ def _module_payload(
         title=module.title,
         description=module.description,
         order_index=module.order_index,
+        module_kind=module.module_kind,
+        owner_teacher=_module_teacher_summary(module.owner_teacher),
+        is_shared_pool=module.is_shared_pool,
+        source_module_id=module.source_module_id,
+        cover_image_url=module.cover_image_path,
         lessons=module.lessons,
         assessments=module.assessments,
         activities=[
@@ -92,6 +125,22 @@ def _module_payload(
         status=status_value,
         progress_percent=progress_percent,
         assessment_score=assessment_score,
+    )
+
+
+def _module_teacher_summary(user: User | None) -> ModuleTeacherSummaryOut | None:
+    if user is None:
+        return None
+    full_name = " ".join(
+        part.strip()
+        for part in [user.first_name or "", user.middle_name or "", user.last_name or ""]
+        if part and part.strip()
+    ).strip()
+    return ModuleTeacherSummaryOut(
+        id=user.id,
+        username=user.username,
+        full_name=full_name or user.username,
+        email=user.email,
     )
 
 
@@ -162,6 +211,9 @@ def _queue_assessment_report_from_attempt(
     report = AssessmentReport(
         user_id=current_user.id,
         module_id=module.id,
+        module_owner_teacher_id=attempt.module_owner_teacher_id,
+        handled_by_teacher_id=attempt.handled_by_teacher_id,
+        handling_session_id=attempt.handling_session_id,
         module_title=module.title,
         assessment_id=attempt.activity_key,
         assessment_title=attempt.activity_title,
@@ -265,6 +317,14 @@ def list_modules(
     return _build_modules_for_user(db, current_user)
 
 
+@router.get("/certificate-status", response_model=TeacherStudentCertificateOut)
+def get_student_certificate_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_student),
+) -> TeacherStudentCertificateOut:
+    return build_student_certificate_status(db, student=current_user)
+
+
 @router.get("/{module_id}", response_model=ModuleOut)
 def get_module(
     module_id: int,
@@ -291,10 +351,17 @@ def submit_activity_attempt(
     progress = _ensure_progress(db, current_user, module.id, progress)
     _update_completed_lessons(progress, payload.completed_lesson_id)
 
+    teacher_context = None
+    if not has_teacher_access(current_user):
+        teacher_context = resolve_teacher_context_for_student(db, current_user)
+
     attempt = ActivityAttempt(
         user_id=current_user.id,
         module_id=module.id,
         module_activity_id=activity.id,
+        module_owner_teacher_id=module.owner_teacher_id,
+        handled_by_teacher_id=teacher_context.session.teacher_id if teacher_context and teacher_context.session else None,
+        handling_session_id=teacher_context.session.id if teacher_context and teacher_context.session else None,
         activity_key=activity.activity_key,
         activity_title=activity.title,
         activity_type=activity.activity_type,

@@ -12,6 +12,7 @@ from app.models.enrollment import Enrollment
 from app.models.registration import Registration
 from app.models.user import User
 from app.services.email_sender import send_student_initial_credentials_email
+from app.services.teacher_scope import ensure_teacher_can_assign_batch
 from app.services.teacher_invites import generate_temporary_password
 
 BATCH_CODE_PATTERN = re.compile(r"[^A-Z0-9-]+")
@@ -78,7 +79,7 @@ def get_or_create_batch(
         batch = db.query(Batch).filter(Batch.id == batch_id).first()
         if not batch:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
-        return batch
+        return ensure_teacher_can_assign_batch(db, current_teacher=current_teacher, batch=batch)
 
     if not batch_code and not batch_name:
         raise HTTPException(
@@ -90,13 +91,14 @@ def get_or_create_batch(
     normalized_name = _normalize_batch_name(batch_name or normalized_code)
     batch = db.query(Batch).filter(Batch.code == normalized_code).first()
     if batch:
-        return batch
+        return ensure_teacher_can_assign_batch(db, current_teacher=current_teacher, batch=batch)
 
     batch = Batch(
         code=normalized_code,
         name=normalized_name,
         status="active",
         created_by_user_id=current_teacher.id,
+        primary_teacher_id=current_teacher.id,
     )
     db.add(batch)
     db.flush()

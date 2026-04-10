@@ -16,6 +16,8 @@ const TEACHER_NAV_ITEMS = [
   { href: "/teacher/modules", label: "Modules", short: "M" },
   { href: "/teacher/lab", label: "Lab", short: "L" },
   { href: "/teacher/progress", label: "Reports", short: "R" },
+  { href: "/teacher/class-management", label: "Class Management", short: "C" },
+  { href: "/teacher/certificate-management", label: "Certificate Management", short: "CT" },
   { href: "/teacher/classes", label: "Enrollments", short: "E" }
 ] as const;
 

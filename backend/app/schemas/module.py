@@ -3,6 +3,13 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class ModuleTeacherSummaryOut(BaseModel):
+    id: int
+    username: str
+    full_name: str
+    email: str | None = None
+
+
 class LessonReferenceOut(BaseModel):
     id: str
     title: str
@@ -111,6 +118,11 @@ class ModuleOut(BaseModel):
     title: str
     description: str
     order_index: int
+    module_kind: str = "system"
+    owner_teacher: ModuleTeacherSummaryOut | None = None
+    is_shared_pool: bool = False
+    source_module_id: int | None = None
+    cover_image_url: str | None = None
     lessons: list[LessonOut]
     assessments: list[AssessmentOut]
     activities: list[ModuleActivityOut] = Field(default_factory=list)

@@ -10,7 +10,9 @@ export default function ModuleDetailPage() {
   return (
     <ModuleDetailViewer
       backHref="/modules"
-      backLabel="Back To Module Cards"
+      backLabel="Back To Weekly Sessions"
+      headerEyebrow="Student Session"
+      headerTitle="Weekly Learning Session"
       moduleId={Number(params.moduleId)}
       storageScope="student-module-detail"
       viewerRole="student"

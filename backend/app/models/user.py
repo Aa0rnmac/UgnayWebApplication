@@ -45,9 +45,63 @@ class User(Base):
         "ActivityAttempt",
         back_populates="user",
         cascade="all, delete-orphan",
+        foreign_keys="ActivityAttempt.user_id",
+    )
+    assessment_reports = relationship(
+        "AssessmentReport",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="AssessmentReport.user_id",
     )
     created_batches = relationship(
         "Batch",
         back_populates="created_by",
         foreign_keys="Batch.created_by_user_id",
+    )
+    primary_batches = relationship(
+        "Batch",
+        back_populates="primary_teacher",
+        foreign_keys="Batch.primary_teacher_id",
+    )
+    owned_modules = relationship(
+        "Module",
+        back_populates="owner_teacher",
+        foreign_keys="Module.owner_teacher_id",
+    )
+    teacher_presence = relationship(
+        "TeacherPresence",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    started_handling_sessions = relationship(
+        "TeacherHandlingSession",
+        back_populates="teacher",
+        foreign_keys="TeacherHandlingSession.teacher_id",
+        cascade="all, delete-orphan",
+    )
+    student_handling_sessions = relationship(
+        "TeacherHandlingSession",
+        back_populates="student",
+        foreign_keys="TeacherHandlingSession.student_id",
+    )
+    handled_activity_attempts = relationship(
+        "ActivityAttempt",
+        back_populates="handled_by_teacher",
+        foreign_keys="ActivityAttempt.handled_by_teacher_id",
+    )
+    module_owned_activity_attempts = relationship(
+        "ActivityAttempt",
+        back_populates="module_owner_teacher",
+        foreign_keys="ActivityAttempt.module_owner_teacher_id",
+    )
+    handled_assessment_reports = relationship(
+        "AssessmentReport",
+        back_populates="handled_by_teacher",
+        foreign_keys="AssessmentReport.handled_by_teacher_id",
+    )
+    module_owned_assessment_reports = relationship(
+        "AssessmentReport",
+        back_populates="module_owner_teacher",
+        foreign_keys="AssessmentReport.module_owner_teacher_id",
     )

@@ -34,6 +34,22 @@ export function resolveUploadsBase(): string {
   return resolveApiBase().replace(/\/api\/?$/, "");
 }
 
+export function resolveUploadUrl(path: string | null | undefined): string | null {
+  if (!path) {
+    return null;
+  }
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  if (path.startsWith("/")) {
+    return `${resolveUploadsBase()}${path}`;
+  }
+  if (path.startsWith("uploads/")) {
+    return `${resolveUploadsBase()}/${path}`;
+  }
+  return path;
+}
+
 function getStoredToken(): string | undefined {
   if (typeof window === "undefined") {
     return undefined;
@@ -246,6 +262,11 @@ export type ModuleItem = {
   title: string;
   description: string;
   order_index: number;
+  module_kind: "system" | "teacher_custom";
+  owner_teacher: TeacherUserSummary | null;
+  is_shared_pool: boolean;
+  source_module_id: number | null;
+  cover_image_url: string | null;
   lessons: Lesson[];
   assessments: Assessment[];
   activities: ModuleActivity[];
@@ -261,6 +282,11 @@ export type TeacherAssessmentReport = {
   student_id: number;
   module_id: number;
   module_title: string;
+  module_kind: "system" | "teacher_custom";
+  module_owner_teacher: TeacherUserSummary | null;
+  handled_by_teacher: TeacherUserSummary | null;
+  handling_session_id: number | null;
+  handling_started_at: string | null;
   assessment_id: string;
   assessment_title: string;
   right_count: number;
@@ -282,6 +308,7 @@ export type TeacherBatch = {
   capacity: number | null;
   notes: string | null;
   student_count: number;
+  primary_teacher: TeacherUserSummary | null;
   created_at: string | null;
 };
 
@@ -295,9 +322,27 @@ export type TeacherUserSummary = {
 export type TeacherStudentModuleProgress = {
   module_id: number;
   module_title: string;
+  module_kind: "system" | "teacher_custom";
+  owner_teacher: TeacherUserSummary | null;
   status: string;
   progress_percent: number;
   assessment_score: number | null;
+  updated_at: string;
+};
+
+export type TeacherHandlingSession = {
+  id: number;
+  status: "active" | "ended";
+  started_at: string;
+  ended_at: string | null;
+  teacher: TeacherUserSummary;
+  batch: TeacherBatch | null;
+  student: TeacherUserSummary | null;
+};
+
+export type TeacherPresence = {
+  teacher: TeacherUserSummary;
+  status: "online" | "offline";
   updated_at: string;
 };
 
@@ -312,7 +357,124 @@ export type TeacherStudent = {
   role: string;
   enrollment_status: string | null;
   batch: TeacherBatch | null;
+  resolved_teacher: TeacherUserSummary | null;
+  active_handling_session: TeacherHandlingSession | null;
   module_progress: TeacherStudentModuleProgress[];
+};
+
+export type TeacherModuleCard = {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  order_index: number;
+  module_kind: "system" | "teacher_custom";
+  is_published: boolean;
+  is_shared_pool: boolean;
+  source_module_id: number | null;
+  source_module_title: string | null;
+  cover_image_url: string | null;
+  archived_at: string | null;
+  owner_teacher: TeacherUserSummary | null;
+  lesson_count: number;
+  activity_count: number;
+};
+
+export type TeacherModulesCatalog = {
+  managed_student_count: number;
+  my_modules: TeacherModuleCard[];
+  shared_pool: TeacherModuleCard[];
+  system_templates: TeacherModuleCard[];
+};
+
+export type TeacherModuleCreatePayload = {
+  title: string;
+  description: string;
+};
+
+export type TeacherModuleUpdatePayload = {
+  title?: string | null;
+  description?: string | null;
+  is_published?: boolean | null;
+  is_shared_pool?: boolean | null;
+};
+
+export type TeacherPresenceUpdatePayload = {
+  status: "online" | "offline";
+};
+
+export type TeacherHandlingSessionCreatePayload = {
+  batch_id?: number | null;
+  student_id?: number | null;
+};
+
+export type TeacherStudentCertificateModule = {
+  module_id: number;
+  module_title: string;
+  order_index: number;
+  completed: boolean;
+  latest_score: number | null;
+  best_score: number | null;
+  certificate_score_used: number | null;
+  passed: boolean;
+};
+
+export type TeacherStudentCertificateSummary = {
+  target_required_modules: number;
+  effective_required_modules: number;
+  completed_required_modules: number;
+  average_best_score: number;
+  eligible: boolean;
+  reason: string;
+};
+
+export type TeacherStudentCertificateRecord = {
+  status: "approved" | "rejected";
+  decision_note: string | null;
+  decided_at: string;
+  decided_by_name: string;
+  issued_at: string | null;
+  certificate_reference: string;
+};
+
+export type TeacherStudentCertificateTemplate = {
+  student_name: string;
+  certificate_title: string;
+  completion_statement: string;
+  issue_date: string;
+  approving_teacher_name: string;
+  certificate_reference: string;
+  effective_required_modules: number;
+  completed_required_modules: number;
+  average_best_score: number;
+};
+
+export type TeacherStudentCertificate = {
+  student_id: number;
+  student_name: string;
+  modules: TeacherStudentCertificateModule[];
+  summary: TeacherStudentCertificateSummary;
+  record: TeacherStudentCertificateRecord | null;
+  template: TeacherStudentCertificateTemplate | null;
+};
+
+export type StudentCertificateStatus = TeacherStudentCertificate;
+
+export type TeacherStudentCertificateDecisionPayload = {
+  decision: "approve" | "reject";
+  note?: string | null;
+};
+
+export type TeacherCertificateHistoryItem = {
+  id: number;
+  student: TeacherUserSummary;
+  batch: TeacherBatch | null;
+  status: "approved" | "rejected";
+  certificate_reference: string;
+  decision_note: string | null;
+  decided_at: string;
+  decided_by_name: string;
+  issued_at: string | null;
 };
 
 export type TeacherEnrollment = {
@@ -391,6 +553,11 @@ export type TeacherActivityAttempt = {
   student_name: string;
   module_id: number;
   module_title: string;
+  module_kind: "system" | "teacher_custom";
+  module_owner_teacher: TeacherUserSummary | null;
+  handled_by_teacher: TeacherUserSummary | null;
+  handling_session_id: number | null;
+  handling_started_at: string | null;
   activity_id: number;
   activity_key: string;
   activity_title: string;
@@ -956,6 +1123,12 @@ export function getModule(moduleId: number, token?: string): Promise<ModuleItem>
   return request<ModuleItem>(`/modules/${moduleId}`, undefined, token);
 }
 
+export function getStudentCertificateStatus(
+  token?: string
+): Promise<StudentCertificateStatus> {
+  return request<StudentCertificateStatus>("/modules/certificate-status", undefined, token);
+}
+
 export function submitActivityAttempt(
   moduleId: number,
   activityKey: string | number,
@@ -1149,6 +1322,137 @@ export function restoreTeacherBatch(batchId: number, token?: string): Promise<Te
   );
 }
 
+export function getTeacherModulesCatalog(token?: string): Promise<TeacherModulesCatalog> {
+  return request<TeacherModulesCatalog>("/teacher/modules", undefined, token);
+}
+
+export function createTeacherModule(
+  payload: TeacherModuleCreatePayload,
+  token?: string
+): Promise<TeacherModuleCard> {
+  return request<TeacherModuleCard>(
+    "/teacher/modules",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function updateTeacherModule(
+  moduleId: number,
+  payload: TeacherModuleUpdatePayload,
+  token?: string
+): Promise<TeacherModuleCard> {
+  return request<TeacherModuleCard>(
+    `/teacher/modules/${moduleId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function copyTeacherModule(moduleId: number, token?: string): Promise<TeacherModuleCard> {
+  return request<TeacherModuleCard>(
+    `/teacher/modules/${moduleId}/copy`,
+    {
+      method: "POST",
+    },
+    token
+  );
+}
+
+export function archiveTeacherModule(moduleId: number, token?: string): Promise<TeacherModuleCard> {
+  return request<TeacherModuleCard>(
+    `/teacher/modules/${moduleId}/archive`,
+    {
+      method: "POST",
+    },
+    token
+  );
+}
+
+export function restoreTeacherModule(moduleId: number, token?: string): Promise<TeacherModuleCard> {
+  return request<TeacherModuleCard>(
+    `/teacher/modules/${moduleId}/restore`,
+    {
+      method: "POST",
+    },
+    token
+  );
+}
+
+export function uploadTeacherModuleCover(
+  moduleId: number,
+  coverImage: File,
+  token?: string
+): Promise<TeacherModuleCard> {
+  const form = new FormData();
+  form.append("cover_image", coverImage);
+  return request<TeacherModuleCard>(
+    `/teacher/modules/${moduleId}/cover`,
+    {
+      method: "POST",
+      body: form,
+    },
+    token
+  );
+}
+
+export function getTeacherPresence(token?: string): Promise<TeacherPresence> {
+  return request<TeacherPresence>("/teacher/presence", undefined, token);
+}
+
+export function updateTeacherPresence(
+  payload: TeacherPresenceUpdatePayload,
+  token?: string
+): Promise<TeacherPresence> {
+  return request<TeacherPresence>(
+    "/teacher/presence",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function getTeacherActiveSession(
+  token?: string
+): Promise<TeacherHandlingSession | null> {
+  return request<TeacherHandlingSession | null>("/teacher/sessions/active", undefined, token);
+}
+
+export function startTeacherHandlingSession(
+  payload: TeacherHandlingSessionCreatePayload,
+  token?: string
+): Promise<TeacherHandlingSession> {
+  return request<TeacherHandlingSession>(
+    "/teacher/sessions",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function endTeacherHandlingSession(
+  sessionId: number,
+  token?: string
+): Promise<TeacherHandlingSession> {
+  return request<TeacherHandlingSession>(
+    `/teacher/sessions/${sessionId}/end`,
+    {
+      method: "POST",
+    },
+    token
+  );
+}
+
 export function getTeacherStudent(studentId: number, token?: string): Promise<TeacherStudent> {
   return request<TeacherStudent>(`/teacher/students/${studentId}`, undefined, token);
 }
@@ -1162,6 +1466,42 @@ export function getTeacherStudentActivityAttempts(
     undefined,
     token
   );
+}
+
+export function getTeacherStudentCertificate(
+  studentId: number,
+  token?: string
+): Promise<TeacherStudentCertificate> {
+  return request<TeacherStudentCertificate>(
+    `/teacher/students/${studentId}/certificate`,
+    undefined,
+    token
+  );
+}
+
+export function decideTeacherStudentCertificate(
+  studentId: number,
+  payload: TeacherStudentCertificateDecisionPayload,
+  token?: string
+): Promise<TeacherStudentCertificate> {
+  return request<TeacherStudentCertificate>(
+    `/teacher/students/${studentId}/certificate/decision`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function getTeacherCertificateHistory(
+  filters?: { status?: "issued" | "all" },
+  token?: string
+): Promise<TeacherCertificateHistoryItem[]> {
+  const query = buildQuery({
+    status: filters?.status,
+  });
+  return request<TeacherCertificateHistoryItem[]>(`/teacher/certificates${query}`, undefined, token);
 }
 
 export function getTeacherActivityAttempt(
