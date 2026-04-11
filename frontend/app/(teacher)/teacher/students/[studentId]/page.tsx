@@ -104,7 +104,7 @@ export default function TeacherStudentDetailPage() {
               className="teacher-card-ghost-button rounded-full border px-4 py-2 text-xs font-semibold transition hover:bg-white/10"
               href="/teacher/classes"
             >
-              Back to Enrollments
+              Back to Enrollment Management
             </Link>
             <Link
               className="rounded-full bg-brandBlue px-4 py-2 text-xs font-semibold text-white"

@@ -84,7 +84,7 @@ def get_or_create_batch(
     if not batch_code and not batch_name:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Provide batch_id or batch_code/batch_name when approving enrollment.",
+            detail="Provide batch_id or batch_code/batch_name.",
         )
 
     normalized_code = normalize_batch_code(batch_code or batch_name or "")
@@ -98,7 +98,7 @@ def get_or_create_batch(
         name=normalized_name,
         status="active",
         created_by_user_id=current_teacher.id,
-        primary_teacher_id=current_teacher.id,
+        primary_teacher_id=None if current_teacher.role == "admin" else current_teacher.id,
     )
     db.add(batch)
     db.flush()
@@ -110,7 +110,7 @@ def approve_enrollment(
     *,
     enrollment: Enrollment,
     current_teacher: User,
-    batch: Batch,
+    batch: Batch | None,
     issued_username: str | None = None,
     temporary_password: str | None = None,
     notes: str | None = None,
@@ -119,7 +119,7 @@ def approve_enrollment(
     registration = enrollment.registration
     if registration is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is missing registration data.")
-    if batch.status == "archived":
+    if batch is not None and batch.status == "archived":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Archived batches cannot accept new approvals. Restore the batch first.",
@@ -164,7 +164,7 @@ def approve_enrollment(
                 to_email=normalized_email,
                 username=resolved_username,
                 temporary_password=raw_password,
-                batch_name=batch.name,
+                batch_name=batch.name if batch is not None else "Unassigned",
             )
         except RuntimeError as exc:
             raise HTTPException(
@@ -195,13 +195,20 @@ def approve_enrollment(
 
     now = datetime.now(timezone.utc)
     enrollment.user_id = student_user.id
-    enrollment.batch_id = batch.id
+    enrollment.batch_id = batch.id if batch is not None else None
     enrollment.status = "approved"
     enrollment.payment_review_status = "approved"
     enrollment.review_notes = notes.strip() if notes else None
     enrollment.reviewed_at = now
     enrollment.approved_at = now
     enrollment.approved_by_user_id = current_teacher.id
+    enrollment.requested_teacher_id = None
+    enrollment.teacher_assignment_request_status = "none"
+    enrollment.teacher_assignment_request_note = None
+    enrollment.teacher_assignment_requested_at = None
+    enrollment.teacher_assignment_reviewed_at = None
+    enrollment.teacher_assignment_reviewed_by_user_id = None
+    enrollment.teacher_assignment_decision_note = None
     enrollment.rejected_at = None
     enrollment.rejected_by_user_id = None
     db.add(enrollment)
@@ -261,5 +268,57 @@ def reject_enrollment(
 
     registration.status = "rejected"
     registration.notes = normalized_internal_note
+    db.add(registration)
+    return enrollment
+
+
+def assign_approved_enrollment_to_batch(
+    db: Session,
+    *,
+    enrollment: Enrollment,
+    current_teacher: User,
+    batch: Batch,
+    notes: str | None = None,
+) -> Enrollment:
+    registration = enrollment.registration
+    if registration is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment is missing registration data.")
+
+    if enrollment.status != "approved" or enrollment.user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only approved enrollments can be assigned to a batch.",
+        )
+
+    if batch.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Archived batches cannot accept student assignments. Restore the batch first.",
+        )
+
+    if (
+        enrollment.teacher_assignment_request_status == "pending"
+        and enrollment.requested_teacher_id is not None
+        and current_teacher.role != "admin"
+        and enrollment.requested_teacher_id != current_teacher.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another teacher already has an active management request for this student.",
+        )
+
+    now = datetime.now(timezone.utc)
+    normalized_note = notes.strip() if notes and notes.strip() else None
+    enrollment.batch_id = batch.id
+    enrollment.reviewed_at = now
+    if enrollment.teacher_assignment_request_status == "pending":
+        enrollment.teacher_assignment_request_status = "approved"
+        enrollment.teacher_assignment_reviewed_at = now
+        enrollment.teacher_assignment_reviewed_by_user_id = current_teacher.id
+        enrollment.teacher_assignment_decision_note = normalized_note
+    if normalized_note is not None:
+        enrollment.review_notes = normalized_note
+        registration.notes = normalized_note
+    db.add(enrollment)
     db.add(registration)
     return enrollment

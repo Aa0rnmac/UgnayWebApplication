@@ -21,10 +21,11 @@ type TeacherHomeCard = {
 };
 
 export function TeacherHome() {
-  const { displayName } = useAuth();
+  const { displayName, role } = useAuth();
   const [snapshot, setSnapshot] = useState<TeacherWorkspaceSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const teacherName = displayName.trim() || "Teacher";
+  const panelRoleLabel = role === "admin" ? "Admin" : "Teacher";
+  const teacherName = displayName.trim() || panelRoleLabel;
 
   useEffect(() => {
     getTeacherWorkspaceSnapshot()
@@ -73,10 +74,10 @@ export function TeacherHome() {
       <div className="panel overflow-hidden">
         <div className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-            Teacher Workspace
+            {panelRoleLabel} Workspace
           </p>
           <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-900">
-            Welcome, Teacher <span className="text-brandBlue">{teacherName}</span>!
+            Welcome, {panelRoleLabel} <span className="text-brandBlue">{teacherName}</span>!
           </h1>
           <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
             Summary of your active modules, active students, issued certificates.

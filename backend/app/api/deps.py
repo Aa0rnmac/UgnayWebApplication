@@ -8,6 +8,7 @@ from app.models.user import User
 
 DEMO_USERNAME = "student_demo"
 TEACHER_ROLES = {"teacher", "admin"}
+ADMIN_ROLES = {"admin"}
 
 
 def _normalize_user_role(user: User, db: Session) -> User:
@@ -94,10 +95,23 @@ def has_teacher_access(user: User) -> bool:
     return user.role in TEACHER_ROLES
 
 
+def has_admin_access(user: User) -> bool:
+    return user.role in ADMIN_ROLES
+
+
 def get_current_teacher(current_user: User = Depends(get_current_user)) -> User:
     if not has_teacher_access(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Teacher access required.",
+        )
+    return current_user
+
+
+def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    if not has_admin_access(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
         )
     return current_user

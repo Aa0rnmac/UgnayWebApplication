@@ -37,6 +37,7 @@ class TeacherBatchCreateRequest(BaseModel):
     end_date: date | None = None
     capacity: int | None = Field(default=None, ge=1)
     notes: str | None = Field(default=None, max_length=2000)
+    primary_teacher_id: int | None = Field(default=None, ge=1)
 
 
 class TeacherPresenceOut(BaseModel):
@@ -205,11 +206,18 @@ class TeacherEnrollmentOut(BaseModel):
     reviewed_at: datetime | None = None
     approved_at: datetime | None = None
     rejected_at: datetime | None = None
+    teacher_assignment_request_status: Literal["none", "pending", "approved", "rejected"] = "none"
+    teacher_assignment_request_note: str | None = None
+    teacher_assignment_requested_at: datetime | None = None
+    teacher_assignment_reviewed_at: datetime | None = None
+    teacher_assignment_decision_note: str | None = None
     created_at: datetime
     updated_at: datetime
     registration: RegistrationOut
     batch: TeacherBatchOut | None = None
     student: TeacherUserSummary | None = None
+    requested_teacher: TeacherUserSummary | None = None
+    teacher_assignment_reviewed_by: TeacherUserSummary | None = None
 
 
 class TeacherEnrollmentApprovalResultOut(BaseModel):
@@ -242,3 +250,29 @@ class TeacherEnrollmentRejectRequest(BaseModel):
     internal_note: str | None = Field(default=None, max_length=2000)
     rejection_reason_code: Literal["incorrect_amount_paid", "incorrect_information"]
     rejection_reason_detail: str | None = Field(default=None, max_length=2000)
+
+
+class TeacherEnrollmentAssignBatchRequest(BaseModel):
+    batch_id: int | None = Field(default=None, ge=1)
+    batch_code: str | None = Field(default=None, max_length=60)
+    batch_name: str | None = Field(default=None, max_length=160)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class TeacherEnrollmentRequestManagementRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class TeacherEnrollmentApproveManagementRequest(BaseModel):
+    batch_id: int | None = Field(default=None, ge=1)
+    batch_code: str | None = Field(default=None, max_length=60)
+    batch_name: str | None = Field(default=None, max_length=160)
+    decision_note: str | None = Field(default=None, max_length=2000)
+
+
+class TeacherEnrollmentRejectManagementRequest(BaseModel):
+    decision_note: str | None = Field(default=None, max_length=2000)
+
+
+class TeacherBatchAssignTeacherRequest(BaseModel):
+    teacher_id: int = Field(ge=1)

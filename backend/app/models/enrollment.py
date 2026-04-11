@@ -30,6 +30,22 @@ class Enrollment(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    requested_teacher_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    teacher_assignment_request_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="none", server_default="none"
+    )
+    teacher_assignment_request_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    teacher_assignment_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    teacher_assignment_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    teacher_assignment_reviewed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    teacher_assignment_decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -43,4 +59,9 @@ class Enrollment(Base):
     user = relationship("User", back_populates="enrollments", foreign_keys=[user_id])
     batch = relationship("Batch", back_populates="enrollments")
     approved_by = relationship("User", foreign_keys=[approved_by_user_id])
+    requested_teacher = relationship("User", foreign_keys=[requested_teacher_id])
+    teacher_assignment_reviewed_by = relationship(
+        "User",
+        foreign_keys=[teacher_assignment_reviewed_by_user_id],
+    )
     rejected_by = relationship("User", foreign_keys=[rejected_by_user_id])

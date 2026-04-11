@@ -17,7 +17,7 @@ export function RoleRouteRedirect({
 
   useEffect(() => {
     if (loading) return;
-    router.replace(role === "teacher" ? teacherHref : studentHref);
+    router.replace(role === "student" ? studentHref : teacherHref);
   }, [loading, role, router, studentHref, teacherHref]);
 
   return (

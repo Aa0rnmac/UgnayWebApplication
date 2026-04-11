@@ -1,10 +1,10 @@
 import { RequireRole } from "@/components/require-role";
 
-export default function TeacherWorkspaceLayout({
+export default function AdminWorkspaceLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <RequireRole fallbackHref="/dashboard" roles={["teacher", "admin"]}>
+    <RequireRole fallbackHref="/dashboard" roles={["admin"]}>
       {children}
     </RequireRole>
   );

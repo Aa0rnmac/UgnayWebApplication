@@ -151,9 +151,9 @@ export function StudentHome() {
             </Link>
             <Link
               className="rounded-lg bg-brandYellow px-4 py-2 text-xs font-semibold text-brandNavy transition hover:bg-brandYellow/90"
-              href="/lab"
+              href="/gesture-tester"
             >
-              Open Lab
+              Open Gesture Tester
             </Link>
             {nextCoreModule ? (
               <Link

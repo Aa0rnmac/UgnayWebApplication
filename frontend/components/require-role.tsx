@@ -9,21 +9,25 @@ export function RequireRole({
   children,
   fallbackHref,
   role,
+  roles,
 }: {
   children: React.ReactNode;
   fallbackHref: string;
-  role: UserRole;
+  role?: UserRole;
+  roles?: UserRole[];
 }) {
   const router = useRouter();
   const { loading, role: currentRole } = useAuth();
+  const allowedRoles = roles && roles.length > 0 ? roles : role ? [role] : [];
+  const hasAccess = allowedRoles.includes(currentRole);
 
   useEffect(() => {
-    if (loading || currentRole === role) {
+    if (loading || hasAccess) {
       return;
     }
 
     router.replace(fallbackHref);
-  }, [currentRole, fallbackHref, loading, role, router]);
+  }, [currentRole, fallbackHref, hasAccess, loading, router]);
 
   if (loading) {
     return (
@@ -33,7 +37,7 @@ export function RequireRole({
     );
   }
 
-  if (currentRole !== role) {
+  if (!hasAccess) {
     return (
       <section className="panel">
         <p className="text-sm text-muted">Redirecting to the correct workspace...</p>

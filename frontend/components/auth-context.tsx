@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 import { getCurrentUser } from "@/lib/api";
 
-export type UserRole = "student" | "teacher";
+export type UserRole = "student" | "teacher" | "admin";
 
 type RawSessionUser = {
   id?: number;
@@ -46,7 +46,7 @@ function toAuthUser(user?: RawSessionUser): AuthUser {
   return {
     id: typeof user?.id === "number" ? user.id : 0,
     username,
-    role: user?.role === "teacher" || user?.role === "admin" ? "teacher" : "student",
+    role: user?.role === "admin" ? "admin" : user?.role === "teacher" ? "teacher" : "student",
     displayName,
     profileImagePath: user?.profile_image_path ?? null,
   };

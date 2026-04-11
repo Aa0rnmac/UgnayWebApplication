@@ -1450,9 +1450,9 @@ function Module1AssessmentThree({
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
+            href="/gesture-tester"
           >
-            Open Free Signing Lab
+            Open Gesture Tester
           </Link>
         </aside>
       </div>
@@ -1929,9 +1929,9 @@ function NumbersCameraAssessment({
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
+            href="/gesture-tester"
           >
-            Open Free Signing Lab
+            Open Gesture Tester
           </Link>
         </aside>
       </div>
@@ -2280,9 +2280,9 @@ function GestureCameraAssessment({
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
+            href="/gesture-tester"
           >
-            Open Free Signing Lab
+            Open Gesture Tester
           </Link>
         </aside>
       </div>
@@ -2612,9 +2612,9 @@ function Module7ColorAssessmentTwo({
 
           <Link
             className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
+            href="/gesture-tester"
           >
-            Open Free Signing Lab
+            Open Gesture Tester
           </Link>
         </aside>
       </div>

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.api.deps import get_current_teacher
+from app.api.deps import get_current_admin, get_current_teacher
 from app.core.config import settings
 from app.core.datetime_utils import utc_now
 from app.models.activity_attempt import ActivityAttempt
@@ -19,13 +19,18 @@ from app.models.student_certificate import StudentCertificate
 from app.models.user import User
 from app.schemas.registration import RegistrationOut
 from app.schemas.teacher import (
+    TeacherEnrollmentApproveManagementRequest,
     TeacherBatchCreateRequest,
+    TeacherBatchAssignTeacherRequest,
     TeacherBatchOut,
     TeacherCertificateHistoryItemOut,
     TeacherEnrollmentApprovalResultOut,
     TeacherEnrollmentApproveRequest,
+    TeacherEnrollmentAssignBatchRequest,
     TeacherEnrollmentOut,
+    TeacherEnrollmentRejectManagementRequest,
     TeacherEnrollmentRejectRequest,
+    TeacherEnrollmentRequestManagementRequest,
     TeacherEnrollmentRejectionResultOut,
     TeacherStudentCertificateDecisionRequest,
     TeacherStudentCertificateOut,
@@ -37,6 +42,7 @@ from app.schemas.teacher import (
 from app.schemas.teacher_report import TeacherActivityAttemptItemOut, TeacherActivityAttemptOut
 from app.services.email_sender import send_student_rejection_email
 from app.services.enrollment_service import (
+    assign_approved_enrollment_to_batch,
     approve_enrollment,
     EnrollmentApprovalResult,
     get_or_create_batch,
@@ -79,6 +85,17 @@ def _get_student_or_404(db: Session, student_id: int) -> User:
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
     return student
+
+
+def _get_teacher_or_404(db: Session, teacher_id: int) -> User:
+    teacher = (
+        db.query(User)
+        .filter(User.id == teacher_id, User.role == "teacher", User.archived_at.is_(None))
+        .first()
+    )
+    if not teacher:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher not found.")
+    return teacher
 
 
 def _registration_out(registration: Registration, enrollment: Enrollment | None = None) -> RegistrationOut:
@@ -161,11 +178,18 @@ def _enrollment_out(enrollment: Enrollment) -> TeacherEnrollmentOut:
         reviewed_at=enrollment.reviewed_at,
         approved_at=enrollment.approved_at,
         rejected_at=enrollment.rejected_at,
+        teacher_assignment_request_status=enrollment.teacher_assignment_request_status,
+        teacher_assignment_request_note=enrollment.teacher_assignment_request_note,
+        teacher_assignment_requested_at=enrollment.teacher_assignment_requested_at,
+        teacher_assignment_reviewed_at=enrollment.teacher_assignment_reviewed_at,
+        teacher_assignment_decision_note=enrollment.teacher_assignment_decision_note,
         created_at=enrollment.created_at,
         updated_at=enrollment.updated_at,
         registration=_registration_out(registration, enrollment),
         batch=_batch_out(batch, student_count=student_count),
         student=_student_summary(student),
+        requested_teacher=_student_summary(enrollment.requested_teacher),
+        teacher_assignment_reviewed_by=_student_summary(enrollment.teacher_assignment_reviewed_by),
     )
 
 
@@ -253,6 +277,13 @@ def _rejection_reason_summary(
     return f"{base_reason}\n\nAdditional details:\n{normalized_detail}"
 
 
+def _normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 def _activity_attempt_out(attempt: ActivityAttempt) -> TeacherActivityAttemptOut:
     return TeacherActivityAttemptOut(
         id=attempt.id,
@@ -299,6 +330,8 @@ def _get_enrollment_or_404(db: Session, enrollment_id: int) -> Enrollment:
             joinedload(Enrollment.registration),
             joinedload(Enrollment.user),
             joinedload(Enrollment.batch).joinedload(Batch.primary_teacher),
+            joinedload(Enrollment.requested_teacher),
+            joinedload(Enrollment.teacher_assignment_reviewed_by),
         )
         .filter(Enrollment.id == enrollment_id)
         .first()
@@ -441,6 +474,8 @@ def list_teacher_enrollments(
             joinedload(Enrollment.registration),
             joinedload(Enrollment.user),
             joinedload(Enrollment.batch).joinedload(Batch.primary_teacher),
+            joinedload(Enrollment.requested_teacher),
+            joinedload(Enrollment.teacher_assignment_reviewed_by),
         )
         .order_by(Enrollment.created_at.desc(), Enrollment.id.desc())
     )
@@ -484,22 +519,24 @@ def approve_teacher_enrollment(
     enrollment_id: int,
     payload: TeacherEnrollmentApproveRequest,
     db: Session = Depends(get_db),
-    current_teacher: User = Depends(get_current_teacher),
+    current_admin: User = Depends(get_current_admin),
 ) -> TeacherEnrollmentApprovalResultOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
-    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
-    batch = get_or_create_batch(
-        db,
-        current_teacher=current_teacher,
-        batch_id=payload.batch_id,
-        batch_code=payload.batch_code,
-        batch_name=payload.batch_name,
-    )
+    ensure_teacher_can_access_enrollment(current_teacher=current_admin, enrollment=enrollment)
+    batch = None
+    if payload.batch_id is not None or payload.batch_code or payload.batch_name:
+        batch = get_or_create_batch(
+            db,
+            current_teacher=current_admin,
+            batch_id=payload.batch_id,
+            batch_code=payload.batch_code,
+            batch_name=payload.batch_name,
+        )
     try:
         result = approve_enrollment(
             db,
             enrollment=enrollment,
-            current_teacher=current_teacher,
+            current_teacher=current_admin,
             batch=batch,
             issued_username=payload.issued_username,
             temporary_password=payload.temporary_password,
@@ -519,10 +556,10 @@ def reject_teacher_enrollment(
     enrollment_id: int,
     payload: TeacherEnrollmentRejectRequest,
     db: Session = Depends(get_db),
-    current_teacher: User = Depends(get_current_teacher),
+    current_admin: User = Depends(get_current_admin),
 ) -> TeacherEnrollmentRejectionResultOut:
     enrollment = _get_enrollment_or_404(db, enrollment_id)
-    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
+    ensure_teacher_can_access_enrollment(current_teacher=current_admin, enrollment=enrollment)
     from app.services.enrollment_service import reject_enrollment
 
     rejection_reason = _rejection_reason_summary(
@@ -533,7 +570,7 @@ def reject_teacher_enrollment(
         reject_enrollment(
             db,
             enrollment=enrollment,
-            current_teacher=current_teacher,
+            current_teacher=current_admin,
             internal_note=payload.internal_note,
             rejection_reason_code=payload.rejection_reason_code,
             rejection_reason_detail=payload.rejection_reason_detail,
@@ -553,6 +590,182 @@ def reject_teacher_enrollment(
         delivery_message=delivery_message,
         recipient_email=recipient_email,
     )
+
+
+@router.post("/enrollments/{enrollment_id}/assign-batch", response_model=TeacherEnrollmentOut)
+def assign_teacher_enrollment_batch(
+    enrollment_id: int,
+    payload: TeacherEnrollmentAssignBatchRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherEnrollmentOut:
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
+
+    batch = get_or_create_batch(
+        db,
+        current_teacher=current_teacher,
+        batch_id=payload.batch_id,
+        batch_code=payload.batch_code,
+        batch_name=payload.batch_name,
+    )
+    try:
+        assign_approved_enrollment_to_batch(
+            db,
+            enrollment=enrollment,
+            current_teacher=current_teacher,
+            batch=batch,
+            notes=payload.notes,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(enrollment)
+    return _enrollment_out(enrollment)
+
+
+@router.post("/enrollments/{enrollment_id}/request-management", response_model=TeacherEnrollmentOut)
+def request_teacher_enrollment_management(
+    enrollment_id: int,
+    payload: TeacherEnrollmentRequestManagementRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherEnrollmentOut:
+    if teacher_has_global_access(current_teacher):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin accounts cannot submit teacher management requests.",
+        )
+
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_teacher, enrollment=enrollment)
+
+    if enrollment.status != "approved" or enrollment.user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only approved student enrollments can be requested for teacher management.",
+        )
+    if enrollment.batch_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This student already belongs to a batch.",
+        )
+
+    if (
+        enrollment.teacher_assignment_request_status == "pending"
+        and enrollment.requested_teacher_id is not None
+        and enrollment.requested_teacher_id != current_teacher.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another teacher already has an active request for this student.",
+        )
+
+    now = utc_now()
+    enrollment.requested_teacher_id = current_teacher.id
+    enrollment.teacher_assignment_request_status = "pending"
+    enrollment.teacher_assignment_request_note = _normalize_optional_text(payload.note)
+    enrollment.teacher_assignment_requested_at = now
+    enrollment.teacher_assignment_reviewed_at = None
+    enrollment.teacher_assignment_reviewed_by_user_id = None
+    enrollment.teacher_assignment_decision_note = None
+    db.add(enrollment)
+    db.commit()
+    db.refresh(enrollment)
+    return _enrollment_out(enrollment)
+
+
+@router.post("/enrollments/{enrollment_id}/request-management/approve", response_model=TeacherEnrollmentOut)
+def approve_teacher_enrollment_management_request(
+    enrollment_id: int,
+    payload: TeacherEnrollmentApproveManagementRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> TeacherEnrollmentOut:
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_admin, enrollment=enrollment)
+
+    if enrollment.teacher_assignment_request_status != "pending" or enrollment.requested_teacher_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No pending teacher management request found for this student.",
+        )
+
+    requested_teacher = _get_teacher_or_404(db, enrollment.requested_teacher_id)
+    if payload.batch_id is None and not payload.batch_code and not payload.batch_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Select or create a batch when approving this management request.",
+        )
+
+    batch = get_or_create_batch(
+        db,
+        current_teacher=current_admin,
+        batch_id=payload.batch_id,
+        batch_code=payload.batch_code,
+        batch_name=payload.batch_name,
+    )
+    if batch.primary_teacher_id is None:
+        batch.primary_teacher_id = requested_teacher.id
+        db.add(batch)
+        db.flush()
+    elif batch.primary_teacher_id != requested_teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Selected batch is assigned to a different teacher.",
+        )
+
+    decision_note = _normalize_optional_text(payload.decision_note)
+
+    try:
+        assign_approved_enrollment_to_batch(
+            db,
+            enrollment=enrollment,
+            current_teacher=current_admin,
+            batch=batch,
+            notes=decision_note,
+        )
+        now = utc_now()
+        enrollment.teacher_assignment_request_status = "approved"
+        enrollment.teacher_assignment_reviewed_at = now
+        enrollment.teacher_assignment_reviewed_by_user_id = current_admin.id
+        enrollment.teacher_assignment_decision_note = decision_note
+        db.add(enrollment)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(enrollment)
+    return _enrollment_out(enrollment)
+
+
+@router.post("/enrollments/{enrollment_id}/request-management/reject", response_model=TeacherEnrollmentOut)
+def reject_teacher_enrollment_management_request(
+    enrollment_id: int,
+    payload: TeacherEnrollmentRejectManagementRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> TeacherEnrollmentOut:
+    enrollment = _get_enrollment_or_404(db, enrollment_id)
+    ensure_teacher_can_access_enrollment(current_teacher=current_admin, enrollment=enrollment)
+
+    if enrollment.teacher_assignment_request_status != "pending" or enrollment.requested_teacher_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No pending teacher management request found for this student.",
+        )
+
+    enrollment.teacher_assignment_request_status = "rejected"
+    enrollment.teacher_assignment_reviewed_at = utc_now()
+    enrollment.teacher_assignment_reviewed_by_user_id = current_admin.id
+    enrollment.teacher_assignment_decision_note = _normalize_optional_text(payload.decision_note)
+    db.add(enrollment)
+    db.commit()
+    db.refresh(enrollment)
+    return _enrollment_out(enrollment)
 
 
 @router.get("/batches", response_model=list[TeacherBatchOut])
@@ -583,6 +796,26 @@ def list_teacher_batches(
     ]
 
 
+@router.get("/teachers", response_model=list[TeacherUserSummary])
+def list_teachers_for_admin(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> list[TeacherUserSummary]:
+    _ = current_admin
+    teachers = (
+        db.query(User)
+        .filter(User.role == "teacher", User.archived_at.is_(None))
+        .order_by(User.first_name.asc(), User.last_name.asc(), User.username.asc())
+        .all()
+    )
+    teacher_summaries: list[TeacherUserSummary] = []
+    for teacher in teachers:
+        summary = _student_summary(teacher)
+        if summary is not None:
+            teacher_summaries.append(summary)
+    return teacher_summaries
+
+
 @router.post("/batches", response_model=TeacherBatchOut, status_code=status.HTTP_201_CREATED)
 def create_teacher_batch(
     payload: TeacherBatchCreateRequest,
@@ -597,6 +830,15 @@ def create_teacher_batch(
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Batch already exists.")
 
+    primary_teacher_id = None if teacher_has_global_access(current_teacher) else current_teacher.id
+    if payload.primary_teacher_id is not None:
+        if not teacher_has_global_access(current_teacher):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can assign a batch to another teacher.",
+            )
+        primary_teacher_id = _get_teacher_or_404(db, payload.primary_teacher_id).id
+
     batch = Batch(
         code=normalize_batch_code(payload.code),
         name=payload.name.strip(),
@@ -606,12 +848,30 @@ def create_teacher_batch(
         capacity=payload.capacity,
         notes=payload.notes.strip() if payload.notes else None,
         created_by_user_id=current_teacher.id,
-        primary_teacher_id=current_teacher.id,
+        primary_teacher_id=primary_teacher_id,
     )
     db.add(batch)
     db.commit()
     db.refresh(batch)
     return _batch_out(batch, student_count=0)
+
+
+@router.post("/batches/{batch_id}/assign-teacher", response_model=TeacherBatchOut)
+def assign_batch_teacher(
+    batch_id: int,
+    payload: TeacherBatchAssignTeacherRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> TeacherBatchOut:
+    _ = current_admin
+    batch = _get_batch_or_404(db, batch_id)
+    assigned_teacher = _get_teacher_or_404(db, payload.teacher_id)
+
+    batch.primary_teacher_id = assigned_teacher.id
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _batch_out(batch, student_count=_batch_student_count(batch))
 
 
 @router.post("/batches/{batch_id}/archive", response_model=TeacherBatchOut)

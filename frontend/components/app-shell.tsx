@@ -22,11 +22,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const publicRoute = useMemo(() => isPublicRoute(pathname), [pathname]);
-  const homeHref = role === "teacher" ? "/teacher" : "/dashboard";
+  const homeHref =
+    role === "student" ? "/dashboard" : role === "admin" ? "/admin" : "/teacher";
   const headerGreeting =
     role === "teacher" ? (
       <>
         Welcome, Teacher <span className="text-brandBlue">{displayName}</span>
+      </>
+    ) : role === "admin" ? (
+      <>
+        Welcome, Admin <span className="text-brandBlue">{displayName}</span>
       </>
     ) : (
       <>

@@ -1,7 +1,5 @@
-"use client";
+import { permanentRedirect } from "next/navigation";
 
-import { SigningLab } from "@/components/lab/signing-lab";
-
-export default function SigningLabPage() {
-  return <SigningLab variant="student" />;
+export default function LabRedirectPage() {
+  permanentRedirect("/gesture-tester");
 }

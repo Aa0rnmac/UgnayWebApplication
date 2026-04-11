@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_teacher
+from app.api.deps import get_current_admin
 from app.core.config import PROJECT_ROOT
 from app.db.session import get_db
 from app.models.enrollment import Enrollment
@@ -173,7 +173,7 @@ def validate_registration(
     registration_id: int,
     payload: RegistrationValidationRequest,
     db: Session = Depends(get_db),
-    current_teacher: User = Depends(get_current_teacher),
+    current_admin: User = Depends(get_current_admin),
 ) -> RegistrationValidationResponse:
     registration = db.query(Registration).filter(Registration.id == registration_id).first()
     if not registration:
@@ -191,14 +191,14 @@ def validate_registration(
 
     batch = get_or_create_batch(
         db,
-        current_teacher=current_teacher,
+        current_teacher=current_admin,
         batch_code="LEGACY-APPROVED",
         batch_name="Legacy Approved",
     )
     approve_enrollment(
         db,
         enrollment=enrollment,
-        current_teacher=current_teacher,
+        current_teacher=current_admin,
         batch=batch,
         issued_username=payload.issued_username,
         temporary_password=payload.initial_password,

@@ -1,5 +1,5 @@
 import { EnrollmentManagementWorkspace } from "@/components/workspaces/enrollment-management-workspace";
 
-export default function TeacherEnrollmentPage() {
+export default function AdminEnrollmentPage() {
   return <EnrollmentManagementWorkspace />;
 }

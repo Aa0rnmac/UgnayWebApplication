@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { fetchWithApiFallback, getApiBase, getApiBaseCandidates } from "@/lib/api-base";
 
-export type SessionRole = "student" | "teacher";
+export type SessionRole = "student" | "teacher" | "admin";
 
 type RawUser = {
   id?: number;
@@ -46,7 +46,7 @@ export function normalizeSessionUser(user: RawUser | undefined): SessionUser {
   return {
     id: typeof user?.id === "number" ? user.id : 0,
     username: user?.username?.trim() || "Guest",
-    role: user?.role === "teacher" || user?.role === "admin" ? "teacher" : "student",
+    role: user?.role === "admin" ? "admin" : user?.role === "teacher" ? "teacher" : "student",
   };
 }
 

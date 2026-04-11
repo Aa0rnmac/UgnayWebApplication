@@ -8,26 +8,39 @@ import { useState } from "react";
 const STUDENT_NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", short: "D" },
   { href: "/modules", label: "Modules", short: "M" },
-  { href: "/lab", label: "Free Signing Gesture", short: "F" }
+  { href: "/gesture-tester", label: "Gesture Tester", short: "GT" }
 ] as const;
 
 const TEACHER_NAV_ITEMS = [
   { href: "/teacher", label: "Dashboard", short: "D" },
   { href: "/teacher/modules", label: "Modules", short: "M" },
-  { href: "/teacher/lab", label: "Lab", short: "L" },
   { href: "/teacher/class-management", label: "Class Management", short: "C" },
   { href: "/teacher/certificate-management", label: "Certificate Management", short: "CT" },
-  { href: "/teacher/classes", label: "Enrollments", short: "E" }
+  { href: "/teacher/gesture-tester", label: "Gesture Tester", short: "GT" },
+  { href: "/teacher/classes", label: "Enrollment Management", short: "EM" }
 ] as const;
 
-export function AppNav({ role }: { role: "student" | "teacher" }) {
+const ADMIN_NAV_ITEMS = [
+  { href: "/admin", label: "Dashboard", short: "D" },
+  { href: "/admin/enrollment", label: "Enrollment Management", short: "EM" },
+  { href: "/admin/certificate-management", label: "Certificate Management", short: "CT" }
+] as const;
+
+export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const navItems = role === "teacher" ? TEACHER_NAV_ITEMS : STUDENT_NAV_ITEMS;
+  const navItems =
+    role === "admin"
+      ? ADMIN_NAV_ITEMS
+      : role === "teacher"
+        ? TEACHER_NAV_ITEMS
+        : STUDENT_NAV_ITEMS;
   const dailyGoal =
-    role === "teacher"
-      ? "Approve new learners, review the watchlist, and use the lab to support practical coaching."
+    role === "admin"
+      ? "Review pending applications, resolve teacher requests, and verify certificate decisions."
+      : role === "teacher"
+      ? "Approve new learners, review the watchlist, and use Gesture Tester to support practical coaching."
       : "Practice at least one module and one gesture set.";
 
   return (
@@ -109,7 +122,7 @@ export function AppNav({ role }: { role: "student" | "teacher" }) {
           <nav className="flex-1 space-y-2 p-3">
             {navItems.map((item) => {
               const active =
-                item.href === "/teacher"
+                item.href === "/teacher" || item.href === "/admin"
                   ? pathname === item.href
                   : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (

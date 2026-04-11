@@ -24,4 +24,4 @@ npm run dev:clean
 ## Pages
 - `/` dashboard/home with progress summary
 - `/modules` module sidebar + lesson content + assessment controls + locking
-- `/lab` free signing lab camera UI + mock prediction
+- `/gesture-tester` signing camera UI + prediction workflow (`/lab` permanently redirects here)

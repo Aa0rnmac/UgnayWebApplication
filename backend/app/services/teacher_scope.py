@@ -66,11 +66,14 @@ def teacher_can_access_enrollment(current_teacher: User, enrollment: Enrollment)
         return True
 
     if enrollment.status == "pending":
-        return True
+        return False
     if enrollment.status == "approved":
+        if enrollment.batch is None:
+            # Teachers can claim approved students that are still waiting for batch assignment.
+            return True
         return teacher_owns_batch(current_teacher, enrollment.batch)
     if enrollment.status == "rejected":
-        return enrollment.rejected_by_user_id == current_teacher.id
+        return False
     return False
 
 

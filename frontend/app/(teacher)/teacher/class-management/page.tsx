@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useAuth } from "@/components/auth-context";
 import { TeacherFilteredProgressBreakdown } from "@/components/teacher/filtered-progress-breakdown";
 import { TeacherHandlingControls } from "@/components/teacher/teacher-handling-controls";
 import {
@@ -15,8 +16,10 @@ import {
   TeacherReportSummary,
   TeacherUserSummary,
   archiveTeacherBatch,
+  assignTeacherToBatch,
   createTeacherBatch,
   endTeacherHandlingSession,
+  getAdminTeachers,
   getTeacherActiveSession,
   getTeacherBatchStudents,
   getTeacherBatches,
@@ -29,10 +32,16 @@ import {
   updateTeacherPresence,
 } from "@/lib/api";
 
-type BatchForm = { code: string; name: string; capacity: string; notes: string };
+type BatchForm = {
+  code: string;
+  name: string;
+  capacity: string;
+  notes: string;
+  primaryTeacherId: string;
+};
 type MessageTone = "success" | "warning";
 
-const EMPTY_BATCH: BatchForm = { code: "", name: "", capacity: "", notes: "" };
+const EMPTY_BATCH: BatchForm = { code: "", name: "", capacity: "", notes: "", primaryTeacherId: "" };
 const PREVIEW_LIMIT = 5;
 
 function statusLabel(status: TeacherBatch["status"]) {
@@ -274,6 +283,8 @@ function StudentsAttentionDetailDrawer({
 }
 
 export default function TeacherClassManagementPage() {
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const [activeBatches, setActiveBatches] = useState<TeacherBatch[]>([]);
   const [archivedBatches, setArchivedBatches] = useState<TeacherBatch[]>([]);
   const [approvedEnrollments, setApprovedEnrollments] = useState<TeacherEnrollment[]>([]);
@@ -293,6 +304,8 @@ export default function TeacherClassManagementPage() {
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [loadingBatchId, setLoadingBatchId] = useState<number | null>(null);
   const [batchActionId, setBatchActionId] = useState<number | null>(null);
+  const [teacherAssignBusyBatchId, setTeacherAssignBusyBatchId] = useState<number | null>(null);
+  const [adminTeachers, setAdminTeachers] = useState<TeacherUserSummary[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<MessageTone>("success");
   const [reportSummary, setReportSummary] = useState<TeacherReportSummary | null>(null);
@@ -347,6 +360,7 @@ export default function TeacherClassManagementPage() {
         nextPresence,
         nextActiveSession,
         nextModulesCatalog,
+        nextAdminTeachers,
       ] =
         await Promise.all([
           getTeacherBatches({ status: "active" }),
@@ -357,6 +371,7 @@ export default function TeacherClassManagementPage() {
           getTeacherPresence(),
           getTeacherActiveSession(),
           getTeacherModulesCatalog(),
+          isAdmin ? getAdminTeachers() : Promise.resolve([] as TeacherUserSummary[]),
         ]);
 
       setActiveBatches(nextActiveBatches);
@@ -365,6 +380,7 @@ export default function TeacherClassManagementPage() {
       setTeacherPresence(nextPresence);
       setActiveSession(nextActiveSession);
       setManagedStudentCount(nextModulesCatalog.managed_student_count);
+      setAdminTeachers(nextAdminTeachers);
 
       const visibleBatchIds = new Set(
         [...nextActiveBatches, ...nextArchivedBatches].map((batch) => batch.id)
@@ -394,7 +410,7 @@ export default function TeacherClassManagementPage() {
 
   useEffect(() => {
     void loadClassManagement();
-  }, [showArchivedBatches]);
+  }, [isAdmin, showArchivedBatches]);
 
   useEffect(() => {
     let isActive = true;
@@ -545,6 +561,8 @@ export default function TeacherClassManagementPage() {
         name: batchForm.name.trim(),
         capacity: batchForm.capacity ? Number(batchForm.capacity) : null,
         notes: batchForm.notes.trim() || null,
+        primary_teacher_id:
+          isAdmin && batchForm.primaryTeacherId ? Number(batchForm.primaryTeacherId) : null,
       });
       setBatchForm(EMPTY_BATCH);
       setMessageTone("success");
@@ -604,6 +622,24 @@ export default function TeacherClassManagementPage() {
     }
   };
 
+  const handleAssignTeacherToBatch = async (batchId: number, teacherId: number) => {
+    setTeacherAssignBusyBatchId(batchId);
+    setPageError(null);
+    setMessage(null);
+    setMessageTone("success");
+    try {
+      await assignTeacherToBatch(batchId, { teacher_id: teacherId });
+      setMessage("Batch teacher updated successfully.");
+      await loadClassManagement();
+    } catch (requestError) {
+      setPageError(
+        requestError instanceof Error ? requestError.message : "Unable to assign teacher to batch."
+      );
+    } finally {
+      setTeacherAssignBusyBatchId(null);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="panel overflow-hidden">
@@ -612,11 +648,14 @@ export default function TeacherClassManagementPage() {
             Class Management
           </p>
           <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
-            Manage teacher runtime, active batches, and live class rosters.
+            {isAdmin
+              ? "Manage batches, assign teachers, and monitor class ownership."
+              : "Manage teacher runtime, active batches, and live class rosters."}
           </h2>
           <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
-            This workspace now owns teacher availability, handling sessions, batch creation, and
-            roster visibility so the enrollment page can stay focused on approvals and payment review.
+            {isAdmin
+              ? "Use this workspace to align batches with the right teachers. Enrollment approval is handled in Enrollment Approval."
+              : "This workspace now owns teacher availability, handling sessions, batch creation, and roster visibility so the enrollment page can stay focused on approvals and payment review."}
           </p>
         </div>
       </div>
@@ -630,7 +669,7 @@ export default function TeacherClassManagementPage() {
             {loading ? "..." : managedStudentCount}
           </p>
           <p className="teacher-panel-copy mt-2 text-sm uppercase tracking-[0.2em]">
-            Students currently managed by you
+            {isAdmin ? "Students across all active batches" : "Students currently managed by you"}
           </p>
         </div>
 
@@ -744,23 +783,25 @@ export default function TeacherClassManagementPage() {
         </div>
       ) : null}
 
-      <TeacherHandlingControls
-        activeSession={activeSession}
-        batches={activeBatches}
-        onBatchChange={setSessionBatchId}
-        onEndSession={() => void handleEndSession()}
-        onModeChange={setSessionMode}
-        onStartSession={() => void handleStartSession()}
-        onStudentChange={setSessionStudentId}
-        onTogglePresence={(nextStatus) => void handleTogglePresence(nextStatus)}
-        presence={teacherPresence}
-        sessionBatchId={sessionBatchId}
-        sessionBusy={sessionBusy}
-        sessionError={sessionError}
-        sessionMode={sessionMode}
-        sessionStudentId={sessionStudentId}
-        students={sessionStudents}
-      />
+      {!isAdmin ? (
+        <TeacherHandlingControls
+          activeSession={activeSession}
+          batches={activeBatches}
+          onBatchChange={setSessionBatchId}
+          onEndSession={() => void handleEndSession()}
+          onModeChange={setSessionMode}
+          onStartSession={() => void handleStartSession()}
+          onStudentChange={setSessionStudentId}
+          onTogglePresence={(nextStatus) => void handleTogglePresence(nextStatus)}
+          presence={teacherPresence}
+          sessionBatchId={sessionBatchId}
+          sessionBusy={sessionBusy}
+          sessionError={sessionError}
+          sessionMode={sessionMode}
+          sessionStudentId={sessionStudentId}
+          students={sessionStudents}
+        />
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[0.92fr,1.08fr]">
         <div className="space-y-4">
@@ -803,6 +844,22 @@ export default function TeacherClassManagementPage() {
                 placeholder="Notes"
                 value={batchForm.notes}
               />
+              {isAdmin ? (
+                <select
+                  className="teacher-card-control"
+                  onChange={(event) =>
+                    setBatchForm((previous) => ({ ...previous, primaryTeacherId: event.target.value }))
+                  }
+                  value={batchForm.primaryTeacherId}
+                >
+                  <option value="">Assign teacher later</option>
+                  {adminTeachers.map((teacher) => (
+                    <option key={teacher.id} value={teacher.id}>
+                      {teacher.full_name} ({teacher.username})
+                    </option>
+                  ))}
+                </select>
+              ) : null}
             </div>
             <button
               className="mt-4 rounded-xl bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90 disabled:opacity-60"
@@ -875,6 +932,9 @@ export default function TeacherClassManagementPage() {
                     <p className="teacher-card-copy mt-3 text-sm">
                       {batch.student_count} student(s) - {statusLabel(batch.status)}
                     </p>
+                    <p className="teacher-card-meta mt-2 text-xs">
+                      Primary teacher: {batch.primary_teacher?.full_name ?? "Not assigned"}
+                    </p>
 
                     {expanded ? (
                       <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
@@ -908,6 +968,35 @@ export default function TeacherClassManagementPage() {
                                 : "Archive Batch"}
                           </button>
                         </div>
+
+                        {isAdmin ? (
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <select
+                              className="teacher-card-control max-w-sm"
+                              value={batch.primary_teacher?.id ? String(batch.primary_teacher.id) : ""}
+                              disabled={teacherAssignBusyBatchId === batch.id}
+                              onChange={(event) => {
+                                const nextTeacherId = Number(event.target.value);
+                                if (!nextTeacherId || nextTeacherId === batch.primary_teacher?.id) {
+                                  return;
+                                }
+                                void handleAssignTeacherToBatch(batch.id, nextTeacherId);
+                              }}
+                            >
+                              <option value="">Select teacher</option>
+                              {adminTeachers.map((teacher) => (
+                                <option key={teacher.id} value={teacher.id}>
+                                  {teacher.full_name} ({teacher.username})
+                                </option>
+                              ))}
+                            </select>
+                            <p className="teacher-card-meta text-xs">
+                              {teacherAssignBusyBatchId === batch.id
+                                ? "Updating batch teacher..."
+                                : "Admin can reassign this batch to a different teacher."}
+                            </p>
+                          </div>
+                        ) : null}
 
                         <div className="mt-4">
                           {loadingBatchId === batch.id ? (

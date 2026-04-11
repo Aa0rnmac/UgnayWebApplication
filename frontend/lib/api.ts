@@ -487,11 +487,18 @@ export type TeacherEnrollment = {
   reviewed_at: string | null;
   approved_at: string | null;
   rejected_at: string | null;
+  teacher_assignment_request_status: "none" | "pending" | "approved" | "rejected";
+  teacher_assignment_request_note: string | null;
+  teacher_assignment_requested_at: string | null;
+  teacher_assignment_reviewed_at: string | null;
+  teacher_assignment_decision_note: string | null;
   created_at: string;
   updated_at: string;
   registration: RegistrationRecord;
   batch: TeacherBatch | null;
   student: TeacherUserSummary | null;
+  requested_teacher: TeacherUserSummary | null;
+  teacher_assignment_reviewed_by: TeacherUserSummary | null;
 };
 
 export type TeacherEnrollmentApprovalResult = {
@@ -526,6 +533,28 @@ export type TeacherEnrollmentRejectPayload = {
   rejection_reason_detail?: string | null;
 };
 
+export type TeacherEnrollmentAssignBatchPayload = {
+  batch_id?: number | null;
+  batch_code?: string | null;
+  batch_name?: string | null;
+  notes?: string | null;
+};
+
+export type TeacherEnrollmentRequestManagementPayload = {
+  note?: string | null;
+};
+
+export type TeacherEnrollmentApproveManagementPayload = {
+  batch_id?: number | null;
+  batch_code?: string | null;
+  batch_name?: string | null;
+  decision_note?: string | null;
+};
+
+export type TeacherEnrollmentRejectManagementPayload = {
+  decision_note?: string | null;
+};
+
 export type TeacherBatchCreatePayload = {
   code: string;
   name: string;
@@ -534,6 +563,11 @@ export type TeacherBatchCreatePayload = {
   end_date?: string | null;
   capacity?: number | null;
   notes?: string | null;
+  primary_teacher_id?: number | null;
+};
+
+export type TeacherBatchAssignTeacherPayload = {
+  teacher_id: number;
 };
 
 export type TeacherActivityAttemptItem = {
@@ -1271,6 +1305,66 @@ export function rejectTeacherEnrollment(
   );
 }
 
+export function assignTeacherEnrollmentBatch(
+  enrollmentId: number,
+  payload: TeacherEnrollmentAssignBatchPayload,
+  token?: string
+): Promise<TeacherEnrollment> {
+  return request<TeacherEnrollment>(
+    `/teacher/enrollments/${enrollmentId}/assign-batch`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function requestTeacherEnrollmentManagement(
+  enrollmentId: number,
+  payload: TeacherEnrollmentRequestManagementPayload,
+  token?: string
+): Promise<TeacherEnrollment> {
+  return request<TeacherEnrollment>(
+    `/teacher/enrollments/${enrollmentId}/request-management`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function approveTeacherEnrollmentManagementRequest(
+  enrollmentId: number,
+  payload: TeacherEnrollmentApproveManagementPayload,
+  token?: string
+): Promise<TeacherEnrollment> {
+  return request<TeacherEnrollment>(
+    `/teacher/enrollments/${enrollmentId}/request-management/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function rejectTeacherEnrollmentManagementRequest(
+  enrollmentId: number,
+  payload: TeacherEnrollmentRejectManagementPayload,
+  token?: string
+): Promise<TeacherEnrollment> {
+  return request<TeacherEnrollment>(
+    `/teacher/enrollments/${enrollmentId}/request-management/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
 export function getTeacherBatches(
   filters?: { status?: "active" | "archived" | "all" },
   token?: string
@@ -1287,6 +1381,25 @@ export function createTeacherBatch(
 ): Promise<TeacherBatch> {
   return request<TeacherBatch>(
     "/teacher/batches",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function getAdminTeachers(token?: string): Promise<TeacherUserSummary[]> {
+  return request<TeacherUserSummary[]>("/teacher/teachers", undefined, token);
+}
+
+export function assignTeacherToBatch(
+  batchId: number,
+  payload: TeacherBatchAssignTeacherPayload,
+  token?: string
+): Promise<TeacherBatch> {
+  return request<TeacherBatch>(
+    `/teacher/batches/${batchId}/assign-teacher`,
     {
       method: "POST",
       body: JSON.stringify(payload),
