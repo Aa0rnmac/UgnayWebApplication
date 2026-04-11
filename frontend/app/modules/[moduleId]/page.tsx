@@ -226,9 +226,9 @@ export default function StudentModulePlayerPage() {
               <p className="text-sm text-slate-700">No available learning item.</p>
             )}
 
-            {certificateStatus?.eligible ? (
+            {certificateStatus?.summary.eligible ? (
               <div className="mt-6 rounded-2xl border border-brandGreen/30 bg-brandGreenLight px-4 py-4 text-sm text-slate-800">
-                Certificate ready for <span className="font-semibold">{certificateStatus.section_name}</span>. Open the profile or download route to get your certificate.
+                Certificate requirements are complete. Open the profile or download route to get your certificate.
               </div>
             ) : null}
           </div>

@@ -250,7 +250,7 @@ export type CertificateTemplateSummary = {
   created_at: string;
 };
 
-export type StudentCertificateStatus = {
+export type StudentCertificateDownloadStatus = {
   eligible: boolean;
   template_id?: number | null;
   section_name?: string | null;
@@ -1423,8 +1423,8 @@ export function submitStudentItem(
   );
 }
 
-export function getStudentCertificateStatus(token?: string) {
-  return request<StudentCertificateStatus>("/student/certificate", undefined, token);
+export function getStudentCertificateDownloadStatus(token?: string) {
+  return request<StudentCertificateDownloadStatus>("/student/certificate", undefined, token);
 }
 
 export function downloadStudentCertificate(token?: string) {
