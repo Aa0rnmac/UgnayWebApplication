@@ -17,14 +17,18 @@ function isPublicRoute(pathname: string): boolean {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { displayName, id, loading, logout, profileImagePath, role } = useAuth();
+  const { displayName, id, loading, logout, mustChangePassword, profileImagePath, role } = useAuth();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const publicRoute = useMemo(() => isPublicRoute(pathname), [pathname]);
-  const homeHref = role === "teacher" ? "/teacher" : "/dashboard";
+  const homeHref = role === "admin" ? "/admin" : role === "teacher" ? "/teacher" : "/dashboard";
   const headerGreeting =
-    role === "teacher" ? (
+    role === "admin" ? (
+      <>
+        Welcome, Admin <span className="text-brandBlue">{displayName}</span>
+      </>
+    ) : role === "teacher" ? (
       <>
         Welcome, Teacher <span className="text-brandBlue">{displayName}</span>
       </>
@@ -53,8 +57,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     if (id === 0) {
       router.replace("/");
+      return;
     }
-  }, [homeHref, id, loading, pathname, publicRoute, router]);
+    if (mustChangePassword && pathname !== "/profile") {
+      router.replace("/profile?forcePasswordChange=1");
+    }
+  }, [homeHref, id, loading, mustChangePassword, pathname, publicRoute, router]);
 
   useEffect(() => {
     setUserMenuOpen(false);
@@ -89,7 +97,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [userMenuOpen]);
 
-  if ((!publicRoute && loading) || (publicRoute && pathname === "/" && id !== 0) || (!publicRoute && id === 0)) {
+  if (
+    (!publicRoute && loading) ||
+    (publicRoute && pathname === "/" && id !== 0) ||
+    (!publicRoute && id === 0) ||
+    (!publicRoute && mustChangePassword && pathname !== "/profile")
+  ) {
     return <div className="min-h-screen bg-grid" />;
   }
 
@@ -107,7 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             />
             <div>
               <p className="text-xl font-bold text-slate-900 md:text-2xl">FSL Learning Hub</p>
-              <p className="text-sm text-muted">Hand &amp; Heart Student Portal</p>
+              <p className="text-sm text-muted">Hand &amp; Heart LMS Portal</p>
             </div>
           </div>
         </header>

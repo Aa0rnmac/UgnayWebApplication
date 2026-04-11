@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  detectOpenPalmFromImage,
   getAlphabetModelStatus,
   getNumbersModelStatus,
   getWordsModelStatus,
@@ -45,16 +44,12 @@ function formatResultTime(value: number | null) {
 
 export function SigningLab({ variant = "student" }: SigningLabProps) {
   const REPEAT_TOKEN_COOLDOWN_MS = 1400;
-  const ALPHABET_PALM_COOLDOWN_MS = 900;
   const isTeacherTester = variant === "teacher";
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const predictionInFlightRef = useRef(false);
-  const openPalmInFlightRef = useRef(false);
   const wordsHistoryRef = useRef<LabPrediction[]>([]);
-  const palmRaisedRef = useRef(false);
-  const lastPalmCommitAtRef = useRef(0);
   const predictionRef = useRef("No prediction yet.");
   const blockedTokenRef = useRef<string | null>(null);
   const modeCheckRef = useRef<{ key: string; ready: boolean; message: string } | null>(null);
@@ -111,8 +106,6 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     setLastRecognizedToken(null);
     setBlockedTokenAfterClear(null);
     setLastTestedAt(null);
-    palmRaisedRef.current = false;
-    lastPalmCommitAtRef.current = 0;
     lastAcceptedRef.current = { token: null, at: 0 };
     wordsHistoryRef.current = [];
   }, [mode, isSequenceMode]);
@@ -131,8 +124,6 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     setLastRecognizedToken(null);
     setBlockedTokenAfterClear(null);
     setLastTestedAt(null);
-    palmRaisedRef.current = false;
-    lastPalmCommitAtRef.current = 0;
     lastAcceptedRef.current = { token: null, at: 0 };
   }, [wordsCategory, mode]);
 
@@ -149,8 +140,6 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     setLastRecognizedToken(null);
     setBlockedTokenAfterClear(null);
     setLastTestedAt(null);
-    palmRaisedRef.current = false;
-    lastPalmCommitAtRef.current = 0;
     lastAcceptedRef.current = { token: null, at: 0 };
   }, [numbersCategory, mode]);
 
@@ -179,72 +168,6 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     setLastRecognizedToken(token);
     lastAcceptedRef.current = { token, at: now };
   }, [prediction, lastRecognizedToken, blockedTokenAfterClear, mode, isTeacherTester]);
-
-  useEffect(() => {
-    if (isTeacherTester || !running || mode !== "alphabet") {
-      palmRaisedRef.current = false;
-      return;
-    }
-
-    let cancelled = false;
-
-    async function checkOpenPalmSignal() {
-      if (cancelled || !running || mode !== "alphabet" || openPalmInFlightRef.current) {
-        return;
-      }
-      openPalmInFlightRef.current = true;
-      try {
-        const frame = await captureCurrentFrameAsFile({
-          maxWidth: 640,
-          maxHeight: 480,
-          jpegQuality: 0.9,
-        });
-        if (!frame) {
-          return;
-        }
-        const result = await detectOpenPalmFromImage(frame);
-        const openPalm = result.open_palm;
-        const now = Date.now();
-
-        if (
-          openPalm &&
-          !palmRaisedRef.current &&
-          now - lastPalmCommitAtRef.current >= ALPHABET_PALM_COOLDOWN_MS
-        ) {
-          const token = predictionRef.current.trim();
-          const blocked = blockedTokenRef.current;
-          if (
-            token &&
-            token !== "No prediction yet." &&
-            token !== "UNSURE" &&
-            (!blocked || blocked !== token)
-          ) {
-            setRecognizedInput((previous) => (previous ? `${previous} ${token}` : token));
-            setLastRecognizedToken(token);
-            lastAcceptedRef.current = { token, at: now };
-            lastPalmCommitAtRef.current = now;
-          }
-        }
-
-        palmRaisedRef.current = openPalm;
-      } catch {
-        // Keep silent to avoid noisy UI while polling.
-      } finally {
-        openPalmInFlightRef.current = false;
-      }
-    }
-
-    const interval = window.setInterval(() => {
-      void checkOpenPalmSignal();
-    }, 420);
-    void checkOpenPalmSignal();
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      palmRaisedRef.current = false;
-    };
-  }, [running, mode, blockedTokenAfterClear, isTeacherTester]);
 
   async function startCamera() {
     setError(null);
@@ -614,7 +537,11 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
         return;
       }
 
-      markPredictionResult(chooseStablePrediction(samples));
+      const result = chooseStablePrediction(samples);
+      markPredictionResult(result);
+      if (!isTeacherTester && mode === "alphabet") {
+        setRecognizedInput(result.prediction);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Prediction failed";
       setError(message);
@@ -782,7 +709,7 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
   }
 
   useEffect(() => {
-    if (isTeacherTester || !running || isSequenceMode) {
+    if (!isTeacherTester || !running || isSequenceMode) {
       return;
     }
 
@@ -805,7 +732,7 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
 
   const sectionTitle = "Free Signing Lab";
   const sectionDescription =
-    "For Alphabet mode, show an open palm to enter the current predicted letter. Numbers and Words support manual capture.";
+    "Keep your hand inside the guide box, choose the correct range first, and use the manual analyze button when you are ready.";
   const modeLabel = isTeacherTester ? "Recognition Mode" : "What do you want to sign?";
   const actionLabel = "Analyze Sign Now";
   const outputLabel = "Prediction Output";
@@ -815,7 +742,7 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
       : "Alphabet mode ready"
     : isSequenceMode
       ? `${mode === "words" ? "Words" : "Numbers"} manual mode ready`
-      : "Alphabet mode active (show open palm to enter)";
+      : "Alphabet mode ready for manual analysis";
   const activeStatus = isTeacherTester
     ? "Analyzing gesture..."
     : isSequenceMode
@@ -833,13 +760,25 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
         <div className="panel panel-lively">
-          <video
-            autoPlay
-            className="aspect-video w-full rounded-xl border border-slate-300 bg-slate-900"
-            muted
-            playsInline
-            ref={videoRef}
-          />
+          <div className="relative">
+            <video
+              autoPlay
+              className="aspect-video w-full rounded-xl border border-slate-300 bg-slate-900"
+              muted
+              playsInline
+              ref={videoRef}
+            />
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="flex h-[56%] w-[56%] flex-col justify-between rounded-2xl border-4 border-white/90 shadow-[0_0_0_999px_rgba(15,23,42,0.22)]">
+                <span className="self-center rounded-full bg-white/90 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-brandNavy">
+                  Sign Here
+                </span>
+                <span className="mb-3 self-center rounded-full bg-brandBlue/90 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-white">
+                  Keep your hand inside the box
+                </span>
+              </div>
+            </div>
+          </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               className={`rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 ${
@@ -911,6 +850,9 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
                 <option value="81-90">81-90</option>
                 <option value="91-100">91-100</option>
               </select>
+              <p className="mt-2 text-xs text-slate-600">
+                Choose the range first. Example: if you want to sign 11-20, select 11-20 before analyzing.
+              </p>
             </div>
           ) : null}
 
@@ -936,12 +878,12 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
           ) : null}
 
           {!isTeacherTester && mode === "alphabet" ? (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-900">
-              Note: Show an open palm after the prediction appears to enter the letter.
+            <div className="mt-3 rounded-xl border border-brandYellow/35 bg-brandYellowLight px-3 py-3 text-sm font-medium text-slate-800">
+              Alphabet mode is manual now. Keep one hand inside the focus box, then press Analyze Sign Now.
             </div>
           ) : null}
 
-          {isSequenceMode || isTeacherTester ? (
+          {running ? (
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 className="rounded-lg bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"

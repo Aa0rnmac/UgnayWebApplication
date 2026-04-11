@@ -13,20 +13,30 @@ const STUDENT_NAV_ITEMS = [
 
 const TEACHER_NAV_ITEMS = [
   { href: "/teacher", label: "Dashboard", short: "D" },
-  { href: "/teacher/modules", label: "Modules", short: "M" },
-  { href: "/teacher/lab", label: "Lab", short: "L" },
-  { href: "/teacher/progress", label: "Reports", short: "R" },
-  { href: "/teacher/classes", label: "Enrollments", short: "E" }
+  { href: "/teacher/sections", label: "Sections", short: "S" },
+  { href: "/teacher/reports", label: "Reports", short: "R" },
+  { href: "/teacher/lab", label: "Lab", short: "L" }
 ] as const;
 
-export function AppNav({ role }: { role: "student" | "teacher" }) {
+const ADMIN_NAV_ITEMS = [
+  { href: "/admin", label: "Dashboard", short: "D" },
+  { href: "/admin/accounts", label: "Accounts", short: "A" },
+  { href: "/admin/sections", label: "Sections", short: "S" },
+  { href: "/admin/reports", label: "Reports", short: "R" },
+  { href: "/admin/certificates", label: "Certificates", short: "C" }
+] as const;
+
+export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const navItems = role === "teacher" ? TEACHER_NAV_ITEMS : STUDENT_NAV_ITEMS;
+  const navItems =
+    role === "admin" ? ADMIN_NAV_ITEMS : role === "teacher" ? TEACHER_NAV_ITEMS : STUDENT_NAV_ITEMS;
   const dailyGoal =
-    role === "teacher"
-      ? "Approve new learners, review the watchlist, and use the lab to support practical coaching."
+    role === "admin"
+      ? "Create accounts, organize sections, and review certificate approvals."
+      : role === "teacher"
+      ? "Publish section modules, check reports, and guide learners in the signing lab."
       : "Practice at least one module and one gesture set.";
 
   return (

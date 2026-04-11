@@ -1,252 +1,75 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { getModules, ModuleItem } from "@/lib/api";
+import { getStudentDashboard, type StudentCourse } from "@/lib/api";
 
-const HERO_TIPS = [
-  "Tip: Do short daily practice. Five focused minutes beats one long random session.",
-  "Tip: Keep handshape clear first, then increase speed little by little.",
-  "Tip: Use the lab after each module lesson to lock in memory."
-] as const;
-
-const MODULE_GRADIENTS = [
-  "from-brandYellowLight via-white to-brandYellowLight/45",
-  "from-brandBlueLight via-white to-brandBlueLight/45",
-  "from-brandRedLight via-white to-brandRedLight/45",
-  "from-brandGreenLight via-white to-brandGreenLight/45"
-] as const;
-
-function progressTone(percent: number) {
-  if (percent >= 100) {
-    return "text-brandGreen";
-  }
-  if (percent > 0) {
-    return "text-brandYellow";
-  }
-  return "text-brandRed";
-}
-
-function progressBarTone(percent: number) {
-  if (percent >= 100) {
-    return "bg-brandGreen";
-  }
-  if (percent > 0) {
-    return "bg-brandYellow";
-  }
-  return "bg-brandRed";
-}
-
-export default function DashboardPage() {
-  const [modules, setModules] = useState<ModuleItem[]>([]);
+export default function StudentDashboardPage() {
+  const [course, setCourse] = useState<StudentCourse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [tipIndex, setTipIndex] = useState(0);
-  const autoRetryTimerRef = useRef<number | null>(null);
-
-  function clearAutoRetryTimer() {
-    if (autoRetryTimerRef.current !== null) {
-      window.clearTimeout(autoRetryTimerRef.current);
-      autoRetryTimerRef.current = null;
-    }
-  }
-
-  async function loadModules() {
-    clearAutoRetryTimer();
-    setLoading(true);
-    setError(null);
-    try {
-      const payload = await getModules();
-      setModules(payload);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load modules.");
-    } finally {
-      setLoading(false);
-    }
-  }
 
   useEffect(() => {
-    void loadModules();
-    return () => {
-      clearAutoRetryTimer();
-    };
+    getStudentDashboard().then(setCourse).catch((requestError: Error) => setError(requestError.message));
   }, []);
 
-  useEffect(() => {
-    if (!error || loading) {
-      return;
-    }
-
-    if (!error.includes("Unable to reach API")) {
-      return;
-    }
-
-    autoRetryTimerRef.current = window.setTimeout(() => {
-      void loadModules();
-    }, 2200);
-
-    return () => {
-      clearAutoRetryTimer();
-    };
-  }, [error, loading]);
-
-  useEffect(() => {
-    function handleFocus() {
-      if (!error || loading) {
-        return;
-      }
-      if (!error.includes("Unable to reach API")) {
-        return;
-      }
-      void loadModules();
-    }
-
-    window.addEventListener("focus", handleFocus);
-    return () => {
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [error, loading]);
-
-  const summary = useMemo(() => {
-    const total = modules.length;
-    const completed = modules.filter((module) => module.progress_percent >= 100).length;
-    const inProgress = modules.filter(
-      (module) => module.progress_percent > 0 && module.progress_percent < 100
-    ).length;
-    return { total, completed, inProgress };
-  }, [modules]);
-
-  const nextModule =
-    modules.find((module) => module.progress_percent < 100) ??
-    modules[0] ??
-    null;
+  const completedModules = useMemo(
+    () => (course?.modules ?? []).filter((module) => module.status === "completed").length,
+    [course]
+  );
 
   return (
     <section className="space-y-6">
-      <div className="panel panel-lively relative overflow-hidden">
-        <div className="pointer-events-none absolute -right-14 -top-14 h-40 w-40 rounded-full bg-brandBlueLight blur-2xl" />
-        <div className="pointer-events-none absolute -bottom-16 left-14 h-36 w-36 rounded-full bg-brandYellowLight blur-2xl" />
-        <div className="relative">
-          <h2 className="text-3xl font-bold title-gradient">Dashboard</h2>
-          <p className="mt-2 max-w-3xl text-sm text-muted">
-            Welcome back. Track your progress, jump into practice quickly, and keep your FSL
-            learning streak active.
-          </p>
+      <div className="panel">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Student LMS</p>
+        <h2 className="mt-3 text-3xl font-bold title-gradient">Learning Dashboard</h2>
+        <p className="mt-2 text-sm text-slate-700">
+          Follow the module order. Finish each reading or assessment before moving to the next item.
+        </p>
+      </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              className="rounded-lg bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandBlue/90"
-              onClick={() => setTipIndex((index) => (index + 1) % HERO_TIPS.length)}
-              type="button"
-            >
-              New Study Tip
-            </button>
-            <span className="rounded-lg border border-brandBorder bg-brandBlueLight/45 px-3 py-2 text-xs font-medium text-slate-700">
-              {HERO_TIPS[tipIndex]}
-            </span>
-          </div>
+      {error ? <p className="rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm text-brandRed">{error}</p> : null}
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="panel panel-lively">
+          <p className="text-xs uppercase tracking-[0.22em] label-accent">Section</p>
+          <p className="mt-3 text-2xl font-black text-brandBlue">{course?.section?.name ?? "Not assigned"}</p>
+        </div>
+        <div className="panel panel-lively">
+          <p className="text-xs uppercase tracking-[0.22em] label-accent">Completed Modules</p>
+          <p className="mt-3 text-4xl font-black text-brandGreen">{completedModules}</p>
+        </div>
+        <div className="panel panel-lively">
+          <p className="text-xs uppercase tracking-[0.22em] label-accent">Total Modules</p>
+          <p className="mt-3 text-4xl font-black text-accentWarm">{course?.modules.length ?? 0}</p>
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <article className="panel panel-lively">
-          <p className="text-xs uppercase tracking-wider label-accent">Total Activities</p>
-          <p className="mt-2 text-3xl font-black text-brandBlue">{summary.total}</p>
-        </article>
-        <article className="panel panel-lively">
-          <p className="text-xs uppercase tracking-wider label-accent">Completed</p>
-          <p className="mt-2 text-3xl font-black text-brandGreen">{summary.completed}</p>
-        </article>
-        <article className="panel panel-lively">
-          <p className="text-xs uppercase tracking-wider label-accent">In Progress</p>
-          <p className="mt-2 text-3xl font-black text-brandYellow">{summary.inProgress}</p>
-        </article>
-      </div>
-
-      <div className="panel panel-lively">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs uppercase tracking-wider label-accent">Quick Access</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              className="rounded-lg bg-brandRed px-4 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brandRed/90"
-              href="/modules"
-            >
-              Open Modules
-            </Link>
-            <Link
-              className="rounded-lg bg-brandYellow px-4 py-2 text-xs font-semibold text-brandNavy transition hover:-translate-y-0.5 hover:bg-brandYellow/90"
-              href="/lab"
-            >
-              Open Lab
-            </Link>
-            {nextModule ? (
-              <Link
-                className="rounded-lg border border-brandBorder bg-brandMutedSurface px-4 py-2 text-xs font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-brandBlueLight/65"
-                href={`/modules/${nextModule.id}`}
-              >
-                Continue Next Module
+      <div className="grid gap-4 xl:grid-cols-2">
+        {(course?.modules ?? []).map((module) => (
+          <article className="panel panel-lively" key={module.id}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Module {module.order_index}</p>
+                <h3 className="mt-2 text-xl font-bold text-slate-900">{module.title}</h3>
+                <p className="mt-2 text-sm text-slate-700">{module.description}</p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${module.is_locked ? "bg-brandRedLight text-brandRed" : "bg-brandGreenLight text-brandGreen"}`}>
+                {module.is_locked ? "Locked" : module.status.replaceAll("_", " ")}
+              </span>
+            </div>
+            <div className="mt-4 rounded-full bg-brandMutedSurface">
+              <div className="h-3 rounded-full bg-brandBlue transition-all" style={{ width: `${module.progress_percent}%` }} />
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <p className="text-sm text-slate-700">{module.progress_percent}% complete</p>
+              <Link className={`ml-auto rounded-lg px-4 py-2 text-sm font-semibold ${module.is_locked ? "cursor-not-allowed bg-brandMutedSurface text-slate-500" : "bg-brandBlue text-white"}`} href={module.is_locked ? "#" : `/modules/${module.id}`}>
+                Open Module
               </Link>
-            ) : null}
-          </div>
-        </div>
+            </div>
+          </article>
+        ))}
       </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {loading ? (
-          <p className="text-sm text-muted">Loading module highlights...</p>
-        ) : (
-          modules.map((module, index) => (
-            <Link
-              className="block h-full focus-visible:outline-none"
-              href={`/modules/${module.id}`}
-              key={module.id}
-            >
-              <article
-                className={`panel panel-lively flex h-full min-h-[190px] flex-col border-brandBorder bg-gradient-to-br ${MODULE_GRADIENTS[index % MODULE_GRADIENTS.length]}`}
-              >
-                <p className="text-xs uppercase tracking-wider label-accent">
-                  Module {module.order_index}
-                </p>
-                <h3 className="mt-2 min-h-[4.5rem] text-2xl font-black leading-tight text-slate-900">
-                  {module.title.replace(/^Module \d+:\s*/i, "")}
-                </h3>
-                <div className="mt-auto pt-3">
-                  <p className={`text-sm font-semibold ${progressTone(module.progress_percent)}`}>
-                    Progress: {module.progress_percent}%
-                  </p>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/70">
-                    <div
-                      className={`h-full rounded-full transition-[width] duration-500 ${progressBarTone(module.progress_percent)}`}
-                      style={{ width: `${Math.max(5, module.progress_percent)}%` }}
-                    />
-                  </div>
-                </div>
-              </article>
-            </Link>
-          ))
-        )}
-      </div>
-
-      {error ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-600">Error: {error}</p>
-          {error.includes("Unable to reach API") ? (
-            <p className="text-xs text-red-500">
-              The app will retry automatically while the local backend finishes starting.
-            </p>
-          ) : null}
-          <button
-            className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100"
-            onClick={() => {
-              void loadModules();
-            }}
-            type="button"
-          >
-            Retry
-          </button>
-        </div>
-      ) : null}
     </section>
   );
 }

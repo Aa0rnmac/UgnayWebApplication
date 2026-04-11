@@ -3,9 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { UserRole, useAuth } from "@/components/auth-context";
+import { useAuth } from "@/components/auth-context";
 
-const DEMO_ACCOUNTS: Record<UserRole, { username: string; password: string; label: string }> = {
+type DemoRole = "teacher" | "student";
+
+const DEMO_ACCOUNTS: Record<DemoRole, { username: string; password: string; label: string }> = {
   teacher: {
     username: "teacher_demo",
     password: "teacher123",
@@ -21,11 +23,11 @@ const DEMO_ACCOUNTS: Record<UserRole, { username: string; password: string; labe
 export function AuthSwitcher({ collapsed = false }: { collapsed?: boolean }) {
   const router = useRouter();
   const { loading, login, logout, role, username } = useAuth();
-  const [pendingRole, setPendingRole] = useState<UserRole | null>(null);
+  const [pendingRole, setPendingRole] = useState<DemoRole | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleDemoLogin(nextRole: UserRole) {
+  async function handleDemoLogin(nextRole: DemoRole) {
     setError(null);
     setPendingRole(nextRole);
 

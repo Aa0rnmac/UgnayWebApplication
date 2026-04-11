@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 import { getCurrentUser } from "@/lib/api";
 
-export type UserRole = "student" | "teacher";
+export type UserRole = "student" | "teacher" | "admin";
 
 type RawSessionUser = {
   id?: number;
@@ -13,6 +13,7 @@ type RawSessionUser = {
   first_name?: string | null;
   last_name?: string | null;
   profile_image_path?: string | null;
+  must_change_password?: boolean;
 };
 
 type AuthUser = {
@@ -21,6 +22,7 @@ type AuthUser = {
   role: UserRole;
   displayName: string;
   profileImagePath: string | null;
+  mustChangePassword: boolean;
 };
 
 type SessionState = AuthUser & {
@@ -46,9 +48,11 @@ function toAuthUser(user?: RawSessionUser): AuthUser {
   return {
     id: typeof user?.id === "number" ? user.id : 0,
     username,
-    role: user?.role === "teacher" || user?.role === "admin" ? "teacher" : "student",
+    role:
+      user?.role === "admin" ? "admin" : user?.role === "teacher" ? "teacher" : "student",
     displayName,
     profileImagePath: user?.profile_image_path ?? null,
+    mustChangePassword: Boolean(user?.must_change_password),
   };
 }
 
@@ -62,6 +66,7 @@ const AuthContext = createContext<AuthState>({
   role: "student",
   displayName: "Guest",
   profileImagePath: null,
+  mustChangePassword: false,
   loading: true,
   login: async () => GUEST_USER,
   logout: async () => {},
@@ -73,6 +78,7 @@ const GUEST_USER: AuthUser = {
   role: "student",
   displayName: "Guest",
   profileImagePath: null,
+  mustChangePassword: false,
 };
 
 const GUEST_STATE: SessionState = {

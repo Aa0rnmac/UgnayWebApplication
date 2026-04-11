@@ -8,14 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
+    admin_lms,
     auth,
     health,
     lab,
-    modules,
-    progress,
-    registrations,
-    teacher_enrollment,
-    teacher_reports,
+    student_lms,
+    teacher_lms,
 )
 from app.db.init_db import init_db
 from app.services.alphabet_model import get_alphabet_model_service
@@ -78,13 +76,11 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
-app.include_router(modules.router, prefix="/api")
-app.include_router(progress.router, prefix="/api")
+app.include_router(admin_lms.router, prefix="/api")
+app.include_router(teacher_lms.router, prefix="/api")
+app.include_router(student_lms.router, prefix="/api")
 app.include_router(lab.router, prefix="/api")
-app.include_router(registrations.router, prefix="/api")
-app.include_router(teacher_enrollment.router, prefix="/api")
-app.include_router(teacher_reports.router, prefix="/api")
 
-profiles_path = (Path(__file__).resolve().parents[1] / "uploads" / "profiles").resolve()
-profiles_path.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads/profiles", StaticFiles(directory=profiles_path), name="profile-uploads")
+uploads_root = (Path(__file__).resolve().parents[1] / "uploads").resolve()
+uploads_root.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_root), name="uploads")

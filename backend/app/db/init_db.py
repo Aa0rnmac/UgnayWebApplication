@@ -11,11 +11,16 @@ from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.activity_attempt import ActivityAttempt, ActivityAttemptItem
+from app.models.admin_audit_log import AdminAuditLog
 from app.models.module import Module
 from app.models.module_activity import ModuleActivity
 from app.models.assessment_report import AssessmentReport
+from app.models.certificate import CertificateTemplate, IssuedCertificate
 from app.models.enrollment import Enrollment
+from app.models.lms_progress import SectionModuleItemProgress, SectionModuleProgress
 from app.models.registration import Registration
+from app.models.section import Section, SectionStudentAssignment, SectionTeacherAssignment
+from app.models.section_module import SectionModule, SectionModuleItem
 from app.models.user import User
 
 SEED_MODULES = [
@@ -1008,16 +1013,26 @@ MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG: dict[str, list[dict]] = {
 }
 
 REQUIRED_TABLES = {
+    "admin_audit_logs",
     "activity_attempt_items",
     "activity_attempts",
     "archived_student_accounts",
     "assessment_reports",
     "batches",
+    "certificate_templates",
     "enrollments",
+    "issued_certificates",
     "module_activities",
     "modules",
     "password_reset_otps",
     "registrations",
+    "section_module_item_progress",
+    "section_module_items",
+    "section_module_progress",
+    "section_modules",
+    "section_student_assignments",
+    "section_teacher_assignments",
+    "sections",
     "teacher_invites",
     "user_module_progress",
     "user_sessions",
@@ -1116,6 +1131,24 @@ def seed_demo_user(db: Session) -> None:
             username="student_demo",
             password_hash=hash_password("student123"),
             role="student",
+        )
+    )
+    db.commit()
+
+
+def seed_admin_user(db: Session) -> None:
+    existing_admin = db.query(User).filter(User.role == "admin", User.archived_at.is_(None)).first()
+    if existing_admin:
+        return
+    db.add(
+        User(
+            username="admin_demo",
+            email="admin@ugnay.local",
+            password_hash=hash_password("Admin123!"),
+            role="admin",
+            first_name="System",
+            last_name="Admin",
+            must_change_password=False,
         )
     )
     db.commit()
@@ -1472,6 +1505,16 @@ def ensure_schema_updates() -> None:
         "report_sent_at",
         "ALTER TABLE user_module_progress ADD COLUMN report_sent_at TIMESTAMP",
     )
+    _add_column_if_missing(
+        "section_student_assignments",
+        "course_completed_at",
+        "ALTER TABLE section_student_assignments ADD COLUMN course_completed_at TIMESTAMP",
+    )
+    _add_column_if_missing(
+        "section_student_assignments",
+        "auto_archive_due_at",
+        "ALTER TABLE section_student_assignments ADD COLUMN auto_archive_due_at TIMESTAMP",
+    )
 
     missing_activity_blueprints = sorted(
         slug for slug in published_slugs if not MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.get(slug)
@@ -1500,16 +1543,13 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     validate_seed_data()
-
-    if settings.should_auto_bootstrap_schema:
-        Base.metadata.create_all(bind=engine)
-        ensure_schema_updates()
-    else:
+    Base.metadata.create_all(bind=engine)
+    ensure_schema_updates()
+    if not settings.should_auto_bootstrap_schema:
         _verify_required_tables()
 
     with SessionLocal() as db:
-        seed_modules(db)
-        seed_module_activities(db)
         seed_demo_user(db)
+        seed_admin_user(db)
         backfill_enrollments(db)
         backfill_legacy_activity_attempts(db)

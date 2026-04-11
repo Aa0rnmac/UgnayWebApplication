@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import {
   ApiUser,
@@ -39,6 +40,7 @@ const EMPTY_PROFILE: ProfileForm = {
 };
 
 export default function ProfilePage() {
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [form, setForm] = useState<ProfileForm>(EMPTY_PROFILE);
   const [loading, setLoading] = useState(false);
@@ -94,6 +96,15 @@ export default function ProfilePage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    if (user.must_change_password || searchParams.get("forcePasswordChange") === "1") {
+      setShowPasswordDialog(true);
+    }
+  }, [searchParams, user]);
 
   function updateField<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
     setForm((previous) => ({ ...previous, [key]: value }));
