@@ -6,24 +6,20 @@ import { assignSectionMembers, createAdminSection, getAdminSections, getAdminUse
 
 export default function AdminSectionsPage() {
   const [sections, setSections] = useState<LmsSection[]>([]);
-  const [teachers, setTeachers] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedSectionId, setSelectedSectionId] = useState<string>("");
-  const [teacherId, setTeacherId] = useState<string>("");
   const [studentId, setStudentId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    const [sectionData, teacherData, studentData] = await Promise.all([
+    const [sectionData, studentData] = await Promise.all([
       getAdminSections(),
-      getAdminUsers("teacher"),
       getAdminUsers("student")
     ]);
     setSections(sectionData);
-    setTeachers(teacherData);
     setStudents(studentData);
   }
 
@@ -53,10 +49,8 @@ export default function AdminSectionsPage() {
     setError(null);
     try {
       await assignSectionMembers(Number(selectedSectionId), {
-        teacher_ids: teacherId ? [Number(teacherId)] : [],
         student_ids: studentId ? [Number(studentId)] : []
       });
-      setTeacherId("");
       setStudentId("");
       await refresh();
     } catch (requestError) {
@@ -70,7 +64,7 @@ export default function AdminSectionsPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Admin LMS</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">Section Management</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Suggested flow: assign students to a section during bulk account import, then adjust section placement here when needed.
+          Teachers now have access to all sections. Use this page to create sections and place students.
         </p>
       </div>
 
@@ -109,18 +103,7 @@ export default function AdminSectionsPage() {
               ))}
             </select>
           </label>
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block text-sm font-semibold text-slate-800">
-              Teacher
-              <select className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2" onChange={(event) => setTeacherId(event.target.value)} value={teacherId}>
-                <option value="">No teacher selected</option>
-                {teachers.map((teacher) => (
-                  <option key={teacher.id} value={teacher.id}>
-                    {teacher.username}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="grid gap-4">
             <label className="block text-sm font-semibold text-slate-800">
               Student
               <select className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2" onChange={(event) => setStudentId(event.target.value)} value={studentId}>
@@ -157,7 +140,7 @@ export default function AdminSectionsPage() {
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl bg-brandOffWhite px-3 py-3">
                   <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Teachers</p>
-                  <p className="mt-2 text-sm text-slate-800">{section.teachers.map((member) => member.username).join(", ") || "None assigned"}</p>
+                  <p className="mt-2 text-sm text-slate-800">All active teachers have access.</p>
                 </div>
                 <div className="rounded-xl bg-brandOffWhite px-3 py-3">
                   <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Students</p>

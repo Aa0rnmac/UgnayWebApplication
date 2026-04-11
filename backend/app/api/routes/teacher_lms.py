@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_teacher
+from app.core.datetime_utils import utc_now
 from app.db.session import get_db
 from app.models.certificate import CertificateTemplate
 from app.models.lms_progress import SectionModuleItemProgress
@@ -31,6 +32,7 @@ from app.services.lms_service import (
     sync_module_progress,
     user_summary,
 )
+from app.services.audit_log_service import log_user_activity
 
 
 router = APIRouter(prefix="/teacher", tags=["teacher-lms"])
@@ -61,13 +63,6 @@ def _require_teacher_section(
     )
     if not section:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found.")
-
-    teacher_section_ids = get_teacher_section_ids(db, current_teacher.id)
-    if current_teacher.role != "admin" and section.id not in teacher_section_ids:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not assigned to this section.",
-        )
     return section
 
 
@@ -193,6 +188,15 @@ def create_teacher_section_module(
         is_published=False,
     )
     db.add(module)
+    db.flush()
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_created",
+        target_type="section_module",
+        target_id=module.id,
+        details={"section_id": section_id, "title": module.title},
+    )
     db.commit()
     db.refresh(module)
     return _module_out(module)
@@ -237,6 +241,19 @@ def update_teacher_module(
             db.add(item)
 
     db.add(module)
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_updated",
+        target_type="section_module",
+        target_id=module.id,
+        details={
+            "section_id": module.section_id,
+            "title": module.title,
+            "is_published": module.is_published,
+            "order_index": module.order_index,
+        },
+    )
     db.commit()
     db.refresh(module)
     return _module_out(module)
@@ -271,6 +288,20 @@ def create_teacher_module_item(
         is_published=payload.is_published,
     )
     db.add(item)
+    db.flush()
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_item_created",
+        target_type="section_module_item",
+        target_id=item.id,
+        details={
+            "section_id": module.section_id,
+            "module_id": module.id,
+            "item_type": item.item_type,
+            "title": item.title,
+        },
+    )
     db.commit()
     db.refresh(module)
     return _module_out(module)
@@ -329,6 +360,21 @@ def upload_teacher_module_item_resource(
         is_published=is_published,
     )
     db.add(item)
+    db.flush()
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_resource_uploaded",
+        target_type="section_module_item",
+        target_id=item.id,
+        details={
+            "section_id": module.section_id,
+            "module_id": module.id,
+            "item_type": item.item_type,
+            "title": item.title,
+            "resource_file_name": resource_file.filename or saved_name,
+        },
+    )
     db.commit()
     db.refresh(module)
     return _module_out(module)
@@ -364,6 +410,20 @@ def update_teacher_module_item(
     if payload.is_published is not None:
         item.is_published = payload.is_published
     db.add(item)
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_item_updated",
+        target_type="section_module_item",
+        target_id=item.id,
+        details={
+            "section_id": item.module.section_id,
+            "module_id": item.module.id,
+            "item_type": item.item_type,
+            "title": item.title,
+            "is_published": item.is_published,
+        },
+    )
     db.commit()
     db.refresh(item.module)
     return _module_out(item.module)
@@ -396,6 +456,19 @@ def delete_teacher_module_item(
     for index, row in enumerate(remaining_items, start=1):
         row.order_index = index
         db.add(row)
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_item_deleted",
+        target_type="section_module_item",
+        target_id=item_id,
+        details={
+            "section_id": module.section_id,
+            "module_id": module.id,
+            "title": item.title,
+            "item_type": item.item_type,
+        },
+    )
     db.commit()
     db.refresh(module)
     return _module_out(module)
@@ -420,9 +493,20 @@ def upload_certificate_template(
         uploaded_by_teacher_id=current_teacher.id,
         original_file_name=certificate_file.filename or saved_name,
         file_path=str(saved_path),
-        status="pending",
+        status="approved",
+        approved_by_user_id=current_teacher.id,
+        approved_at=utc_now(),
     )
     db.add(template)
+    db.flush()
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_certificate_template_uploaded",
+        target_type="certificate_template",
+        target_id=template.id,
+        details={"section_id": section_id, "file_name": template.original_file_name, "status": template.status},
+    )
     db.commit()
     return CertificateTemplateOut(
         id=template.id,

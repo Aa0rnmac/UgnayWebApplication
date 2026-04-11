@@ -248,7 +248,7 @@ export default function TeacherSectionsPage() {
 
               <div className="rounded-xl border border-brandBorder bg-brandOffWhite px-4 py-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Certificate Template</p>
-                <p className="mt-2">Upload one certificate template for this section. Admin approval is required before students can download it.</p>
+                <p className="mt-2">Upload one certificate template for this section. Students can download certificates after completing all modules.</p>
                 <input className="mt-3 block w-full text-sm" onChange={(event) => void onUploadCertificate(event.target.files?.[0] ?? null)} type="file" />
                 <div className="mt-3 space-y-2">
                   {certificates.map((item) => (

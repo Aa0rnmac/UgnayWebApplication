@@ -26,6 +26,7 @@ from app.services.lms_service import (
     serialize_course_for_student,
     sync_module_progress,
 )
+from app.services.audit_log_service import log_user_activity
 
 
 router = APIRouter(prefix="/student", tags=["student-lms"])
@@ -111,6 +112,18 @@ def complete_readable_item(
     progress.attempt_count = max(progress.attempt_count, 1)
     progress.duration_seconds = max(progress.duration_seconds, payload.duration_seconds)
     db.add(progress)
+    log_user_activity(
+        db,
+        actor=current_student,
+        action_type="student_item_completed",
+        target_type="section_module_item",
+        target_id=item.id,
+        details={
+            "module_id": module.id,
+            "item_type": item.item_type,
+            "duration_seconds": payload.duration_seconds,
+        },
+    )
     module_progress = sync_module_progress(db, student_id=current_student.id, module=module)
     refresh_student_completion_schedule(db, student_id=current_student.id)
     auto_archive_due_students(db)
@@ -158,6 +171,21 @@ def submit_learning_item(
     progress.duration_seconds += payload.duration_seconds
     progress.submitted_payload = dict(payload.extra_payload or {})
     db.add(progress)
+    log_user_activity(
+        db,
+        actor=current_student,
+        action_type="student_item_submitted",
+        target_type="section_module_item",
+        target_id=item.id,
+        details={
+            "module_id": module.id,
+            "item_type": item.item_type,
+            "attempt_count": progress.attempt_count,
+            "is_correct": progress.is_correct,
+            "score_percent": progress.score_percent,
+            "duration_seconds": payload.duration_seconds,
+        },
+    )
     module_progress = sync_module_progress(db, student_id=current_student.id, module=module)
     refresh_student_completion_schedule(db, student_id=current_student.id)
     auto_archive_due_students(db)
@@ -196,7 +224,7 @@ def get_student_certificate_status(
         return CertificateStudentDownloadOut(
             eligible=False,
             section_name=assignment.section.name,
-            message="Certificate template is still waiting for admin approval.",
+            message="Certificate template is not available yet for this section.",
         )
     if not section_completion_ready(db, current_student.id, assignment.section_id):
         return CertificateStudentDownloadOut(
@@ -240,7 +268,7 @@ def download_student_certificate(
     if template is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Certificate template is not approved yet.",
+            detail="Certificate template is not available yet for this section.",
         )
     if not section_completion_ready(db, current_student.id, assignment.section_id):
         raise HTTPException(
@@ -252,6 +280,14 @@ def download_student_certificate(
         template=template,
         student_id=current_student.id,
         section_id=assignment.section_id,
+    )
+    log_user_activity(
+        db,
+        actor=current_student,
+        action_type="student_certificate_downloaded",
+        target_type="certificate_template",
+        target_id=template.id,
+        details={"section_id": assignment.section_id, "section_name": assignment.section.name},
     )
     refresh_student_completion_schedule(db, student_id=current_student.id)
     auto_archive_due_students(db)

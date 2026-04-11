@@ -63,6 +63,7 @@ export type ApiUser = {
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
+  company_name?: string | null;
   email?: string | null;
   phone_number?: string | null;
   address?: string | null;
@@ -82,6 +83,7 @@ export type LmsSectionMember = {
   role: "student" | "teacher" | "admin";
   first_name?: string | null;
   last_name?: string | null;
+  company_name?: string | null;
   email?: string | null;
   assigned_at?: string | null;
   course_completed_at?: string | null;
@@ -119,6 +121,7 @@ export type BulkAccountCreateRow = {
   email: string;
   first_name?: string;
   last_name?: string;
+  company_name?: string;
   section_id?: number | null;
 };
 
@@ -275,6 +278,22 @@ export type AdminAuditEvent = {
   id: number;
   admin_user_id: number;
   admin_username: string;
+  action_type: string;
+  target_type: string;
+  target_id?: number | null;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
+export type SystemActivityEvent = {
+  id: number;
+  actor_user_id: number;
+  actor_username: string;
+  actor_role: "student" | "teacher" | "admin";
+  actor_email?: string | null;
+  actor_first_name?: string | null;
+  actor_last_name?: string | null;
+  actor_company_name?: string | null;
   action_type: string;
   target_type: string;
   target_id?: number | null;
@@ -1120,6 +1139,14 @@ export function unarchiveStudentAccount(studentId: number, token?: string): Prom
   return request<{ message: string }>(`/admin/students/${studentId}/unarchive`, { method: "POST" }, token);
 }
 
+export function archiveNonAdminAccounts(token?: string): Promise<{ message: string; count: number }> {
+  return request<{ message: string; count: number }>(
+    "/admin/accounts/archive-non-admin",
+    { method: "POST" },
+    token
+  );
+}
+
 export function getAdminSections(token?: string): Promise<LmsSection[]> {
   return request<LmsSection[]>("/admin/sections", undefined, token);
 }
@@ -1196,6 +1223,15 @@ export function getAdminLoginActivityReport(limit = 100, token?: string): Promis
 export function getAdminAuditEvents(limit = 100, token?: string): Promise<AdminAuditEvent[]> {
   const query = buildQuery({ limit });
   return request<AdminAuditEvent[]>(`/admin/reports/admin-actions${query}`, undefined, token);
+}
+
+export function getAdminSystemActivityEvents(
+  limit = 150,
+  role: "all" | "student" | "teacher" | "admin" = "all",
+  token?: string
+): Promise<SystemActivityEvent[]> {
+  const query = buildQuery({ limit, role });
+  return request<SystemActivityEvent[]>(`/admin/reports/system-activity${query}`, undefined, token);
 }
 
 export function getTeacherDashboard(token?: string): Promise<TeacherSectionSummary[]> {

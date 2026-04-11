@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -30,6 +31,7 @@ from app.schemas.lms import (
     SectionCreateRequest,
     SectionOut,
     SectionUpdateRequest,
+    SystemActivityEventOut,
 )
 from app.services.email_sender import (
     send_student_initial_credentials_email,
@@ -40,7 +42,6 @@ from app.services.lms_service import (
     assign_student_to_section,
     build_unique_username,
     count_users_by_role,
-    ensure_teacher_assigned_to_section,
     section_out,
     user_summary,
     generate_temporary_password,
@@ -105,9 +106,7 @@ def get_admin_dashboard(
     db.commit()
     sections = db.query(Section).count()
     active_sections = db.query(Section).filter(Section.status == "active").count()
-    pending_certificates = (
-        db.query(CertificateTemplate).filter(CertificateTemplate.status == "pending").count()
-    )
+    pending_certificates = 0
     recent_users = (
         db.query(User)
         .filter(User.archived_at.is_(None))
@@ -218,6 +217,7 @@ def bulk_import_accounts(
             email=row.email,
             first_name=row.first_name.strip() if row.first_name else None,
             last_name=row.last_name.strip() if row.last_name else None,
+            company_name=row.company_name.strip() if row.company_name else None,
             password_hash=hash_password(temporary_password),
             role=payload.role,
             must_change_password=True,
@@ -243,6 +243,7 @@ def bulk_import_accounts(
             details={
                 "email": row.email,
                 "role": payload.role,
+                "company_name": row.company_name,
                 "section_id": row.section_id,
                 "batch_index": ((index - 1) // payload.batch_size) + 1,
             },
@@ -520,15 +521,6 @@ def update_section_assignments(
     if not section:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found.")
 
-    for teacher_id in payload.teacher_ids:
-        teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
-        if not teacher:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Teacher not found: {teacher_id}",
-            )
-        ensure_teacher_assigned_to_section(db, teacher_id=teacher_id, section_id=section_id)
-
     for student_id in payload.student_ids:
         student = db.query(User).filter(User.id == student_id, User.role == "student").first()
         if not student:
@@ -544,7 +536,10 @@ def update_section_assignments(
         action_type="section_assignments_updated",
         target_type="section",
         target_id=section_id,
-        details={"teacher_ids": payload.teacher_ids, "student_ids": payload.student_ids},
+        details={
+            "teacher_assignment_policy": "all_teachers_access_all_sections",
+            "student_ids": payload.student_ids,
+        },
     )
     db.commit()
 
@@ -567,25 +562,10 @@ def list_pending_certificate_templates(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> list[CertificateTemplateOut]:
-    templates = (
-        db.query(CertificateTemplate)
-        .options(joinedload(CertificateTemplate.section))
-        .filter(CertificateTemplate.status == "pending")
-        .order_by(CertificateTemplate.created_at.asc())
-        .all()
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Certificate review is no longer part of the admin workflow.",
     )
-    return [
-        CertificateTemplateOut(
-            id=item.id,
-            section_id=item.section_id,
-            section_name=item.section.name if item.section else "Unknown section",
-            original_file_name=item.original_file_name,
-            status=item.status,
-            review_remarks=item.review_remarks,
-            created_at=item.created_at,
-        )
-        for item in templates
-    ]
 
 
 @router.post("/certificates/{template_id}/approve", response_model=CertificateTemplateOut)
@@ -595,36 +575,9 @@ def approve_certificate_template(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> CertificateTemplateOut:
-    template = (
-        db.query(CertificateTemplate)
-        .options(joinedload(CertificateTemplate.section))
-        .filter(CertificateTemplate.id == template_id)
-        .first()
-    )
-    if not template:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
-    template.status = "approved"
-    template.review_remarks = payload.remarks
-    template.approved_by_user_id = current_admin.id
-    template.approved_at = utc_now()
-    db.add(template)
-    _log_admin_action(
-        db,
-        admin_id=current_admin.id,
-        action_type="certificate_template_approved",
-        target_type="certificate_template",
-        target_id=template.id,
-        details={"remarks": payload.remarks},
-    )
-    db.commit()
-    return CertificateTemplateOut(
-        id=template.id,
-        section_id=template.section_id,
-        section_name=template.section.name if template.section else "Unknown section",
-        original_file_name=template.original_file_name,
-        status=template.status,
-        review_remarks=template.review_remarks,
-        created_at=template.created_at,
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Certificate review is no longer part of the admin workflow.",
     )
 
 
@@ -635,36 +588,9 @@ def reject_certificate_template(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> CertificateTemplateOut:
-    template = (
-        db.query(CertificateTemplate)
-        .options(joinedload(CertificateTemplate.section))
-        .filter(CertificateTemplate.id == template_id)
-        .first()
-    )
-    if not template:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
-    template.status = "rejected"
-    template.review_remarks = payload.remarks
-    template.approved_by_user_id = current_admin.id
-    template.approved_at = utc_now()
-    db.add(template)
-    _log_admin_action(
-        db,
-        admin_id=current_admin.id,
-        action_type="certificate_template_rejected",
-        target_type="certificate_template",
-        target_id=template.id,
-        details={"remarks": payload.remarks},
-    )
-    db.commit()
-    return CertificateTemplateOut(
-        id=template.id,
-        section_id=template.section_id,
-        section_name=template.section.name if template.section else "Unknown section",
-        original_file_name=template.original_file_name,
-        status=template.status,
-        review_remarks=template.review_remarks,
-        created_at=template.created_at,
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Certificate review is no longer part of the admin workflow.",
     )
 
 
@@ -750,3 +676,71 @@ def list_admin_audit_events(
         )
         for row in rows
     ]
+
+
+@router.get("/reports/system-activity", response_model=list[SystemActivityEventOut])
+def list_system_activity_events(
+    limit: int = 150,
+    role: Literal["student", "teacher", "admin", "all"] = "all",
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> list[SystemActivityEventOut]:
+    safe_limit = max(1, min(limit, 500))
+    query = (
+        db.query(AdminAuditLog)
+        .options(joinedload(AdminAuditLog.admin))
+        .order_by(AdminAuditLog.created_at.desc(), AdminAuditLog.id.desc())
+    )
+    rows = query.limit(safe_limit).all()
+    events: list[SystemActivityEventOut] = []
+    for row in rows:
+        actor = row.admin
+        actor_role = actor.role if actor and actor.role in {"student", "teacher", "admin"} else "student"
+        if role != "all" and actor_role != role:
+            continue
+        details = dict(row.details or {})
+        events.append(
+            SystemActivityEventOut(
+                id=row.id,
+                actor_user_id=row.admin_user_id,
+                actor_username=actor.username if actor else "Unknown",
+                actor_role=actor_role,  # type: ignore[arg-type]
+                actor_email=(actor.email if actor else details.get("actor_email")),
+                actor_first_name=(actor.first_name if actor else details.get("actor_first_name")),
+                actor_last_name=(actor.last_name if actor else details.get("actor_last_name")),
+                actor_company_name=(actor.company_name if actor else details.get("actor_company_name")),
+                action_type=row.action_type,
+                target_type=row.target_type,
+                target_id=row.target_id,
+                details=details,
+                created_at=row.created_at,
+            )
+        )
+    return events
+
+
+@router.post("/accounts/archive-non-admin")
+def archive_non_admin_accounts(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> dict[str, int | str]:
+    now = utc_now()
+    users = (
+        db.query(User)
+        .filter(User.role != "admin", User.archived_at.is_(None))
+        .all()
+    )
+    for user in users:
+        user.archived_at = now
+        db.add(user)
+        db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
+    _log_admin_action(
+        db,
+        admin_id=current_admin.id,
+        action_type="non_admin_accounts_archived",
+        target_type="user",
+        target_id=None,
+        details={"count": len(users)},
+    )
+    db.commit()
+    return {"message": "All non-admin accounts have been archived.", "count": len(users)}

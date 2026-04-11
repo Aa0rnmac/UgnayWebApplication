@@ -19,19 +19,18 @@ export default function AdminDashboardPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Admin LMS</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">System Overview</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Create accounts, manage sections, and review certificate approvals.
+          Create accounts, manage sections, and monitor system activity.
         </p>
       </div>
 
       {error ? <p className="rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm text-brandRed">{error}</p> : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
           { label: "Students", value: dashboard?.total_students ?? 0, tone: "text-brandBlue" },
           { label: "Teachers", value: dashboard?.total_teachers ?? 0, tone: "text-brandGreen" },
           { label: "Sections", value: dashboard?.total_sections ?? 0, tone: "text-accentWarm" },
-          { label: "Active Sections", value: dashboard?.active_sections ?? 0, tone: "text-brandBlue" },
-          { label: "Pending Certificates", value: dashboard?.pending_certificate_approvals ?? 0, tone: "text-brandRed" }
+          { label: "Active Sections", value: dashboard?.active_sections ?? 0, tone: "text-brandBlue" }
         ].map((card) => (
           <div key={card.label} className="panel panel-lively">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">{card.label}</p>
@@ -81,13 +80,10 @@ export default function AdminDashboardPage() {
               Bulk create student and teacher accounts
             </Link>
             <Link className="rounded-xl border border-brandBorder bg-white px-4 py-4 font-semibold text-brandBlue transition hover:bg-brandBlueLight" href="/admin/sections">
-              Create sections and assign teachers or students
-            </Link>
-            <Link className="rounded-xl border border-brandBorder bg-white px-4 py-4 font-semibold text-brandBlue transition hover:bg-brandBlueLight" href="/admin/certificates">
-              Review teacher-uploaded certificate templates
+              Create sections and assign students
             </Link>
             <Link className="rounded-xl border border-brandBorder bg-white px-4 py-4 font-semibold text-brandBlue transition hover:bg-brandBlueLight" href="/admin/reports">
-              View login activity and admin action reports
+              View login activity and system audit logs
             </Link>
           </div>
         </div>

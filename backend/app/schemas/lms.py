@@ -24,6 +24,7 @@ class UserSummaryOut(BaseModel):
     role: Literal["student", "teacher", "admin"]
     first_name: str | None = None
     last_name: str | None = None
+    company_name: str | None = None
     email: str | None = None
 
 
@@ -50,6 +51,7 @@ class BulkAccountCreateRow(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     first_name: str | None = Field(default=None, max_length=120)
     last_name: str | None = Field(default=None, max_length=120)
+    company_name: str | None = Field(default=None, max_length=200)
     section_id: int | None = None
 
     @field_validator("email")
@@ -322,6 +324,22 @@ class AdminAuditEventOut(BaseModel):
     id: int
     admin_user_id: int
     admin_username: str
+    action_type: str
+    target_type: str
+    target_id: int | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class SystemActivityEventOut(BaseModel):
+    id: int
+    actor_user_id: int
+    actor_username: str
+    actor_role: Literal["student", "teacher", "admin"]
+    actor_email: str | None = None
+    actor_first_name: str | None = None
+    actor_last_name: str | None = None
+    actor_company_name: str | None = None
     action_type: str
     target_type: str
     target_id: int | None = None

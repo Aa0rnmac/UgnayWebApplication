@@ -387,6 +387,8 @@ def update_my_profile(
         current_user.middle_name = payload.middle_name.strip() or None
     if payload.last_name is not None:
         current_user.last_name = payload.last_name.strip() or None
+    if payload.company_name is not None:
+        current_user.company_name = payload.company_name.strip() or None
     if payload.email is not None:
         normalized_email = payload.email.strip().lower()
         if normalized_email:
@@ -493,6 +495,7 @@ def unenroll_my_account(
             first_name=current_user.first_name,
             middle_name=current_user.middle_name,
             last_name=current_user.last_name,
+            company_name=current_user.company_name,
             phone_number=current_user.phone_number,
             address=current_user.address,
             birth_date=current_user.birth_date,
@@ -523,6 +526,7 @@ def unenroll_my_account(
     current_user.username = f"archived-student-{current_user.id}-{timestamp_token}"
     current_user.email = f"archived-student-{current_user.id}-{timestamp_token}@archive.local"
     current_user.phone_number = None
+    current_user.company_name = None
     current_user.address = None
     current_user.birth_date = None
     current_user.profile_image_path = None

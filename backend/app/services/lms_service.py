@@ -71,6 +71,7 @@ def user_summary(user: User) -> UserSummaryOut:
         role=user.role,
         first_name=user.first_name,
         last_name=user.last_name,
+        company_name=user.company_name,
         email=user.email,
     )
 
@@ -108,6 +109,9 @@ def section_out(section: Section) -> SectionOut:
 
 
 def get_teacher_section_ids(db: Session, teacher_id: int) -> set[int]:
+    teacher = db.query(User).filter(User.id == teacher_id, User.archived_at.is_(None)).first()
+    if teacher and teacher.role in {"teacher", "admin"}:
+        return {row.id for row in db.query(Section.id).all()}
     return {
         row.section_id
         for row in db.query(SectionTeacherAssignment.section_id)

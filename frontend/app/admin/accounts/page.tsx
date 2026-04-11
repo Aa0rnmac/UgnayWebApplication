@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
+  archiveNonAdminAccounts,
   archiveTeacherAccount,
   bulkImportAccounts,
   getAdminSections,
@@ -20,12 +21,15 @@ function parseRows(source: string, defaultSectionId: number | null) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [email = "", first_name = "", last_name = "", sectionIdValue = ""] = line.split(",").map((part) => part.trim());
+      const [email = "", first_name = "", last_name = "", company_name = ""] = line
+        .split(",")
+        .map((part) => part.trim());
       return {
         email,
         first_name: first_name || undefined,
         last_name: last_name || undefined,
-        section_id: sectionIdValue ? Number(sectionIdValue) : defaultSectionId,
+        company_name: company_name || undefined,
+        section_id: defaultSectionId,
       };
     })
     .filter((row) => row.email);
@@ -83,8 +87,15 @@ export default function AdminAccountsPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Admin LMS</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">Bulk Account Creation</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Paste one account per line using this format: <code>email,first name,last name,section id</code>.
+          Paste one account per line using this format: <code>email,first name,last name,company name</code>.
         </p>
+        <button
+          className="mt-4 rounded-lg border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed transition hover:bg-brandRed/20"
+          onClick={() => void archiveNonAdminAccounts().then(() => refreshUsers(role))}
+          type="button"
+        >
+          Archive All Non-Admin Accounts
+        </button>
       </div>
 
       <form className="panel space-y-4" onSubmit={onSubmit}>
@@ -97,17 +108,23 @@ export default function AdminAccountsPage() {
             </select>
           </label>
 
-          <label className="text-sm font-semibold text-slate-800">
-            Default Section
-            <select className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2" onChange={(event) => setDefaultSectionId(event.target.value)} value={defaultSectionId}>
-              <option value="">No default section</option>
-              {sections.map((section) => (
-                <option key={section.id} value={section.id}>
-                  {section.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {role === "student" ? (
+            <label className="text-sm font-semibold text-slate-800">
+              Default Section
+              <select className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2" onChange={(event) => setDefaultSectionId(event.target.value)} value={defaultSectionId}>
+                <option value="">No default section</option>
+                {sections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <div className="rounded-xl border border-brandBorder bg-brandOffWhite px-4 py-3 text-sm text-slate-700">
+              Teachers can access all sections by default.
+            </div>
+          )}
 
           <div className="rounded-xl border border-brandBorder bg-brandBlueLight px-4 py-3 text-sm text-slate-700">
             Parsed rows: <span className="font-bold text-brandBlue">{parsedRows.length}</span>
@@ -130,7 +147,7 @@ export default function AdminAccountsPage() {
           <textarea
             className="mt-1 min-h-52 w-full rounded-xl border border-brandBorder bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
             onChange={(event) => setRawRows(event.target.value)}
-            placeholder={"student1@school.edu,Juan,Dela Cruz\nstudent2@school.edu,Ana,Santos"}
+            placeholder={"student1@school.edu,Juan,Dela Cruz,ABC Company\nstudent2@school.edu,Ana,Santos,ABC Company"}
             value={rawRows}
           />
         </label>
@@ -155,7 +172,7 @@ export default function AdminAccountsPage() {
                   <th className="px-2 py-3">Email</th>
                   <th className="px-2 py-3">Username</th>
                   <th className="px-2 py-3">Temp Password</th>
-                  <th className="px-2 py-3">Email</th>
+                  <th className="px-2 py-3">Delivery</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,20 +195,26 @@ export default function AdminAccountsPage() {
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-brandBorder text-left text-xs uppercase tracking-[0.2em] text-slate-500">
-                <th className="px-2 py-3">Username</th>
-                <th className="px-2 py-3">Email</th>
-                <th className="px-2 py-3">Status</th>
-                <th className="px-2 py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr className="border-b border-brandBorder/70" key={user.id}>
-                  <td className="px-2 py-3 font-semibold">{user.username}</td>
-                  <td className="px-2 py-3">{user.email ?? "-"}</td>
-                  <td className="px-2 py-3">
-                    {user.archived_at ? "Archived" : user.must_change_password ? "Password change required" : "Active"}
+                <tr className="border-b border-brandBorder text-left text-xs uppercase tracking-[0.2em] text-slate-500">
+                  <th className="px-2 py-3">Username</th>
+                  <th className="px-2 py-3">Email</th>
+                  <th className="px-2 py-3">First Name</th>
+                  <th className="px-2 py-3">Last Name</th>
+                  <th className="px-2 py-3">Company</th>
+                  <th className="px-2 py-3">Status</th>
+                  <th className="px-2 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr className="border-b border-brandBorder/70" key={user.id}>
+                    <td className="px-2 py-3 font-semibold">{user.username}</td>
+                    <td className="px-2 py-3">{user.email ?? "-"}</td>
+                    <td className="px-2 py-3">{user.first_name ?? "-"}</td>
+                    <td className="px-2 py-3">{user.last_name ?? "-"}</td>
+                    <td className="px-2 py-3">{user.company_name ?? "-"}</td>
+                    <td className="px-2 py-3">
+                      {user.archived_at ? "Archived" : user.must_change_password ? "Password change required" : "Active"}
                   </td>
                   <td className="px-2 py-3">
                     <div className="flex flex-wrap gap-2">

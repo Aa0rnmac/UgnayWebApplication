@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@zxing/browser": "0.1.5",
+    "bootstrap": "^5.3.3",
     "next": "15.3.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"

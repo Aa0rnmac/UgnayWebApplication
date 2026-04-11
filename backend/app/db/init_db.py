@@ -1411,6 +1411,9 @@ def ensure_schema_updates() -> None:
     _add_column_if_missing("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR(120)")
     _add_column_if_missing("users", "middle_name", "ALTER TABLE users ADD COLUMN middle_name VARCHAR(120)")
     _add_column_if_missing("users", "last_name", "ALTER TABLE users ADD COLUMN last_name VARCHAR(120)")
+    _add_column_if_missing(
+        "users", "company_name", "ALTER TABLE users ADD COLUMN company_name VARCHAR(200)"
+    )
     _add_column_if_missing("users", "email", "ALTER TABLE users ADD COLUMN email VARCHAR(255)")
     _add_column_if_missing(
         "users", "phone_number", "ALTER TABLE users ADD COLUMN phone_number VARCHAR(40)"
@@ -1456,6 +1459,7 @@ def ensure_schema_updates() -> None:
             first_name VARCHAR(120),
             middle_name VARCHAR(120),
             last_name VARCHAR(120),
+            company_name VARCHAR(200),
             phone_number VARCHAR(40),
             address TEXT,
             birth_date DATE,
@@ -1469,6 +1473,11 @@ def ensure_schema_updates() -> None:
             FOREIGN KEY(original_user_id) REFERENCES users(id)
         )
         """,
+    )
+    _add_column_if_missing(
+        "archived_student_accounts",
+        "company_name",
+        "ALTER TABLE archived_student_accounts ADD COLUMN company_name VARCHAR(200)",
     )
     _add_column_if_missing(
         "user_module_progress",
