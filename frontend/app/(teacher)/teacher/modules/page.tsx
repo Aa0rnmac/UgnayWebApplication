@@ -186,30 +186,108 @@ function formatPercent(value: number | null | undefined, digits = 1) {
   return `${value.toFixed(digits)}%`;
 }
 
-function getMostAffectedWeakModule(weakItems: TeacherWeakItem[]) {
+function normalizeModuleTitle(title: string) {
+  return title.trim().toLowerCase();
+}
+
+function getModuleWeakItemStats(
+  weakItems: TeacherWeakItem[],
+  modules: TeacherModuleCard[] = []
+) {
+  const moduleById = new Map<number, TeacherModuleCard>();
+  const moduleIdByTitle = new Map<string, number>();
+  const moduleMap = new Map<
+    string,
+    { moduleId: number | null; moduleTitle: string; hits: number; worstRate: number }
+  >();
+
+  for (const module of modules) {
+    moduleById.set(module.id, module);
+    moduleIdByTitle.set(normalizeModuleTitle(module.title), module.id);
+    moduleMap.set(`id:${module.id}`, {
+      moduleId: module.id,
+      moduleTitle: module.title,
+      hits: 0,
+      worstRate: 0,
+    });
+  }
+
+  for (const item of weakItems) {
+    let resolvedModuleId: number | undefined;
+
+    if (moduleById.has(item.module_id)) {
+      resolvedModuleId = item.module_id;
+    } else {
+      const fallbackModuleId = moduleIdByTitle.get(normalizeModuleTitle(item.module_title));
+      if (fallbackModuleId !== undefined) {
+        resolvedModuleId = fallbackModuleId;
+      }
+    }
+
+    const key =
+      resolvedModuleId !== undefined
+        ? `id:${resolvedModuleId}`
+        : `title:${normalizeModuleTitle(item.module_title)}`;
+    const resolvedTitle =
+      resolvedModuleId !== undefined
+        ? moduleById.get(resolvedModuleId)?.title ?? item.module_title
+        : item.module_title;
+    const current = moduleMap.get(key) ?? {
+      moduleId: resolvedModuleId ?? item.module_id ?? null,
+      moduleTitle: resolvedTitle,
+      hits: 0,
+      worstRate: 0,
+    };
+    current.hits += 1;
+    current.worstRate = Math.max(current.worstRate, item.wrong_rate_percent);
+    moduleMap.set(key, current);
+  }
+
+  return [...moduleMap.values()];
+}
+
+function getTopPerformingModule(weakItems: TeacherWeakItem[], modules: TeacherModuleCard[]) {
   if (weakItems.length === 0) {
     return "No module data";
   }
-
-  const moduleMap = new Map<string, { hits: number; worstRate: number }>();
-  for (const item of weakItems) {
-    const current = moduleMap.get(item.module_title) ?? { hits: 0, worstRate: 0 };
-    current.hits += 1;
-    current.worstRate = Math.max(current.worstRate, item.wrong_rate_percent);
-    moduleMap.set(item.module_title, current);
+  const stats = getModuleWeakItemStats(weakItems, modules);
+  if (stats.length === 0) {
+    return "No module data";
   }
 
-  const [moduleTitle] = [...moduleMap.entries()].sort((left, right) => {
-    if (right[1].hits !== left[1].hits) {
-      return right[1].hits - left[1].hits;
+  const module = stats.sort((left, right) => {
+    if (left.hits !== right.hits) {
+      return left.hits - right.hits;
     }
-    if (right[1].worstRate !== left[1].worstRate) {
-      return right[1].worstRate - left[1].worstRate;
+    if (left.worstRate !== right.worstRate) {
+      return left.worstRate - right.worstRate;
     }
-    return left[0].localeCompare(right[0]);
+    return left.moduleTitle.localeCompare(right.moduleTitle);
   })[0];
 
-  return moduleTitle;
+  return module.moduleTitle;
+}
+
+function getLowPerformingModule(weakItems: TeacherWeakItem[], modules: TeacherModuleCard[]) {
+  if (weakItems.length === 0) {
+    return "No module data";
+  }
+  const stats = getModuleWeakItemStats(weakItems, modules);
+  if (stats.length === 0) {
+    return "No module data";
+  }
+
+  const module = stats.sort((left, right) => {
+    if (right.hits !== left.hits) {
+      return right.hits - left.hits;
+    }
+    if (right.worstRate !== left.worstRate) {
+      return right.worstRate - left.worstRate;
+    }
+    return left.moduleTitle.localeCompare(right.moduleTitle);
+  })[0];
+
+  return module.moduleTitle;
 }
 
 function WeakItemSummaryStat({
@@ -227,94 +305,200 @@ function WeakItemSummaryStat({
   );
 }
 
-function WeakItemsDetailDrawer({
+function ModulesAttentionViewportModal({
   isOpen,
   onClose,
   weakItems,
+  myModules,
 }: {
   isOpen: boolean;
   onClose: () => void;
   weakItems: TeacherWeakItem[];
+  myModules: TeacherModuleCard[];
 }) {
   if (!isOpen || typeof document === "undefined") {
     return null;
   }
 
+  const weakItemsByModuleId = new Map<number, TeacherWeakItem[]>();
+  const weakItemsByModuleTitle = new Map<string, TeacherWeakItem[]>();
+  for (const item of weakItems) {
+    const byIdItems = weakItemsByModuleId.get(item.module_id) ?? [];
+    byIdItems.push(item);
+    weakItemsByModuleId.set(item.module_id, byIdItems);
+
+    const titleKey = normalizeModuleTitle(item.module_title);
+    const byTitleItems = weakItemsByModuleTitle.get(titleKey) ?? [];
+    byTitleItems.push(item);
+    weakItemsByModuleTitle.set(titleKey, byTitleItems);
+  }
+
+  const moduleRows = myModules
+    .map((module) => {
+      const moduleWeakItems =
+        weakItemsByModuleId.get(module.id) ??
+        weakItemsByModuleTitle.get(normalizeModuleTitle(module.title)) ??
+        [];
+      const worstWrongRate = moduleWeakItems.reduce(
+        (max, item) => Math.max(max, item.wrong_rate_percent),
+        0
+      );
+      const totalWrongCount = moduleWeakItems.reduce(
+        (sum, item) => sum + item.wrong_count,
+        0
+      );
+      const totalAttempts = moduleWeakItems.reduce(
+        (sum, item) => sum + item.attempt_count,
+        0
+      );
+      return {
+        module,
+        moduleWeakItems,
+        weakItemCount: moduleWeakItems.length,
+        worstWrongRate,
+        totalWrongCount,
+        totalAttempts,
+      };
+    })
+    .sort((left, right) => {
+      if (right.weakItemCount !== left.weakItemCount) {
+        return right.weakItemCount - left.weakItemCount;
+      }
+      if (right.worstWrongRate !== left.worstWrongRate) {
+        return right.worstWrongRate - left.worstWrongRate;
+      }
+      return left.module.title.localeCompare(right.module.title);
+    });
+
   return createPortal(
     <div
-      className="fixed inset-0 z-[220] overflow-y-auto bg-slate-950/45 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[220] overflow-y-auto bg-slate-950/55 backdrop-blur-[2px]"
       onClick={onClose}
     >
-      <div className="relative flex min-h-full items-start justify-end p-3 md:p-6">
-        <aside
-          aria-label="Modules That Need Attention"
+      <div className="min-h-full p-2 md:p-4 lg:p-6">
+        <section
+          aria-label="Created Modules Attention View"
           aria-modal="true"
-          className="relative w-full max-w-[560px]"
+          className="mx-auto flex h-[calc(100dvh-1rem)] w-full max-w-[1400px] flex-col overflow-hidden rounded-[30px] border border-black/15 bg-[#f7f4ef] shadow-2xl md:h-[calc(100dvh-2rem)] lg:h-[calc(100dvh-3rem)]"
           onClick={(event) => event.stopPropagation()}
           role="dialog"
         >
-          <div className="flex max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden rounded-[30px] border border-black/10 bg-[#f7f4ef] shadow-2xl md:max-h-[calc(100dvh-3rem)]">
-            <div className="border-b border-black/10 bg-[#f7f4ef] px-5 py-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
-                    Detail View
-                  </p>
-                  <h3 className="teacher-panel-heading mt-1 text-2xl font-black leading-tight">
-                    Modules That Need Attention
-                  </h3>
-                  <p className="teacher-card-meta mt-2 text-sm">
-                    {weakItems.length} weak item(s) across all active batches and all modules.
-                  </p>
-                </div>
-                <button
-                  className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700 transition hover:bg-black/10"
-                  onClick={onClose}
-                  type="button"
-                >
-                  Close
-                </button>
+          <header className="border-b border-black/10 px-5 py-4 md:px-6">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
+                  Detail View
+                </p>
+                <h3 className="teacher-panel-heading mt-1 text-2xl font-black leading-tight md:text-3xl">
+                  Created Modules Attention View
+                </h3>
+                <p className="teacher-card-copy mt-2 text-sm">
+                  Review your created modules ranked by weak-item pressure and wrong-rate severity.
+                </p>
+                <p className="teacher-card-meta mt-2 text-sm">
+                  {myModules.length} created module(s), {weakItems.length} weak item(s) flagged.
+                </p>
               </div>
+              <button
+                className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700 transition hover:bg-black/10"
+                onClick={onClose}
+                type="button"
+              >
+                Close
+              </button>
             </div>
+          </header>
 
-            <div className="flex-1 overflow-y-auto px-5 py-5">
-              {weakItems.length ? (
-                <div className="space-y-4">
-                  {weakItems.map((item) => (
-                    <article
-                      key={`${item.activity_key}-${item.item_key}`}
-                      className="rounded-[24px] border border-black/10 bg-black/20 px-4 py-4 shadow-sm"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="teacher-card-title text-base font-black leading-tight">
-                            {item.activity_title}
-                          </p>
-                          <p className="teacher-card-meta mt-2 text-sm">
-                            {item.module_title} - {item.attempt_count} attempts
-                          </p>
-                        </div>
-                        <div className="shrink-0 rounded-2xl border border-black/10 bg-white/75 px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm">
-                          {formatPercent(item.wrong_rate_percent, 2)} wrong rate
-                        </div>
+          <div className="flex-1 overflow-y-auto px-5 py-5 md:px-6 md:py-6">
+            {moduleRows.length ? (
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {moduleRows.map((row) => (
+                  <article
+                    key={row.module.id}
+                    className="rounded-[24px] border border-black/10 bg-black/20 px-4 py-4 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="teacher-card-title text-base font-black leading-tight">
+                          {row.module.title}
+                        </p>
+                        <p className="teacher-card-meta mt-2 text-sm">
+                          {row.module.lesson_count} lesson{row.module.lesson_count === 1 ? "" : "s"} |{" "}
+                          {row.module.activity_count} activit
+                          {row.module.activity_count === 1 ? "y" : "ies"}
+                        </p>
                       </div>
-                      <p className="teacher-card-copy mt-4 text-base">
-                        {item.prompt ?? item.expected_answer ?? item.item_key}
+                      <div className="shrink-0 rounded-2xl border border-black/10 bg-white/75 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-800 shadow-sm">
+                        {row.weakItemCount ? `${row.weakItemCount} weak` : "No weak items"}
+                      </div>
+                    </div>
+
+                    {row.weakItemCount ? (
+                      <>
+                        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                          <div className="rounded-xl border border-black/10 bg-white/75 px-2 py-2 text-center">
+                            <p className="teacher-card-meta text-[10px] uppercase tracking-[0.15em]">
+                              Worst Wrong
+                            </p>
+                            <p className="teacher-card-title mt-1 text-xs font-black">
+                              {formatPercent(row.worstWrongRate, 2)}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-black/10 bg-white/75 px-2 py-2 text-center">
+                            <p className="teacher-card-meta text-[10px] uppercase tracking-[0.15em]">
+                              Attempts
+                            </p>
+                            <p className="teacher-card-title mt-1 text-xs font-black">
+                              {row.totalAttempts}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-black/10 bg-white/75 px-2 py-2 text-center">
+                            <p className="teacher-card-meta text-[10px] uppercase tracking-[0.15em]">
+                              Wrong
+                            </p>
+                            <p className="teacher-card-title mt-1 text-xs font-black">
+                              {row.totalWrongCount}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-4 space-y-2">
+                          {row.moduleWeakItems.slice(0, 3).map((item) => (
+                            <div
+                              className="rounded-xl border border-black/10 bg-white/70 px-3 py-2"
+                              key={`${row.module.id}-${item.activity_key}-${item.item_key}`}
+                            >
+                              <p className="teacher-card-title text-sm font-black leading-tight">
+                                {item.activity_title}
+                              </p>
+                              <p className="teacher-card-meta mt-1 text-xs">
+                                {formatPercent(item.wrong_rate_percent, 2)} wrong rate |{" "}
+                                {item.attempt_count} attempts
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="teacher-card-copy mt-4 text-sm">
+                        No weak items flagged yet for this created module.
                       </p>
-                      <p className="teacher-card-meta mt-3 text-sm">
-                        Wrong {item.wrong_count} time(s) across {item.attempt_count} attempts
-                      </p>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                  No weak items were flagged across active batches and modules yet.
-                </div>
-              )}
-            </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                No created modules yet. Create a module first to view attention insights here.
+              </div>
+            )}
+            {!weakItems.length && moduleRows.length ? (
+              <div className="teacher-card-copy mt-5 rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                No weak items were flagged yet. Weak items appear after at least 5 attempts and a
+                40% wrong rate.
+              </div>
+            ) : null}
           </div>
-        </aside>
+        </section>
       </div>
     </div>,
     document.body
@@ -1172,7 +1356,7 @@ export default function TeacherModulesPage() {
                   myActiveModules.length === 0 ? "text-red-700" : "text-accent",
                 ].join(" ")}
               >
-                My Active Modules
+                My Modules
               </p>
               <p
                 className={[
@@ -1198,16 +1382,27 @@ export default function TeacherModulesPage() {
               onClick={() => setIsSharedPoolViewportOpen(true)}
               type="button"
             >
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accentWarm">Available Shared Pool</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accentWarm">Available Shared Modules</p>
               <p className="teacher-panel-value mt-3 text-4xl font-black">{catalog?.shared_pool.length ?? 0}</p>
               <p className="teacher-panel-copy mt-2 text-sm">
-                Click to open a full-view importer for shared modules and module templates.
+                Click to open modules shared by other teachers and system templates.
               </p>
             </button>
           </div>
         </div>
 
-        <div className="panel overflow-hidden">
+        <div
+          className="panel cursor-pointer overflow-hidden transition hover:-translate-y-[2px] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brandBlue focus-visible:ring-offset-2"
+          onClick={() => setIsWeakItemsDrawerOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setIsWeakItemsDrawerOpen(true);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+        >
           <div className="flex items-start justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accentWarm">
               MODULES THAT NEED ATTENTION
@@ -1217,15 +1412,14 @@ export default function TeacherModulesPage() {
             </span>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <WeakItemSummaryStat label="Weak Items" value={`${weakItems.length}`} />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <WeakItemSummaryStat
-              label="Worst Wrong Rate"
-              value={weakItems[0] ? formatPercent(weakItems[0].wrong_rate_percent, 2) : "No data"}
+              label="Top Performing Module"
+              value={getTopPerformingModule(weakItems, myActiveModules)}
             />
             <WeakItemSummaryStat
-              label="Most Affected Module"
-              value={getMostAffectedWeakModule(weakItems)}
+              label="Low Performing Module"
+              value={getLowPerformingModule(weakItems, myActiveModules)}
             />
           </div>
 
@@ -1275,22 +1469,30 @@ export default function TeacherModulesPage() {
                 ) : null}
               </>
             ) : (
-              <div className="teacher-card-copy rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
-                No weak items were flagged across active batches and modules yet. Weak items appear
-                after at least 5 attempts and a 40% wrong rate.
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="teacher-card-copy h-full rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                  No low-performing modules were flagged across active batches and modules yet.
+                  Low-performing modules appear after at least 5 attempts and a 40% wrong rate.
+                </div>
+                <div className="teacher-card-copy h-full rounded-2xl border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm">
+                  No high-performing modules were flagged across active batches and modules yet.
+                  High-performing modules appear after at least 5 attempts and a 65% correct rate.
+                </div>
               </div>
             )}
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/5 pt-4">
-            <p className="teacher-card-meta text-xs">Click to open full weak-item details.</p>
             <button
               className="inline-flex rounded-full border border-black/10 bg-black/5 px-3 py-2 text-xs font-semibold text-slate-800 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={summaryLoading || !!summaryError || weakItems.length === 0}
-              onClick={() => setIsWeakItemsDrawerOpen(true)}
+              disabled={summaryLoading || !!summaryError}
+              onClick={(event) => {
+                event.stopPropagation();
+                setIsWeakItemsDrawerOpen(true);
+              }}
               type="button"
             >
-              View all weak items
+              View all
             </button>
           </div>
         </div>
@@ -1302,8 +1504,9 @@ export default function TeacherModulesPage() {
         </div>
       ) : null}
 
-      <WeakItemsDetailDrawer
+      <ModulesAttentionViewportModal
         isOpen={isWeakItemsDrawerOpen}
+        myModules={myActiveModules}
         onClose={() => setIsWeakItemsDrawerOpen(false)}
         weakItems={weakItems}
       />

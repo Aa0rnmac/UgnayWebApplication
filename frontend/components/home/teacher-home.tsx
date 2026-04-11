@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 import { useAuth } from "@/components/auth-context";
 import {
@@ -17,6 +17,7 @@ type TeacherHomeCard = {
   href: string;
   ctaLabel: string;
   appearance: TeacherWorkspaceCardAppearance;
+  metadataSlot?: ReactNode;
 };
 
 export function TeacherHome() {
@@ -34,46 +35,35 @@ export function TeacherHome() {
   const cards: TeacherHomeCard[] = snapshot
     ? [
         {
-          eyebrow: "Enrollment operations",
-          title: `${snapshot.pendingEnrollments} Pending Requests`,
-          description: `${snapshot.approvedStudents} students are already approved across ${snapshot.totalBatches} batches.`,
-          badge: "ENROLLMENT",
-          href: "/teacher/classes",
-          ctaLabel: "Open Enrollment Queue",
-          appearance: snapshot.pendingEnrollments > 0 ? "attention" : "default",
-        },
-        {
-          eyebrow: "Curriculum visibility",
-          title: `${snapshot.liveModules} Live Modules`,
-          description:
-            snapshot.draftModules > 0
-              ? `${snapshot.draftModules} draft module slots are visible for teacher review.`
-              : "All teacher-visible modules are already in a live state.",
-          badge: "MODULES",
-          href: "/teacher/modules",
-          ctaLabel: "Open Modules",
+          eyebrow: "Teacher overview",
+          title: "MY ACTIVE MODULES, MY STUDENTS, MY BATCH",
+          description: "Quick glance at your live teaching scope.",
+          badge: "OVERVIEW",
+          href: "/teacher/class-management",
+          ctaLabel: "Open Teacher Overview",
           appearance: "default",
-        },
-        {
-          eyebrow: "Teaching watchlist",
-          title: `${snapshot.attentionStudents} Students Need Attention`,
-          description: `${snapshot.weakItems} weak activity items and ${snapshot.totalAttempts} saved attempts are available for review.`,
-          badge: "REPORT",
-          href: "/teacher/progress",
-          ctaLabel: "Open Progress View",
-          appearance: "default",
-        },
-        {
-          eyebrow: "Practical recognition",
-          title: `${snapshot.readyLabModes}/${snapshot.totalLabModes} Lab Modes Ready`,
-          description:
-            snapshot.labAttentionModes > 0
-              ? `${snapshot.labAttentionModes} live lab lane still needs teacher caution.`
-              : "All live lab lanes are ready for guided practical coaching.",
-          badge: "LAB",
-          href: "/teacher/lab",
-          ctaLabel: "Open Lab Workspace",
-          appearance: "default",
+          metadataSlot: (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                  Modules
+                </p>
+                <p className="mt-1 text-sm font-black text-slate-900">{snapshot.liveModules}</p>
+              </div>
+              <div className="rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                  Students
+                </p>
+                <p className="mt-1 text-sm font-black text-slate-900">{snapshot.trackedStudents}</p>
+              </div>
+              <div className="rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                  Batches
+                </p>
+                <p className="mt-1 text-sm font-black text-slate-900">{snapshot.totalBatches}</p>
+              </div>
+            </div>
+          ),
         },
       ]
     : [];
@@ -89,18 +79,13 @@ export function TeacherHome() {
             Welcome, Teacher <span className="text-brandBlue">{teacherName}</span>!
           </h1>
           <h2 className="teacher-panel-heading mt-3 text-4xl font-black tracking-tight">
-            Run enrollment, monitor learning signals, and coach practice from one teacher
-            workspace.
+            Summary of your active modules, active students, issued certificates.
           </h2>
-          <p className="teacher-panel-copy mt-3 text-sm leading-relaxed">
-            The teacher surface is now backed by the real enrollment, batch, reporting, and lab
-            contracts. This home view is your live operations cockpit, not a mock planning board.
-          </p>
         </div>
       </div>
 
       {snapshot ? (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        <div className="max-w-xl">
           {cards.map((card, index) => (
             <TeacherWorkspaceCard key={card.title} themeIndex={index} {...card} />
           ))}

@@ -108,9 +108,9 @@ export default function TeacherStudentDetailPage() {
             </Link>
             <Link
               className="rounded-full bg-brandBlue px-4 py-2 text-xs font-semibold text-white"
-              href="/teacher/progress"
+              href="/teacher/class-management"
             >
-              Back to Progress
+              Back to Class Management
             </Link>
           </div>
         </div>
