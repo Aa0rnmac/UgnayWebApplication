@@ -6,11 +6,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   completeReadableItem,
-  getStudentCertificateStatus,
+  getStudentCertificateDownloadStatus,
   getStudentCourse,
   resolveUploadsBase,
   submitStudentItem,
-  type StudentCertificateStatus,
+  type StudentCertificateDownloadStatus,
   type StudentCourse,
   type StudentCourseItem,
   type StudentCourseModule
@@ -27,7 +27,7 @@ const CONTENT_ITEM_TYPES = new Set([
 export default function StudentModulePlayerPage() {
   const params = useParams<{ moduleId: string }>();
   const [course, setCourse] = useState<StudentCourse | null>(null);
-  const [certificateStatus, setCertificateStatus] = useState<StudentCertificateStatus | null>(null);
+  const [certificateStatus, setCertificateStatus] = useState<StudentCertificateDownloadStatus | null>(null);
   const [answerByItem, setAnswerByItem] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -35,7 +35,7 @@ export default function StudentModulePlayerPage() {
   async function refresh() {
     const [courseData, certificateData] = await Promise.all([
       getStudentCourse(),
-      getStudentCertificateStatus()
+      getStudentCertificateDownloadStatus()
     ]);
     setCourse(courseData);
     setCertificateStatus(certificateData);
@@ -226,7 +226,7 @@ export default function StudentModulePlayerPage() {
               <p className="text-sm text-slate-700">No available learning item.</p>
             )}
 
-            {certificateStatus?.summary.eligible ? (
+            {certificateStatus?.eligible ? (
               <div className="mt-6 rounded-2xl border border-brandGreen/30 bg-brandGreenLight px-4 py-4 text-sm text-slate-800">
                 Certificate requirements are complete. Open the profile or download route to get your certificate.
               </div>
