@@ -6,18 +6,20 @@
 - PostgreSQL (`psycopg`)
 
 ## Environment
-1. Copy `.env.example` to `.env`.
-2. Confirm the production-first database values:
+1. Shared defaults are loaded from tracked `backend/.env.shared`.
+2. Copy `.env.example` to `.env` for machine-specific overrides.
+   - Runtime precedence is: `backend/.env.shared` then `backend/.env`.
+3. Confirm the production-first database values:
    - `DATABASE_URL=postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub`
    - `AUTO_BOOTSTRAP_SCHEMA=false` for PostgreSQL
-3. Use SQLite only for explicitly local bootstrap/testing:
+4. Use SQLite only for explicitly local bootstrap/testing:
    - `DATABASE_URL=sqlite:///./fsl_learning_hub.db`
    - `AUTO_BOOTSTRAP_SCHEMA=true`
-4. Set dataset/artifact roots (optional):
+5. Set dataset/artifact roots (optional):
    - `DATASETS_ROOT=datasets` (default, resolved from project root)
    - `ARTIFACTS_ROOT=artifacts` (default, resolved from `backend/`)
    - You can also use an absolute path, for example `DATASETS_ROOT=C:\Users\Marissa\Datasets\FSL`.
-5. Configure SMTP for forgot-password OTP and student approval credential email:
+6. Configure SMTP for forgot-password OTP and student approval credential email:
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
    - TLS/SSL flags: `SMTP_USE_TLS`, `SMTP_USE_SSL`
    - Gmail starter setup:
@@ -29,10 +31,13 @@
      - `SMTP_PASSWORD=<Google App Password>`
      - `SMTP_FROM_EMAIL=<same Gmail address or verified alias>`
    - Gmail requires 2-Step Verification and an App Password before SMTP login will work.
-6. Configure teacher invite signing:
+7. Configure teacher invite signing:
    - `TEACHER_INVITE_SIGNING_SECRET` (required for QR verification and onboarding tokens)
    - `TEACHER_INVITE_DEFAULT_EXPIRY_DAYS`
    - `TEACHER_INVITE_DEFAULT_MAX_USES`
+8. Optional demo credentials (dummy test accounts only):
+   - `DEMO_STUDENT_USERNAME`, `DEMO_STUDENT_PASSWORD`
+   - `DEMO_TEACHER_USERNAME`, `DEMO_TEACHER_PASSWORD`
 
 ## Install
 ```bash
@@ -116,7 +121,7 @@ On startup:
 
 ## Student Demo Mode
 - Student-facing endpoints (`/api/modules`, `/api/progress/summary`, `/api/lab/predict`) work without login.
-- When no bearer token is provided, backend uses/creates `student_demo` automatically.
+- When no bearer token is provided, backend uses/creates `DEMO_STUDENT_USERNAME`.
 
 ## Teacher QR + Passkey Invite Generation
 Generate reusable teacher onboarding invite assets (QR + passkey + printable files):

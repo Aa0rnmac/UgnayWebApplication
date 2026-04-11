@@ -7,15 +7,24 @@ import { UserRole, useAuth } from "@/components/auth-context";
 
 type DemoRole = Extract<UserRole, "teacher" | "student">;
 
+const DEMO_STUDENT_USERNAME =
+  process.env.NEXT_PUBLIC_DEMO_STUDENT_USERNAME?.trim() || "student_demo";
+const DEMO_STUDENT_PASSWORD =
+  process.env.NEXT_PUBLIC_DEMO_STUDENT_PASSWORD?.trim() || "student123";
+const DEMO_TEACHER_USERNAME =
+  process.env.NEXT_PUBLIC_DEMO_TEACHER_USERNAME?.trim() || "teacher_demo";
+const DEMO_TEACHER_PASSWORD =
+  process.env.NEXT_PUBLIC_DEMO_TEACHER_PASSWORD?.trim() || "teacher123";
+
 const DEMO_ACCOUNTS: Record<DemoRole, { username: string; password: string; label: string }> = {
   teacher: {
-    username: "teacher_demo",
-    password: "teacher123",
+    username: DEMO_TEACHER_USERNAME,
+    password: DEMO_TEACHER_PASSWORD,
     label: "Use Teacher Demo",
   },
   student: {
-    username: "student_demo",
-    password: "student123",
+    username: DEMO_STUDENT_USERNAME,
+    password: DEMO_STUDENT_PASSWORD,
     label: "Use Student Demo",
   },
 };
@@ -129,8 +138,15 @@ export function AuthSwitcher({ collapsed = false }: { collapsed?: boolean }) {
       </div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-muted">
-        Demo accounts: <span className="text-brandWhite">teacher_demo / teacher123</span> and{" "}
-        <span className="text-brandWhite">student_demo / student123</span>.
+        Demo accounts:{" "}
+        <span className="text-brandWhite">
+          {DEMO_TEACHER_USERNAME} / {DEMO_TEACHER_PASSWORD}
+        </span>{" "}
+        and{" "}
+        <span className="text-brandWhite">
+          {DEMO_STUDENT_USERNAME} / {DEMO_STUDENT_PASSWORD}
+        </span>
+        .
       </p>
 
       {error ? <p className="mt-2 text-xs text-red-300">{error}</p> : null}

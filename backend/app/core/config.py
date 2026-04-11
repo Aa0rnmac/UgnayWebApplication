@@ -4,10 +4,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(BACKEND_ROOT / ".env.shared", BACKEND_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: str = "development"
     database_url: str = "postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub"
@@ -22,6 +27,10 @@ class Settings(BaseSettings):
     teacher_invite_signing_secret: str = "change-me-teacher-invite-secret"
     teacher_invite_default_expiry_days: int = 7
     teacher_invite_default_max_uses: int = 1
+    demo_student_username: str = "student_demo"
+    demo_student_password: str = "student123"
+    demo_teacher_username: str = "teacher_demo"
+    demo_teacher_password: str = "teacher123"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""

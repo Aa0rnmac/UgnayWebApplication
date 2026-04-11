@@ -1,12 +1,12 @@
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.datetime_utils import as_utc, utc_now
 from app.db.session import get_db
 from app.models.session import UserSession
 from app.models.user import User
 
-DEMO_USERNAME = "student_demo"
 TEACHER_ROLES = {"teacher", "admin"}
 ADMIN_ROLES = {"admin"}
 
@@ -23,13 +23,17 @@ def _normalize_user_role(user: User, db: Session) -> User:
 
 
 def _get_or_create_demo_user(db: Session) -> User:
-    user = db.query(User).filter(User.username == DEMO_USERNAME).first()
+    demo_username = settings.demo_student_username.strip() or "student_demo"
+    user = db.query(User).filter(User.username == demo_username).first()
     if user:
         return _normalize_user_role(user, db)
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Student demo user is not available. Create it during bootstrap first.",
+        detail=(
+            f"Student demo user '{demo_username}' is not available. "
+            "Create it during bootstrap first."
+        ),
     )
 
 

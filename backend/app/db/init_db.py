@@ -7,7 +7,7 @@ from sqlalchemy.sql import text
 
 from app.core.config import settings
 from app.core.datetime_utils import utc_now
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.activity_attempt import ActivityAttempt, ActivityAttemptItem
@@ -1130,16 +1130,68 @@ def seed_module_activities(db: Session) -> None:
     db.commit()
 
 
-def seed_demo_user(db: Session) -> None:
-    existing_user = db.query(User).filter(User.username == "student_demo").first()
-    if existing_user:
+def _upsert_demo_user(
+    db: Session,
+    *,
+    username: str,
+    password: str,
+    role: str,
+) -> None:
+    normalized_username = username.strip()
+    if not normalized_username:
         return
-    db.add(
-        User(
-            username="student_demo",
-            password_hash=hash_password("student123"),
-            role="student",
+
+    existing_user = db.query(User).filter(User.username == normalized_username).first()
+    if existing_user is None:
+        db.add(
+            User(
+                username=normalized_username,
+                password_hash=hash_password(password),
+                role=role,
+                must_change_password=False,
+                archived_at=None,
+            )
         )
+        return
+
+    needs_update = False
+    if existing_user.role != role:
+        existing_user.role = role
+        needs_update = True
+
+    if existing_user.must_change_password:
+        existing_user.must_change_password = False
+        needs_update = True
+
+    if existing_user.archived_at is not None:
+        existing_user.archived_at = None
+        needs_update = True
+
+    if not verify_password(password, existing_user.password_hash):
+        existing_user.password_hash = hash_password(password)
+        needs_update = True
+
+    if needs_update:
+        db.add(existing_user)
+
+
+def seed_demo_users(db: Session) -> None:
+    student_username = settings.demo_student_username.strip() or "student_demo"
+    student_password = settings.demo_student_password.strip() or "student123"
+    teacher_username = settings.demo_teacher_username.strip() or "teacher_demo"
+    teacher_password = settings.demo_teacher_password.strip() or "teacher123"
+
+    _upsert_demo_user(
+        db,
+        username=student_username,
+        password=student_password,
+        role="student",
+    )
+    _upsert_demo_user(
+        db,
+        username=teacher_username,
+        password=teacher_password,
+        role="teacher",
     )
     db.commit()
 
@@ -1662,6 +1714,6 @@ def init_db() -> None:
     with SessionLocal() as db:
         seed_modules(db)
         seed_module_activities(db)
-        seed_demo_user(db)
+        seed_demo_users(db)
         backfill_enrollments(db)
         backfill_legacy_activity_attempts(db)

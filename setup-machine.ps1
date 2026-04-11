@@ -155,6 +155,7 @@ if ($setupFrontend) {
 Write-Host ""
 Write-Host "Machine setup complete." -ForegroundColor Green
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "1. Review backend/.env and fill in machine-specific paths and secrets."
-Write-Host "2. Review frontend/.env.local if you need a fixed API base URL."
-Write-Host "3. Run VS Code 'Run Full Stack' or use run-dev.cmd."
+Write-Host "1. Review backend/.env.shared and frontend/.env.shared (dummy team defaults only)."
+Write-Host "2. Review backend/.env and fill in machine-specific paths and secrets."
+Write-Host "3. Review frontend/.env.local if you need a fixed API base URL."
+Write-Host "4. Run VS Code 'Run Full Stack' or use run-dev.cmd."

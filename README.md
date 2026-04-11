@@ -17,6 +17,7 @@ Helpful options:
 - `-DryRun`
 
 What it does:
+- keeps tracked shared defaults from `backend/.env.shared` and `frontend/.env.shared`
 - creates `backend/.env` from `backend/.env.example` if missing
 - creates `frontend/.env.local` from `frontend/.env.local.example` if missing
 - creates `backend/.venv` if missing
@@ -25,7 +26,8 @@ What it does:
 
 ## Backend quick start
 1. Open terminal in `backend`.
-2. Create `.env` from `.env.example`.
+2. Create `.env` from `.env.example` for local overrides.
+   - Runtime precedence is: `backend/.env.shared` then `backend/.env` (local override).
 3. Create a local virtual environment and install dependencies:
    - `py -m venv .venv`
    - `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`
@@ -35,7 +37,8 @@ What it does:
 
 ## Frontend quick start
 1. Open terminal in `frontend`.
-2. Create `.env.local` from `.env.local.example`.
+2. Create `.env.local` from `.env.local.example` for local overrides.
+   - Runtime precedence is: `frontend/.env.shared` then `frontend/.env.local` (local override).
 3. Install dependencies and run:
    - `npm install`
    - `npm run dev`
@@ -70,10 +73,10 @@ Available launch profiles:
 
 ## Demo Access
 - Student-facing pages still work in guest mode without login.
-- The login screen includes demo account switching for:
-  - `student_demo` / `student123`
-  - `teacher_demo` / `teacher123`
-- Backend still falls back to `student_demo` when no auth token is sent to student endpoints.
+- Demo account credentials are loaded from:
+  - `backend/.env.shared` (seed + guest fallback username)
+  - `frontend/.env.shared` (demo switcher login values)
+- You can override those values locally in `backend/.env` and `frontend/.env.local`.
 
 ## Teacher Backend Guardrails
 - Teacher UI exploration happens on `tim`, but real backend contracts must come from `upstream/main`

@@ -6,9 +6,14 @@
 - Tailwind CSS
 
 ## Environment
-1. Copy `.env.local.example` to `.env.local`.
-2. Ensure:
+1. Shared defaults are loaded from tracked `frontend/.env.shared`.
+2. Copy `.env.local.example` to `.env.local` for machine-specific overrides.
+   - Runtime precedence is: `frontend/.env.shared` then `frontend/.env.local`.
+3. Ensure:
    - `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api`
+4. Optional demo credential overrides:
+   - `NEXT_PUBLIC_DEMO_STUDENT_USERNAME`, `NEXT_PUBLIC_DEMO_STUDENT_PASSWORD`
+   - `NEXT_PUBLIC_DEMO_TEACHER_USERNAME`, `NEXT_PUBLIC_DEMO_TEACHER_PASSWORD`
 
 ## Run
 ```bash

@@ -11,7 +11,7 @@ if (process.argv.includes("--clean")) {
   console.log("Cleared Next.js local caches.");
 }
 
-const nextBin = resolve(process.cwd(), "node_modules", "next", "dist", "bin", "next");
+const nextWithEnvScript = resolve(process.cwd(), "scripts", "next-with-env.mjs");
 
 const networkUrls = Object.values(networkInterfaces())
   .flat()
@@ -25,10 +25,14 @@ if (networkUrls.length > 0) {
   }
 }
 
-const child = spawn(process.execPath, [nextBin, "dev", "-H", "0.0.0.0", "-p", "3000"], {
-  stdio: "inherit",
-  env: process.env
-});
+const child = spawn(
+  process.execPath,
+  [nextWithEnvScript, "dev", "-H", "0.0.0.0", "-p", "3000"],
+  {
+    stdio: "inherit",
+    env: process.env,
+  }
+);
 
 child.on("exit", (code) => {
   process.exit(code ?? 0);
