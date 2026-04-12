@@ -282,6 +282,9 @@ export type StudentCertificateDownloadStatus = {
   message: string;
 };
 
+// Backward-compatible alias for older pages still using the previous name.
+export type StudentCertificateStatus = StudentCertificateDownloadStatus;
+
 export type LoginActivityEvent = {
   session_id: number;
   user_id: number;
@@ -1590,6 +1593,11 @@ export function submitStudentItem(
 
 export function getStudentCertificateDownloadStatus(token?: string) {
   return request<StudentCertificateDownloadStatus>("/student/certificate", undefined, token);
+}
+
+// Backward-compatible alias for older pages still using the previous API helper name.
+export function getStudentCertificateStatus(token?: string) {
+  return getStudentCertificateDownloadStatus(token);
 }
 
 export function downloadStudentCertificate(token?: string) {
