@@ -20,6 +20,9 @@ type SigningLabVariant = "student" | "teacher";
 
 type SigningLabProps = {
   variant?: SigningLabVariant;
+  preferredMode?: RecognitionMode;
+  preferredNumbersCategory?: NumbersCategory;
+  preferredWordsCategory?: WordsCategory;
 };
 
 type CaptureOptions = {
@@ -137,7 +140,12 @@ function appendAlphabetText(previous: string, token: string) {
   return `${previous}${normalized}`;
 }
 
-export function SigningLab({ variant = "student" }: SigningLabProps) {
+export function SigningLab({
+  variant = "student",
+  preferredMode,
+  preferredNumbersCategory,
+  preferredWordsCategory,
+}: SigningLabProps) {
   const REPEAT_TOKEN_COOLDOWN_MS = 1400;
   const isTeacherTester = variant === "teacher";
   const searchParams = useSearchParams();

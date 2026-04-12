@@ -1026,6 +1026,8 @@ REQUIRED_TABLES = {
     "modules",
     "password_reset_otps",
     "registrations",
+    "student_certificates",
+    "teacher_handling_sessions",
     "section_module_item_progress",
     "section_module_items",
     "section_module_progress",
@@ -1473,6 +1475,11 @@ def ensure_schema_updates() -> None:
             FOREIGN KEY(original_user_id) REFERENCES users(id)
         )
         """,
+    )
+    _add_column_if_missing(
+        "archived_student_accounts",
+        "company_name",
+        "ALTER TABLE archived_student_accounts ADD COLUMN company_name VARCHAR(200)",
     )
     _add_column_if_missing(
         "archived_student_accounts",
