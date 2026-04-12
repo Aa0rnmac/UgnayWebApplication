@@ -124,6 +124,12 @@ Write-Host "Repo: $repoRoot"
 if ($setupBackend) {
     Write-Step "Preparing backend environment file"
     Ensure-TemplateFile -TemplatePath $backendTemplate -TargetPath $backendEnv -Label "backend/.env"
+    if (Test-Path -LiteralPath $backendEnv) {
+        $databaseUrlLine = Select-String -Path $backendEnv -Pattern "^\s*DATABASE_URL\s*=\s*(.+?)\s*$" | Select-Object -First 1
+        if ($databaseUrlLine -and $databaseUrlLine.Matches[0].Groups[1].Value.Trim().EndsWith("/fsl_learning_hub")) {
+            Write-Note "backend/.env uses shared database name fsl_learning_hub. Prefer a repo-specific name (example: fsl_learning_hub_ugnaywebapplication)."
+        }
+    }
 
     Write-Step "Preparing backend virtual environment"
     if (Test-Path -LiteralPath $backendVenvPython) {
@@ -155,6 +161,7 @@ if ($setupFrontend) {
 Write-Host ""
 Write-Host "Machine setup complete." -ForegroundColor Green
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "1. Review backend/.env and fill in machine-specific paths and secrets."
-Write-Host "2. Review frontend/.env.local if you need a fixed API base URL."
-Write-Host "3. Run VS Code 'Run Full Stack' or use run-dev.cmd."
+Write-Host "1. Review backend/.env and keep a repo-specific PostgreSQL DATABASE_URL."
+Write-Host "2. Run powershell -ExecutionPolicy Bypass -File .\scripts\dev-db-init.ps1"
+Write-Host "3. Review frontend/.env.local if you need a fixed API base URL."
+Write-Host "4. Run VS Code 'Run Full Stack' or use run-dev.cmd."

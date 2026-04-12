@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "development"
-    database_url: str = "postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub"
+    database_url: str = "postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub_ugnaywebapplication"
     datasets_root: str = "datasets"
     artifacts_root: str = "artifacts"
     api_host: str = "0.0.0.0"

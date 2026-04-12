@@ -23,7 +23,7 @@
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        "$workspace='${workspaceFolder}'; $frontend=Join-Path $workspace 'frontend'; $nextCmd=Join-Path $frontend 'node_modules\\.bin\\next.cmd'; $lockFile=Join-Path $frontend 'package-lock.json'; $stamp=Join-Path $frontend 'node_modules\\.install.stamp'; $needsInstall = (-not (Test-Path -LiteralPath $nextCmd)) -or (-not (Test-Path -LiteralPath $stamp)); if (-not $needsInstall) { $needsInstall = (Get-Item -LiteralPath $lockFile).LastWriteTimeUtc -gt (Get-Item -LiteralPath $stamp).LastWriteTimeUtc }; if ($needsInstall) { Push-Location $frontend; try { & npm.cmd ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Set-Content -LiteralPath $stamp -Value ((Get-Date).ToString('o')) } finally { Pop-Location } }; exit 0"
+        "$workspace='${workspaceFolder}'; $frontend=Join-Path $workspace 'frontend'; $nextCmd=Join-Path $frontend 'node_modules\\.bin\\next.cmd'; $nextBin=Join-Path $frontend 'node_modules\\next\\dist\\bin\\next'; $lockFile=Join-Path $frontend 'package-lock.json'; $stamp=Join-Path $frontend 'node_modules\\.install.stamp'; $needsInstall = (-not (Test-Path -LiteralPath $nextCmd)) -or (-not (Test-Path -LiteralPath $nextBin)) -or (-not (Test-Path -LiteralPath $stamp)); if (-not $needsInstall) { $needsInstall = (Get-Item -LiteralPath $lockFile).LastWriteTimeUtc -gt (Get-Item -LiteralPath $stamp).LastWriteTimeUtc }; if ($needsInstall) { Push-Location $frontend; try { & npm.cmd ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Set-Content -LiteralPath $stamp -Value ((Get-Date).ToString('o')) } finally { Pop-Location } }; exit 0"
       ],
       "problemMatcher": []
     },
@@ -54,14 +54,11 @@
       "problemMatcher": []
     },
     {
-      "label": "Backend: Alembic upgrade head",
+      "label": "Backend: Dev DB init",
       "type": "process",
       "command": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
       "args": [
-        "-m",
-        "alembic",
-        "upgrade",
-        "head"
+        "scripts/dev_db_init.py"
       ],
       "options": {
         "cwd": "${workspaceFolder}/backend"
@@ -74,7 +71,7 @@
       "dependsOn": [
         "Backend: Ensure dependencies",
         "Backend: Stop port 8000",
-        "Backend: Alembic upgrade head"
+        "Backend: Dev DB init"
       ],
       "problemMatcher": []
     },
