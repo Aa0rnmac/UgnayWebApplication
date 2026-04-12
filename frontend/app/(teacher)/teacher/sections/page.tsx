@@ -126,6 +126,20 @@ type McqQuestionDraft = {
   promptFile: File | null;
 };
 
+type IdentificationQuestionDraft = {
+  id: string;
+  question: string;
+  correctAnswer: string;
+  acceptedAnswersText: string;
+  promptFile: File | null;
+};
+
+type SigningLabEntryDraft = {
+  id: string;
+  prompt: string;
+  expectedAnswer: string;
+};
+
 function createMcqQuestionId() {
   return `mcq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -149,7 +163,7 @@ function createMcqQuestionDraft(partial?: Partial<McqQuestionDraft>): McqQuestio
   };
 }
 
-function normalizeMcqQuestionKey(value: string, index: number): string {
+function normalizeQuestionKey(value: string, index: number): string {
   const fallback = `q${index + 1}`;
   const trimmed = value.trim();
   if (!trimmed) {
@@ -164,6 +178,10 @@ function normalizeMcqQuestionKey(value: string, index: number): string {
 
 function mcqQuestionAssetLabel(questionKey: string): string {
   return `mcq-question:${questionKey}`;
+}
+
+function identificationQuestionAssetLabel(questionKey: string): string {
+  return `identification-question:${questionKey}`;
 }
 
 function parseMcqQuestionDrafts(item: LmsModuleItem): McqQuestionDraft[] {
@@ -212,6 +230,110 @@ function parseMcqQuestionDrafts(item: LmsModuleItem): McqQuestionDraft[] {
       correctIndex: matchedIndex >= 0 ? matchedIndex : 0,
     }),
   ];
+}
+
+function createIdentificationQuestionDraft(
+  partial?: Partial<IdentificationQuestionDraft>
+): IdentificationQuestionDraft {
+  return {
+    id: partial?.id ?? createMcqQuestionId(),
+    question: partial?.question ?? "",
+    correctAnswer: partial?.correctAnswer ?? "",
+    acceptedAnswersText: partial?.acceptedAnswersText ?? "",
+    promptFile: partial?.promptFile ?? null,
+  };
+}
+
+function parseIdentificationQuestionDrafts(item: LmsModuleItem): IdentificationQuestionDraft[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const acceptedAnswers = Array.isArray(row.accepted_answers)
+          ? (row.accepted_answers as unknown[]).map((value) => String(value)).filter(Boolean)
+          : [];
+        return createIdentificationQuestionDraft({
+          id:
+            typeof row.question_key === "string" && row.question_key.trim()
+              ? row.question_key.trim()
+              : `q${index + 1}`,
+          question: typeof row.question === "string" ? row.question : "",
+          correctAnswer: typeof row.correct_answer === "string" ? row.correct_answer : "",
+          acceptedAnswersText: acceptedAnswers.join(", "),
+        });
+      })
+      .filter((entry): entry is IdentificationQuestionDraft => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const acceptedAnswers = Array.isArray(item.config.accepted_answers)
+    ? (item.config.accepted_answers as unknown[]).map((value) => String(value)).filter(Boolean)
+    : [];
+  return [
+    createIdentificationQuestionDraft({
+      id: "q1",
+      question: typeof item.config.question === "string" ? item.config.question : "",
+      correctAnswer: typeof item.config.correct_answer === "string" ? item.config.correct_answer : "",
+      acceptedAnswersText: acceptedAnswers.join(", "),
+    }),
+  ];
+}
+
+function createSigningLabEntryDraft(partial?: Partial<SigningLabEntryDraft>): SigningLabEntryDraft {
+  return {
+    id: partial?.id ?? createMcqQuestionId(),
+    prompt: partial?.prompt ?? "",
+    expectedAnswer: partial?.expectedAnswer ?? "",
+  };
+}
+
+function parseSigningLabEntryDrafts(item: LmsModuleItem): SigningLabEntryDraft[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const prompt = typeof row.question === "string" ? row.question : "";
+        const expectedAnswer = typeof row.correct_answer === "string" ? row.correct_answer : "";
+        return createSigningLabEntryDraft({
+          id:
+            typeof row.question_key === "string" && row.question_key.trim()
+              ? row.question_key.trim()
+              : `q${index + 1}`,
+          prompt,
+          expectedAnswer,
+        });
+      })
+      .filter((entry): entry is SigningLabEntryDraft => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const legacyPrompt = typeof item.config.question === "string" ? item.config.question : "";
+  const legacyExpected = typeof item.config.expected_answer === "string" ? item.config.expected_answer : "";
+  return [createSigningLabEntryDraft({ id: "q1", prompt: legacyPrompt, expectedAnswer: legacyExpected })];
+}
+
+function parseRequiredCount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const asInt = Math.trunc(value);
+    return asInt > 0 ? asInt : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
 }
 
 function buildReadableUploadId(file: File): string {
@@ -280,8 +402,38 @@ function getMcqQuestionPromptAsset(attachments: ModuleAsset[], questionKey: stri
   return null;
 }
 
+function getIdentificationQuestionPromptAsset(
+  attachments: ModuleAsset[],
+  questionKey: string
+): ModuleAsset | null {
+  const targetLabel = identificationQuestionAssetLabel(questionKey).toLowerCase();
+  for (let index = attachments.length - 1; index >= 0; index -= 1) {
+    const label = (attachments[index]?.label ?? "").trim().toLowerCase();
+    if (label === targetLabel) {
+      return attachments[index] ?? null;
+    }
+  }
+  return null;
+}
+
 function parseLabMode(value: unknown): RecognitionMode | null {
   return value === "alphabet" || value === "numbers" || value === "words" ? value : null;
+}
+
+function parseBooleanFlag(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") {
+      return true;
+    }
+    if (normalized === "false") {
+      return false;
+    }
+  }
+  return null;
 }
 
 function parseNumbersCategory(value: unknown): NumbersCategory | null {
@@ -300,6 +452,9 @@ function getSigningLabConfig(item: LmsModuleItem): {
   mode: RecognitionMode;
   numbersCategory: NumbersCategory | null;
   wordsCategory: WordsCategory | null;
+  entries: Array<{ question_key: string; question: string; correct_answer: string }>;
+  requiredCount: number;
+  requireAll: boolean;
 } | null {
   if (item.item_type !== "signing_lab_assessment") {
     return null;
@@ -307,7 +462,51 @@ function getSigningLabConfig(item: LmsModuleItem): {
   const mode = parseLabMode(item.config.lab_mode) ?? "alphabet";
   const numbersCategory = parseNumbersCategory(item.config.numbers_category);
   const wordsCategory = parseWordsCategory(item.config.words_category);
-  return { mode, numbersCategory, wordsCategory };
+  const rawQuestionSet = item.config.questions;
+  const parsedEntries = Array.isArray(rawQuestionSet)
+    ? rawQuestionSet
+        .map((entry, index) => {
+          if (!entry || typeof entry !== "object") {
+            return null;
+          }
+          const row = entry as Record<string, unknown>;
+          const question = typeof row.question === "string" ? row.question.trim() : "";
+          const correctAnswer = typeof row.correct_answer === "string" ? row.correct_answer.trim() : "";
+          const questionKey =
+            typeof row.question_key === "string" && row.question_key.trim()
+              ? row.question_key.trim()
+              : `q${index + 1}`;
+          if (!question && !correctAnswer) {
+            return null;
+          }
+          return {
+            question_key: questionKey,
+            question,
+            correct_answer: correctAnswer,
+          };
+        })
+        .filter(
+          (
+            entry
+          ): entry is { question_key: string; question: string; correct_answer: string } => Boolean(entry)
+        )
+    : [];
+  const legacyQuestion = typeof item.config.question === "string" ? item.config.question.trim() : "";
+  const legacyAnswer =
+    typeof item.config.expected_answer === "string" ? item.config.expected_answer.trim() : "";
+  const entries =
+    parsedEntries.length > 0
+      ? parsedEntries
+      : legacyQuestion || legacyAnswer
+        ? [{ question_key: "q1", question: legacyQuestion, correct_answer: legacyAnswer }]
+        : [];
+  const requireAll = parseBooleanFlag(item.config.require_all) ?? true;
+  const rawRequiredCount = parseRequiredCount(item.config.required_count);
+  const defaultRequiredCount = entries.length > 0 ? entries.length : 1;
+  const requiredCount = requireAll
+    ? defaultRequiredCount
+    : Math.max(1, Math.min(rawRequiredCount ?? defaultRequiredCount, defaultRequiredCount));
+  return { mode, numbersCategory, wordsCategory, entries, requiredCount, requireAll };
 }
 
 function displayNumbersRangeLabel(value: NumbersCategory | null): string {
@@ -376,20 +575,26 @@ export default function TeacherSectionsPage() {
   const [itemType, setItemType] = useState<BuilderItemType>("readable");
   const [itemInstructions, setItemInstructions] = useState("");
   const [itemContent, setItemContent] = useState("");
-  const [itemQuestion, setItemQuestion] = useState("");
-  const [itemAnswer, setItemAnswer] = useState("");
-  const [itemAcceptedAnswers, setItemAcceptedAnswers] = useState("");
+  const [, setItemQuestion] = useState("");
+  const [, setItemAnswer] = useState("");
   const [mcqQuestions, setMcqQuestions] = useState<McqQuestionDraft[]>([
     createMcqQuestionDraft({ id: "q1" }),
+  ]);
+  const [identificationQuestions, setIdentificationQuestions] = useState<IdentificationQuestionDraft[]>([
+    createIdentificationQuestionDraft({ id: "q1" }),
   ]);
   const [readableFiles, setReadableFiles] = useState<ReadableUploadEntry[]>([]);
   const [isReadableDropActive, setIsReadableDropActive] = useState(false);
   const [readablePresentationMode, setReadablePresentationMode] =
     useState<ReadablePresentationMode>("auto");
-  const [identificationPromptFile, setIdentificationPromptFile] = useState<File | null>(null);
   const [signingLabMode, setSigningLabMode] = useState<RecognitionMode>("alphabet");
   const [signingLabNumbersRange, setSigningLabNumbersRange] = useState<NumbersCategory>("0-10");
   const [signingLabWordsCategory, setSigningLabWordsCategory] = useState<WordsCategory>("greeting");
+  const [signingLabEntries, setSigningLabEntries] = useState<SigningLabEntryDraft[]>([
+    createSigningLabEntryDraft({ id: "q1" }),
+  ]);
+  const [signingLabRequireAll, setSigningLabRequireAll] = useState(true);
+  const [signingLabRequiredCount, setSigningLabRequiredCount] = useState(1);
 
   const selectedModule = useMemo(
     () => modules.find((module) => String(module.id) === selectedModuleId) ?? null,
@@ -547,15 +752,17 @@ export default function TeacherSectionsPage() {
     setItemContent("");
     setItemQuestion("");
     setItemAnswer("");
-    setItemAcceptedAnswers("");
     setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
+    setIdentificationQuestions([createIdentificationQuestionDraft({ id: "q1" })]);
     setReadableFiles([]);
     setIsReadableDropActive(false);
     setReadablePresentationMode("auto");
-    setIdentificationPromptFile(null);
     setSigningLabMode("alphabet");
     setSigningLabNumbersRange("0-10");
     setSigningLabWordsCategory("greeting");
+    setSigningLabEntries([createSigningLabEntryDraft({ id: "q1" })]);
+    setSigningLabRequireAll(true);
+    setSigningLabRequiredCount(1);
     setEditingItemId(null);
   }
 
@@ -567,14 +774,16 @@ export default function TeacherSectionsPage() {
     setItemContent(item.content_text ?? "");
     setReadableFiles([]);
     setReadablePresentationMode("auto");
-    setIdentificationPromptFile(null);
 
     if (item.item_type === "readable") {
       setReadablePresentationMode(parseReadablePresentationMode(item.config.presentation_mode));
       setItemQuestion("");
       setItemAnswer("");
-      setItemAcceptedAnswers("");
       setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
+      setIdentificationQuestions([createIdentificationQuestionDraft({ id: "q1" })]);
+      setSigningLabEntries([createSigningLabEntryDraft({ id: "q1" })]);
+      setSigningLabRequireAll(true);
+      setSigningLabRequiredCount(1);
       return;
     }
 
@@ -582,36 +791,52 @@ export default function TeacherSectionsPage() {
       setMcqQuestions(parseMcqQuestionDrafts(item));
       setItemQuestion("");
       setItemAnswer("");
-      setItemAcceptedAnswers("");
+      setIdentificationQuestions([createIdentificationQuestionDraft({ id: "q1" })]);
+      setSigningLabEntries([createSigningLabEntryDraft({ id: "q1" })]);
+      setSigningLabRequireAll(true);
+      setSigningLabRequiredCount(1);
       return;
     }
 
     if (item.item_type === "identification_assessment") {
-      const acceptedAnswers = Array.isArray(item.config.accepted_answers)
-        ? (item.config.accepted_answers as unknown[]).map((entry) => String(entry))
-        : [];
-      setItemQuestion(typeof item.config.question === "string" ? item.config.question : "");
-      setItemAnswer(typeof item.config.correct_answer === "string" ? item.config.correct_answer : "");
-      setItemAcceptedAnswers(acceptedAnswers.join(", "));
+      setIdentificationQuestions(parseIdentificationQuestionDrafts(item));
+      setItemQuestion("");
+      setItemAnswer("");
       setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
+      setSigningLabEntries([createSigningLabEntryDraft({ id: "q1" })]);
+      setSigningLabRequireAll(true);
+      setSigningLabRequiredCount(1);
       return;
     }
 
     if (item.item_type === "signing_lab_assessment") {
+      const parsedEntries = parseSigningLabEntryDrafts(item);
+      const parsedRequireAll = parseBooleanFlag(item.config.require_all) ?? true;
+      const parsedRequiredCount = parseRequiredCount(item.config.required_count);
+      const maxEntries = Math.max(1, parsedEntries.length);
+      const resolvedRequiredCount = parsedRequireAll
+        ? maxEntries
+        : Math.max(1, Math.min(parsedRequiredCount ?? maxEntries, maxEntries));
       setItemQuestion(typeof item.config.question === "string" ? item.config.question : "");
       setItemAnswer(typeof item.config.expected_answer === "string" ? item.config.expected_answer : "");
       setSigningLabMode(parseLabMode(item.config.lab_mode) ?? "alphabet");
       setSigningLabNumbersRange(parseNumbersCategory(item.config.numbers_category) ?? "0-10");
       setSigningLabWordsCategory(parseWordsCategory(item.config.words_category) ?? "greeting");
+      setSigningLabEntries(parsedEntries);
+      setSigningLabRequireAll(parsedRequireAll);
+      setSigningLabRequiredCount(resolvedRequiredCount);
       setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
-      setItemAcceptedAnswers("");
+      setIdentificationQuestions([createIdentificationQuestionDraft({ id: "q1" })]);
       return;
     }
 
     setItemQuestion("");
     setItemAnswer("");
-    setItemAcceptedAnswers("");
     setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
+    setIdentificationQuestions([createIdentificationQuestionDraft({ id: "q1" })]);
+    setSigningLabEntries([createSigningLabEntryDraft({ id: "q1" })]);
+    setSigningLabRequireAll(true);
+    setSigningLabRequiredCount(1);
   }
 
   function addMcqQuestion(afterIndex?: number) {
@@ -704,6 +929,129 @@ export default function TeacherSectionsPage() {
           ? {
               ...entry,
               promptFile: file,
+            }
+          : entry
+      )
+    );
+  }
+
+  function addIdentificationQuestion(afterIndex?: number) {
+    setIdentificationQuestions((current) => {
+      const next = [...current];
+      const insertAt =
+        typeof afterIndex === "number"
+          ? Math.min(Math.max(afterIndex + 1, 0), next.length)
+          : next.length;
+      next.splice(insertAt, 0, createIdentificationQuestionDraft());
+      return next;
+    });
+  }
+
+  function removeIdentificationQuestion(questionIndex: number) {
+    setIdentificationQuestions((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+      return current.filter((_, index) => index !== questionIndex);
+    });
+  }
+
+  function updateIdentificationQuestionText(questionIndex: number, value: string) {
+    setIdentificationQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex
+          ? {
+              ...entry,
+              question: value,
+            }
+          : entry
+      )
+    );
+  }
+
+  function updateIdentificationCorrectAnswer(questionIndex: number, value: string) {
+    setIdentificationQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex
+          ? {
+              ...entry,
+              correctAnswer: value,
+            }
+          : entry
+      )
+    );
+  }
+
+  function updateIdentificationAcceptedAnswers(questionIndex: number, value: string) {
+    setIdentificationQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex
+          ? {
+              ...entry,
+              acceptedAnswersText: value,
+            }
+          : entry
+      )
+    );
+  }
+
+  function setIdentificationQuestionPromptFile(questionIndex: number, file: File | null) {
+    setIdentificationQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex
+          ? {
+              ...entry,
+              promptFile: file,
+            }
+          : entry
+      )
+    );
+  }
+
+  function addSigningLabEntry(afterIndex?: number) {
+    setSigningLabEntries((current) => {
+      const next = [...current];
+      const insertAt =
+        typeof afterIndex === "number"
+          ? Math.min(Math.max(afterIndex + 1, 0), next.length)
+          : next.length;
+      next.splice(insertAt, 0, createSigningLabEntryDraft());
+      return next;
+    });
+  }
+
+  function removeSigningLabEntry(entryIndex: number) {
+    setSigningLabEntries((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+      const next = current.filter((_, index) => index !== entryIndex);
+      const maxEntries = Math.max(1, next.length);
+      setSigningLabRequiredCount((previous) => Math.max(1, Math.min(previous, maxEntries)));
+      return next;
+    });
+  }
+
+  function updateSigningLabEntryPrompt(entryIndex: number, value: string) {
+    setSigningLabEntries((current) =>
+      current.map((entry, index) =>
+        index === entryIndex
+          ? {
+              ...entry,
+              prompt: value,
+            }
+          : entry
+      )
+    );
+  }
+
+  function updateSigningLabEntryExpectedAnswer(entryIndex: number, value: string) {
+    setSigningLabEntries((current) =>
+      current.map((entry, index) =>
+        index === entryIndex
+          ? {
+              ...entry,
+              expectedAnswer: value,
             }
           : entry
       )
@@ -914,23 +1262,85 @@ export default function TeacherSectionsPage() {
     }
 
     if (item.item_type === "identification_assessment") {
-      const question = typeof item.config.question === "string" ? item.config.question : "";
-      const promptMedia = getPromptMedia(item);
+      const attachments = getItemAttachments(item);
+      const sharedPromptMedia = getPromptMedia(item);
+      const questionSet = Array.isArray(item.config.questions)
+        ? (item.config.questions as unknown[])
+            .map((entry, index) => {
+              if (!entry || typeof entry !== "object") {
+                return null;
+              }
+              const row = entry as Record<string, unknown>;
+              const acceptedAnswers = Array.isArray(row.accepted_answers)
+                ? (row.accepted_answers as unknown[]).map((value) => String(value))
+                : [];
+              return {
+                key:
+                  typeof row.question_key === "string" && row.question_key.trim()
+                    ? row.question_key.trim()
+                    : `q${index + 1}`,
+                question: typeof row.question === "string" ? row.question : "",
+                answer: typeof row.correct_answer === "string" ? row.correct_answer : "",
+                acceptedAnswers,
+              };
+            })
+            .filter(
+              (
+                entry
+              ): entry is { key: string; question: string; answer: string; acceptedAnswers: string[] } =>
+                Boolean(entry)
+            )
+        : [];
+      const fallbackQuestion = typeof item.config.question === "string" ? item.config.question : "";
+      const fallbackAnswer = typeof item.config.correct_answer === "string" ? item.config.correct_answer : "";
+      const fallbackAccepted = Array.isArray(item.config.accepted_answers)
+        ? (item.config.accepted_answers as unknown[]).map((value) => String(value))
+        : [];
+      const displayQuestions =
+        questionSet.length > 0
+          ? questionSet
+          : [{ key: "q1", question: fallbackQuestion, answer: fallbackAnswer, acceptedAnswers: fallbackAccepted }];
+      const hasPerQuestionPrompt = displayQuestions.some((entry) =>
+        Boolean(getIdentificationQuestionPromptAsset(attachments, entry.key))
+      );
       return (
         <div className="vstack gap-3">
           <p className="mb-0 rounded-3 bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
-            {question || item.instructions || "No question yet."}
+            {item.instructions || "Students will type their answer for each question."}
           </p>
-          {promptMedia ? (
+          {sharedPromptMedia && !hasPerQuestionPrompt ? (
             <div className="card border-brandBorder">
               <div className="card-body">
-                <p className="small fw-semibold mb-2">{promptMedia.resource_file_name}</p>
-                {renderPreviewAsset(promptMedia)}
+                <p className="small fw-semibold mb-2">{sharedPromptMedia.resource_file_name}</p>
+                {renderPreviewAsset(sharedPromptMedia)}
               </div>
             </div>
-          ) : (
-            <p className="mb-0 small text-slate-600">No prompt media yet.</p>
-          )}
+          ) : null}
+          {displayQuestions.map((entry, questionIndex) => {
+            const questionPrompt = getIdentificationQuestionPromptAsset(attachments, entry.key);
+            return (
+              <div className="rounded-3 border border-brandBorder bg-white px-3 py-3" key={entry.key}>
+                <p className="mb-2 fw-semibold text-sm">
+                  {questionIndex + 1}. {entry.question || "No question yet."}
+                </p>
+                {questionPrompt ? (
+                  <div className="mb-3">
+                    <p className="small fw-semibold mb-2">{questionPrompt.resource_file_name}</p>
+                    {renderPreviewAsset(questionPrompt)}
+                  </div>
+                ) : null}
+                <p className="mb-1 small text-slate-700">
+                  Correct answer: <span className="fw-semibold">{entry.answer || "Not set"}</span>
+                </p>
+                <p className="mb-0 small text-slate-600">
+                  Accepted answers:{" "}
+                  <span className="fw-semibold">
+                    {entry.acceptedAnswers.length > 0 ? entry.acceptedAnswers.join(", ") : "None"}
+                  </span>
+                </p>
+              </div>
+            );
+          })}
         </div>
       );
     }
@@ -939,11 +1349,6 @@ export default function TeacherSectionsPage() {
       const config = getSigningLabConfig(item);
       return (
         <div className="vstack gap-2">
-          <p className="mb-0 rounded-3 bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
-            {(typeof item.config.question === "string" ? item.config.question : "") ||
-              item.instructions ||
-              "No prompt yet."}
-          </p>
           {config ? (
             <div className="small text-slate-700">
               <p className="mb-1">Camera Type: <span className="fw-semibold">{displayType(config.mode)}</span></p>
@@ -951,7 +1356,26 @@ export default function TeacherSectionsPage() {
                 <p className="mb-1">Range: <span className="fw-semibold">{displayNumbersRangeLabel(config.numbersCategory)}</span></p>
               ) : null}
               {config.mode === "words" ? (
-                <p className="mb-0">Category: <span className="fw-semibold">{displayWordsCategoryLabel(config.wordsCategory)}</span></p>
+                <p className="mb-1">Category: <span className="fw-semibold">{displayWordsCategoryLabel(config.wordsCategory)}</span></p>
+              ) : null}
+              <p className="mb-1">
+                Required to submit:{" "}
+                <span className="fw-semibold">
+                  {config.requireAll ? `All ${config.entries.length} entries` : `${config.requiredCount} of ${config.entries.length} entries`}
+                </span>
+              </p>
+              {config.entries.length > 0 ? (
+                <div className="rounded-3 border border-brandBorder bg-white px-3 py-3">
+                  <p className="mb-2 fw-semibold text-sm">Entry 1 Preview</p>
+                  <p className="mb-1 text-sm text-slate-700">
+                    Prompt:{" "}
+                    <span className="fw-semibold">{config.entries[0].question || "No prompt yet."}</span>
+                  </p>
+                  <p className="mb-0 text-sm text-slate-700">
+                    Expected answer:{" "}
+                    <span className="fw-semibold">{config.entries[0].correct_answer || "Not set"}</span>
+                  </p>
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -997,6 +1421,7 @@ export default function TeacherSectionsPage() {
     try {
       let config: Record<string, unknown> = {};
       let mcqQuestionsForUpload: Array<{ question_key: string; promptFile: File | null }> = [];
+      let identificationQuestionsForUpload: Array<{ question_key: string; promptFile: File | null }> = [];
 
       if (itemType === "multiple_choice_assessment") {
         if (mcqQuestions.length === 0) {
@@ -1004,7 +1429,7 @@ export default function TeacherSectionsPage() {
           return;
         }
         const normalizedQuestions = mcqQuestions.map((entry, index) => {
-          const questionKey = normalizeMcqQuestionKey(entry.id, index);
+          const questionKey = normalizeQuestionKey(entry.id, index);
           const question = entry.question.trim();
           const choices = entry.choices.map((choice) => choice.trim()).filter(Boolean);
           const selectedAnswer = choices[entry.correctIndex] || "";
@@ -1041,27 +1466,51 @@ export default function TeacherSectionsPage() {
               : null,
         };
       } else if (itemType === "identification_assessment") {
-        const primaryAnswer = itemAnswer.trim();
-        if (!primaryAnswer) {
-          setError("Add the expected answer for identification.");
+        if (identificationQuestions.length === 0) {
+          setError("Add at least one identification question.");
           return;
         }
-        const acceptedAnswers = Array.from(
-          new Set([primaryAnswer, ...normalizeWords(itemAcceptedAnswers)])
-        );
+        const normalizedQuestions = identificationQuestions.map((entry, index) => {
+          const questionKey = normalizeQuestionKey(entry.id, index);
+          const question = entry.question.trim();
+          const correctAnswer = entry.correctAnswer.trim();
+          if (!question) {
+            throw new Error(`Identification question ${index + 1} is required.`);
+          }
+          if (!correctAnswer) {
+            throw new Error(`Identification question ${index + 1} needs a correct answer.`);
+          }
+          const acceptedAnswers = Array.from(
+            new Set(
+              [correctAnswer, ...normalizeWords(entry.acceptedAnswersText)].map((value) => value.trim()).filter(Boolean)
+            )
+          );
+          return {
+            question_key: questionKey,
+            question,
+            correct_answer: correctAnswer,
+            accepted_answers: acceptedAnswers,
+            promptFile: entry.promptFile,
+          };
+        });
+        identificationQuestionsForUpload = normalizedQuestions.map((entry) => ({
+          question_key: entry.question_key,
+          promptFile: entry.promptFile,
+        }));
+        const firstQuestion = normalizedQuestions[0];
         config = {
-          question: itemQuestion.trim(),
-          correct_answer: primaryAnswer,
-          accepted_answers: acceptedAnswers,
+          question: firstQuestion.question,
+          correct_answer: firstQuestion.correct_answer,
+          accepted_answers: firstQuestion.accepted_answers,
+          questions: normalizedQuestions.map(({ promptFile: _promptFile, ...questionConfig }) => questionConfig),
           prompt_media:
             isEditingItem && editingItem
               ? (editingItem.config.prompt_media as unknown) ?? null
               : null,
         };
       } else if (itemType === "signing_lab_assessment") {
-        const expectedAnswer = itemAnswer.trim();
-        if (!expectedAnswer) {
-          setError("Add the expected answer for camera interface assessment.");
+        if (signingLabEntries.length === 0) {
+          setError("Add at least one camera interface entry.");
           return;
         }
         if (signingLabMode === "numbers" && !signingLabNumbersRange) {
@@ -1072,13 +1521,37 @@ export default function TeacherSectionsPage() {
           setError("Choose a words category for camera interface assessment.");
           return;
         }
+        const normalizedEntries = signingLabEntries.map((entry, index) => {
+          const questionKey = normalizeQuestionKey(entry.id, index);
+          const prompt = entry.prompt.trim();
+          const expectedAnswer = entry.expectedAnswer.trim();
+          if (!prompt) {
+            throw new Error(`Camera interface entry ${index + 1} needs a prompt.`);
+          }
+          if (!expectedAnswer) {
+            throw new Error(`Camera interface entry ${index + 1} needs an expected answer.`);
+          }
+          return {
+            question_key: questionKey,
+            question: prompt,
+            correct_answer: expectedAnswer,
+          };
+        });
+        const maxEntries = normalizedEntries.length;
+        const resolvedRequiredCount = signingLabRequireAll
+          ? maxEntries
+          : Math.max(1, Math.min(Math.trunc(signingLabRequiredCount || maxEntries), maxEntries));
+        const firstEntry = normalizedEntries[0];
         config = {
-          question: itemQuestion.trim(),
-          expected_answer: expectedAnswer,
+          question: firstEntry.question,
+          expected_answer: firstEntry.correct_answer,
           helper_text: "Open the camera interface, analyze your sign, and submit the detected result.",
           lab_mode: signingLabMode,
           numbers_category: signingLabMode === "numbers" ? signingLabNumbersRange : null,
-          words_category: signingLabMode === "words" ? signingLabWordsCategory : null
+          words_category: signingLabMode === "words" ? signingLabWordsCategory : null,
+          questions: normalizedEntries,
+          require_all: signingLabRequireAll,
+          required_count: resolvedRequiredCount,
         };
       } else {
         const existingAttachmentCount =
@@ -1131,11 +1604,17 @@ export default function TeacherSectionsPage() {
           });
         }
       }
-      if (itemType === "identification_assessment" && identificationPromptFile) {
-        updatedModule = await uploadTeacherModuleItemAsset(targetItemId, {
-          file: identificationPromptFile,
-          usage: "prompt"
-        });
+      if (itemType === "identification_assessment") {
+        for (const question of identificationQuestionsForUpload) {
+          if (!question.promptFile) {
+            continue;
+          }
+          updatedModule = await uploadTeacherModuleItemAsset(targetItemId, {
+            file: question.promptFile,
+            usage: "attachment",
+            label: identificationQuestionAssetLabel(question.question_key),
+          });
+        }
       }
       if (itemType === "multiple_choice_assessment") {
         for (const question of mcqQuestionsForUpload) {
@@ -1486,7 +1965,7 @@ export default function TeacherSectionsPage() {
                         </div>
                         <div className="vstack gap-3">
                           {mcqQuestions.map((question, questionIndex) => {
-                            const questionKey = normalizeMcqQuestionKey(question.id, questionIndex);
+                            const questionKey = normalizeQuestionKey(question.id, questionIndex);
                             const existingQuestionPrompt =
                               isEditingItem && editingItem?.item_type === "multiple_choice_assessment"
                                 ? getMcqQuestionPromptAsset(editingItemAttachments, questionKey)
@@ -1603,45 +2082,111 @@ export default function TeacherSectionsPage() {
 
                     {itemType === "identification_assessment" ? (
                       <>
-                        <div>
-                          <label className="form-label fw-semibold">Question</label>
-                          <input
-                            className="form-control"
-                            onChange={(event) => setItemQuestion(event.target.value)}
-                            placeholder="What gesture is shown?"
-                            value={itemQuestion}
-                          />
+                        <div className="d-flex justify-content-between align-items-center">
+                          <label className="form-label fw-semibold mb-0">Identification Questions</label>
                         </div>
-                        <div>
-                          <label className="form-label fw-semibold">Correct Answer</label>
-                          <input
-                            className="form-control"
-                            onChange={(event) => setItemAnswer(event.target.value)}
-                            placeholder="Example: LETTER B"
-                            value={itemAnswer}
-                          />
-                        </div>
-                        <div>
-                          <label className="form-label fw-semibold">Accepted Answers (Optional)</label>
-                          <textarea
-                            className="form-control"
-                            onChange={(event) => setItemAcceptedAnswers(event.target.value)}
-                            placeholder="Add aliases separated by comma or new line."
-                            rows={3}
-                            value={itemAcceptedAnswers}
-                          />
-                        </div>
-                        <div>
-                          <label className="form-label fw-semibold">Prompt Media (Image or Video)</label>
-                          <input
-                            accept={IDENTIFICATION_PROMPT_ACCEPT}
-                            className="form-control"
-                            onChange={(event) => setIdentificationPromptFile(event.target.files?.[0] ?? null)}
-                            type="file"
-                          />
-                          <div className="form-text">
-                            Students will guess the sign based on this uploaded image/video.
-                          </div>
+                        <div className="vstack gap-3">
+                          {identificationQuestions.map((question, questionIndex) => {
+                            const questionKey = normalizeQuestionKey(question.id, questionIndex);
+                            const existingQuestionPrompt =
+                              isEditingItem && editingItem?.item_type === "identification_assessment"
+                                ? getIdentificationQuestionPromptAsset(editingItemAttachments, questionKey)
+                                : null;
+                            return (
+                              <div className="card border-brandBorder" key={question.id}>
+                                <div className="card-body vstack gap-2">
+                                  <div className="d-flex justify-content-between align-items-center">
+                                    <p className="mb-0 fw-semibold">Question {questionIndex + 1}</p>
+                                    <div className="d-flex gap-2">
+                                      {questionIndex === identificationQuestions.length - 1 ? (
+                                        <button
+                                          className="btn btn-outline-primary btn-sm"
+                                          onClick={() => addIdentificationQuestion(questionIndex)}
+                                          type="button"
+                                        >
+                                          Add Question
+                                        </button>
+                                      ) : null}
+                                      <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        disabled={identificationQuestions.length <= 1}
+                                        onClick={() => removeIdentificationQuestion(questionIndex)}
+                                        type="button"
+                                      >
+                                        Remove Question
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <input
+                                    className="form-control"
+                                    onChange={(event) =>
+                                      updateIdentificationQuestionText(questionIndex, event.target.value)
+                                    }
+                                    placeholder={`Type identification question ${questionIndex + 1}`}
+                                    value={question.question}
+                                  />
+                                  <div>
+                                    <label className="form-label fw-semibold mb-1">
+                                      Prompt Media (Image or Video)
+                                    </label>
+                                    <input
+                                      accept={IDENTIFICATION_PROMPT_ACCEPT}
+                                      className="form-control"
+                                      onChange={(event) =>
+                                        setIdentificationQuestionPromptFile(
+                                          questionIndex,
+                                          event.target.files?.[0] ?? null
+                                        )
+                                      }
+                                      type="file"
+                                    />
+                                    <div className="form-text">
+                                      This media will be shown only for Question {questionIndex + 1}.
+                                    </div>
+                                    {question.promptFile ? (
+                                      <p className="mb-0 mt-1 small text-slate-700">
+                                        Selected media: <span className="fw-semibold">{question.promptFile.name}</span>
+                                      </p>
+                                    ) : existingQuestionPrompt ? (
+                                      <p className="mb-0 mt-1 small text-slate-700">
+                                        Current media:{" "}
+                                        <span className="fw-semibold">{existingQuestionPrompt.resource_file_name}</span>
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                  <div>
+                                    <label className="form-label fw-semibold mb-1">Correct Answer</label>
+                                    <input
+                                      className="form-control"
+                                      onChange={(event) =>
+                                        updateIdentificationCorrectAnswer(questionIndex, event.target.value)
+                                      }
+                                      placeholder="Example: LETTER B"
+                                      value={question.correctAnswer}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="form-label fw-semibold mb-1">Accepted Answers (Optional)</label>
+                                    <textarea
+                                      className="form-control"
+                                      onChange={(event) =>
+                                        updateIdentificationAcceptedAnswers(questionIndex, event.target.value)
+                                      }
+                                      placeholder="Add aliases separated by comma or new line."
+                                      rows={2}
+                                      value={question.acceptedAnswersText}
+                                    />
+                                  </div>
+                                  <p className="mb-0 small text-slate-600 fw-normal">
+                                    Students will type their answer for this question.
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <p className="mb-0 text-xs text-slate-600">
+                            Identification is typing-only. No multiple-choice options are shown to students.
+                          </p>
                         </div>
                       </>
                     ) : null}
@@ -1704,23 +2249,109 @@ export default function TeacherSectionsPage() {
                             </div>
                           </div>
                         ) : null}
-                        <div>
-                          <label className="form-label fw-semibold">Prompt</label>
-                          <input
-                            className="form-control"
-                            onChange={(event) => setItemQuestion(event.target.value)}
-                            placeholder="Sign the word shown below."
-                            value={itemQuestion}
-                          />
+                        <div className="rounded-3 border border-brandBorder bg-brandOffWhite p-3">
+                          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                            <p className="mb-0 fw-semibold">Camera Interface Entries</p>
+                            <span className="small text-slate-700">
+                              {signingLabEntries.length} {signingLabEntries.length === 1 ? "entry" : "entries"}
+                            </span>
+                          </div>
+                          <div className="vstack gap-3">
+                            {signingLabEntries.map((entry, entryIndex) => (
+                              <div className="card border-brandBorder" key={entry.id}>
+                                <div className="card-body vstack gap-2">
+                                  <div className="d-flex justify-content-between align-items-center">
+                                    <p className="mb-0 fw-semibold">Entry {entryIndex + 1}</p>
+                                    <div className="d-flex gap-2">
+                                      {entryIndex === signingLabEntries.length - 1 ? (
+                                        <button
+                                          className="btn btn-outline-primary btn-sm"
+                                          onClick={() => addSigningLabEntry(entryIndex)}
+                                          type="button"
+                                        >
+                                          Add Entry
+                                        </button>
+                                      ) : null}
+                                      <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        disabled={signingLabEntries.length <= 1}
+                                        onClick={() => removeSigningLabEntry(entryIndex)}
+                                        type="button"
+                                      >
+                                        Remove Entry
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="form-label fw-semibold mb-1">Prompt</label>
+                                    <input
+                                      className="form-control"
+                                      onChange={(event) =>
+                                        updateSigningLabEntryPrompt(entryIndex, event.target.value)
+                                      }
+                                      placeholder="Example: Sign the word GOOD MORNING."
+                                      value={entry.prompt}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="form-label fw-semibold mb-1">Expected Word / Phrase</label>
+                                    <input
+                                      className="form-control"
+                                      onChange={(event) =>
+                                        updateSigningLabEntryExpectedAnswer(entryIndex, event.target.value)
+                                      }
+                                      placeholder="Example: GOOD MORNING"
+                                      value={entry.expectedAnswer}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div>
-                          <label className="form-label fw-semibold">Expected Word / Phrase</label>
-                          <input
-                            className="form-control"
-                            onChange={(event) => setItemAnswer(event.target.value)}
-                            placeholder="Example: GOOD MORNING"
-                            value={itemAnswer}
-                          />
+                        <div className="rounded-3 border border-brandBorder bg-white p-3">
+                          <p className="mb-2 fw-semibold">Completion Requirement</p>
+                          <div className="form-check mb-2">
+                            <input
+                              checked={signingLabRequireAll}
+                              className="form-check-input"
+                              id="signing-require-all"
+                              onChange={(event) => setSigningLabRequireAll(event.target.checked)}
+                              type="checkbox"
+                            />
+                            <label className="form-check-label" htmlFor="signing-require-all">
+                              Require all entries before submission
+                            </label>
+                          </div>
+                          {!signingLabRequireAll ? (
+                            <div>
+                              <label className="form-label fw-semibold mb-1">Minimum entries required</label>
+                              <input
+                                className="form-control"
+                                max={signingLabEntries.length}
+                                min={1}
+                                onChange={(event) => {
+                                  const parsed = Number.parseInt(event.target.value, 10);
+                                  if (Number.isFinite(parsed)) {
+                                    setSigningLabRequiredCount(
+                                      Math.max(1, Math.min(parsed, Math.max(1, signingLabEntries.length)))
+                                    );
+                                    return;
+                                  }
+                                  setSigningLabRequiredCount(1);
+                                }}
+                                type="number"
+                                value={Math.max(1, Math.min(signingLabRequiredCount, Math.max(1, signingLabEntries.length)))}
+                              />
+                              <div className="form-text">
+                                Students can submit after answering at least this many entries.
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="mb-0 small text-slate-700">
+                              Students must answer all {signingLabEntries.length} entries.
+                            </p>
+                          )}
                         </div>
                       </>
                     ) : null}
@@ -1816,13 +2447,24 @@ export default function TeacherSectionsPage() {
                                   </p>
                                 ) : null}
                                 {signingConfig.mode === "words" ? (
-                                  <p className="mb-0">
+                                  <p className="mb-1">
                                     Words category:{" "}
                                     <span className="fw-semibold">
                                       {displayWordsCategoryLabel(signingConfig.wordsCategory)}
                                     </span>
                                   </p>
                                 ) : null}
+                                <p className="mb-1">
+                                  Entries: <span className="fw-semibold">{signingConfig.entries.length}</span>
+                                </p>
+                                <p className="mb-0">
+                                  Requirement:{" "}
+                                  <span className="fw-semibold">
+                                    {signingConfig.requireAll
+                                      ? `All ${signingConfig.entries.length} entries`
+                                      : `${signingConfig.requiredCount} of ${signingConfig.entries.length} entries`}
+                                  </span>
+                                </p>
                               </div>
                             ) : null}
                             <div className="d-flex flex-wrap gap-2 mt-3">

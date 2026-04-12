@@ -16,6 +16,7 @@ import {
   type StudentCourseItem,
   type StudentCourseModule
 } from "@/lib/api";
+import { displayWordLabel, type WordDisplayLanguage } from "@/lib/word-localization";
 
 const CONTENT_ITEM_TYPES = new Set([
   "readable",
@@ -146,6 +147,24 @@ function getMcqQuestionPromptAsset(attachments: ModuleAsset[], questionKey: stri
   return null;
 }
 
+function identificationQuestionAssetLabel(questionKey: string): string {
+  return `identification-question:${questionKey}`;
+}
+
+function getIdentificationQuestionPromptAsset(
+  attachments: ModuleAsset[],
+  questionKey: string
+): ModuleAsset | null {
+  const targetLabel = identificationQuestionAssetLabel(questionKey).toLowerCase();
+  for (let index = attachments.length - 1; index >= 0; index -= 1) {
+    const label = (attachments[index]?.label ?? "").trim().toLowerCase();
+    if (label === targetLabel) {
+      return attachments[index] ?? null;
+    }
+  }
+  return null;
+}
+
 function resolveAssetUrl(asset: ModuleAsset): string {
   if (asset.resource_url && /^https?:\/\//i.test(asset.resource_url)) {
     return asset.resource_url;
@@ -170,6 +189,17 @@ type McqQuestionConfig = {
   question_key: string;
   question: string;
   choices: string[];
+};
+
+type IdentificationQuestionConfig = {
+  question_key: string;
+  question: string;
+};
+
+type SigningLabEntryConfig = {
+  question_key: string;
+  question: string;
+  correct_answer: string;
 };
 
 function getMcqQuestionSet(item: StudentCourseItem): McqQuestionConfig[] {
@@ -214,16 +244,163 @@ function getMcqQuestionSet(item: StudentCourseItem): McqQuestionConfig[] {
   return [];
 }
 
+function getIdentificationQuestionSet(item: StudentCourseItem): IdentificationQuestionConfig[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const question = typeof row.question === "string" ? row.question.trim() : "";
+        const questionKey =
+          typeof row.question_key === "string" && row.question_key.trim()
+            ? row.question_key.trim()
+            : `q${index + 1}`;
+        if (!question) {
+          return null;
+        }
+        return {
+          question_key: questionKey,
+          question,
+        };
+      })
+      .filter((entry): entry is IdentificationQuestionConfig => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const question = typeof item.config.question === "string" ? item.config.question.trim() : "";
+  if (question) {
+    return [{ question_key: "q1", question }];
+  }
+  return [];
+}
+
+function parseRequiredCount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const asInt = Math.trunc(value);
+    return asInt > 0 ? asInt : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function parseBooleanFlag(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") {
+      return true;
+    }
+    if (normalized === "false") {
+      return false;
+    }
+  }
+  return null;
+}
+
+function getSigningLabEntrySet(item: StudentCourseItem): SigningLabEntryConfig[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const question = typeof row.question === "string" ? row.question.trim() : "";
+        const correctAnswer = typeof row.correct_answer === "string" ? row.correct_answer.trim() : "";
+        const questionKey =
+          typeof row.question_key === "string" && row.question_key.trim()
+            ? row.question_key.trim()
+            : `q${index + 1}`;
+        if (!question && !correctAnswer) {
+          return null;
+        }
+        return {
+          question_key: questionKey,
+          question,
+          correct_answer: correctAnswer,
+        };
+      })
+      .filter((entry): entry is SigningLabEntryConfig => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+  const legacyQuestion = typeof item.config.question === "string" ? item.config.question.trim() : "";
+  const legacyExpected =
+    typeof item.config.expected_answer === "string" ? item.config.expected_answer.trim() : "";
+  if (legacyQuestion || legacyExpected) {
+    return [{ question_key: "q1", question: legacyQuestion, correct_answer: legacyExpected }];
+  }
+  return [];
+}
+
+function getSigningLabRequirement(item: StudentCourseItem, totalEntries: number): {
+  requireAll: boolean;
+  requiredCount: number;
+} {
+  const defaultRequired = Math.max(1, totalEntries);
+  const requireAll = parseBooleanFlag(item.config.require_all) ?? true;
+  const parsedRequired = parseRequiredCount(item.config.required_count);
+  if (requireAll) {
+    return {
+      requireAll: true,
+      requiredCount: defaultRequired,
+    };
+  }
+  return {
+    requireAll: false,
+    requiredCount: Math.max(1, Math.min(parsedRequired ?? defaultRequired, defaultRequired)),
+  };
+}
+
+function localizeAssessmentCopy(value: string, language: WordDisplayLanguage): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+
+  const signPromptMatch = trimmed.match(/^sign\s*:\s*(.+)$/i);
+  if (signPromptMatch) {
+    const localizedTarget = displayWordLabel(signPromptMatch[1].trim(), language);
+    if (localizedTarget !== signPromptMatch[1].trim()) {
+      return `Sign: ${localizedTarget}`;
+    }
+  }
+
+  const localized = displayWordLabel(trimmed, language);
+  return localized !== trimmed ? localized : value;
+}
+
 export default function StudentModulePlayerPage() {
   const params = useParams<{ moduleId: string }>();
   const [course, setCourse] = useState<StudentCourse | null>(null);
   const [certificateStatus, setCertificateStatus] = useState<StudentCertificateDownloadStatus | null>(null);
   const [answerByItem, setAnswerByItem] = useState<Record<number, string>>({});
   const [mcqAnswersByItem, setMcqAnswersByItem] = useState<Record<number, Record<string, string>>>({});
+  const [identificationAnswersByItem, setIdentificationAnswersByItem] = useState<
+    Record<number, Record<string, string>>
+  >({});
+  const [signingLabAnswersByItem, setSigningLabAnswersByItem] = useState<
+    Record<number, Record<string, string>>
+  >({});
+  const [signingLabEntryIndexByItem, setSigningLabEntryIndexByItem] = useState<Record<number, number>>({});
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [slideshowIndexByItem, setSlideshowIndexByItem] = useState<Record<number, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [assessmentWordLanguage, setAssessmentWordLanguage] =
+    useState<WordDisplayLanguage>("filipino");
 
   async function refresh(options?: { tolerateCertificateError?: boolean }) {
     const tolerateCertificateError = options?.tolerateCertificateError ?? false;
@@ -343,6 +520,42 @@ export default function StudentModulePlayerPage() {
           extraPayload.question_total = questionSet.length;
         }
       }
+      if (item.item_type === "identification_assessment") {
+        const questionSet = getIdentificationQuestionSet(item);
+        if (questionSet.length > 1) {
+          const questionAnswers = identificationAnswersByItem[item.id] ?? {};
+          const hasMissingAnswer = questionSet.some(
+            (question) => !(questionAnswers[question.question_key] ?? "").trim()
+          );
+          if (hasMissingAnswer) {
+            setError("Please type an answer for all identification questions before submitting.");
+            return;
+          }
+          responseText = "multi-identification-submission";
+          extraPayload.question_answers = questionAnswers;
+          extraPayload.question_total = questionSet.length;
+        }
+      }
+      if (item.item_type === "signing_lab_assessment") {
+        const entrySet = getSigningLabEntrySet(item);
+        if (entrySet.length > 1) {
+          const answerMap = signingLabAnswersByItem[item.id] ?? {};
+          const { requiredCount } = getSigningLabRequirement(item, entrySet.length);
+          const answeredCount = entrySet.reduce((total, entry) => {
+            return (answerMap[entry.question_key] ?? "").trim() ? total + 1 : total;
+          }, 0);
+          if (answeredCount < requiredCount) {
+            setError(
+              `Please answer at least ${requiredCount} camera entries before submitting.`
+            );
+            return;
+          }
+          responseText = "multi-signing-submission";
+          extraPayload.question_answers = answerMap;
+          extraPayload.question_total = entrySet.length;
+          extraPayload.required_count = requiredCount;
+        }
+      }
       if (!responseText.trim()) {
         setError("Please provide an answer before submitting.");
         return;
@@ -350,7 +563,7 @@ export default function StudentModulePlayerPage() {
       await submitStudentItem(item.id, {
         response_text: responseText,
         duration_seconds: 60,
-        score_percent: item.item_type === "signing_lab_assessment" ? 100 : undefined,
+        score_percent: undefined,
         extra_payload: extraPayload
       });
       setMessage("Answer saved. Continue to the next item.");
@@ -496,23 +709,76 @@ export default function StudentModulePlayerPage() {
     const promptMedia = getPromptMedia(item);
     const mcqQuestionSet =
       item.item_type === "multiple_choice_assessment" ? getMcqQuestionSet(item) : [];
+    const identificationQuestionSet =
+      item.item_type === "identification_assessment" ? getIdentificationQuestionSet(item) : [];
+    const signingLabEntrySet =
+      item.item_type === "signing_lab_assessment" ? getSigningLabEntrySet(item) : [];
+    const signingLabRequirement =
+      item.item_type === "signing_lab_assessment"
+        ? getSigningLabRequirement(item, signingLabEntrySet.length)
+        : null;
     const isMultiQuestionMcq =
       item.item_type === "multiple_choice_assessment" && mcqQuestionSet.length > 1;
+    const isMultiQuestionIdentification =
+      item.item_type === "identification_assessment" && identificationQuestionSet.length > 1;
+    const isMultiEntrySigningLab =
+      item.item_type === "signing_lab_assessment" && signingLabEntrySet.length > 1;
     const multiAnswers = mcqAnswersByItem[item.id] ?? {};
+    const identificationAnswers = identificationAnswersByItem[item.id] ?? {};
+    const signingLabAnswers = signingLabAnswersByItem[item.id] ?? {};
+    const rawSigningEntryIndex = signingLabEntryIndexByItem[item.id] ?? 0;
+    const currentSigningEntryIndex =
+      signingLabEntrySet.length > 0
+        ? Math.min(Math.max(rawSigningEntryIndex, 0), signingLabEntrySet.length - 1)
+        : 0;
+    const currentSigningEntry = signingLabEntrySet[currentSigningEntryIndex] ?? null;
+    const answeredSigningEntries = signingLabEntrySet.reduce((total, entry) => {
+      return (signingLabAnswers[entry.question_key] ?? "").trim() ? total + 1 : total;
+    }, 0);
     const hasQuestionPrompt =
       item.item_type === "multiple_choice_assessment" &&
       mcqQuestionSet.some((entry) => Boolean(getMcqQuestionPromptAsset(attachments, entry.question_key)));
+    const hasIdentificationQuestionPrompt =
+      item.item_type === "identification_assessment" &&
+      identificationQuestionSet.some((entry) =>
+        Boolean(getIdentificationQuestionPromptAsset(attachments, entry.question_key))
+      );
     const singleQuestionPrompt =
       item.item_type === "multiple_choice_assessment"
         ? getMcqQuestionPromptAsset(attachments, mcqQuestionSet[0]?.question_key ?? "q1") || promptMedia
         : null;
+    const singleIdentificationPrompt =
+      item.item_type === "identification_assessment"
+        ? getIdentificationQuestionPromptAsset(
+            attachments,
+            identificationQuestionSet[0]?.question_key ?? "q1"
+          ) || promptMedia
+        : null;
 
     return (
       <form className="space-y-4" onSubmit={(event) => void onSubmitItem(event, item)}>
+        <div className="rounded-xl border border-brandBlue/25 bg-brandBlueLight px-4 py-3">
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-brandBlue">
+            Word Label Language
+          </label>
+          <select
+            className="w-full rounded-lg border border-brandBlue/20 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+            onChange={(event) =>
+              setAssessmentWordLanguage(event.target.value as WordDisplayLanguage)
+            }
+            value={assessmentWordLanguage}
+          >
+            <option value="english">English</option>
+            <option value="filipino">Filipino</option>
+          </select>
+          <p className="mb-0 mt-2 text-xs text-slate-700">
+            Gestures are the same. Only the meaning/word labels are translated.
+          </p>
+        </div>
         <p className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm leading-7 text-slate-700">
-          {isMultiQuestionMcq
+          {isMultiQuestionMcq || isMultiQuestionIdentification || isMultiEntrySigningLab
             ? item.instructions || "Answer all questions to complete this assessment."
-            : question}
+            : localizeAssessmentCopy(question, assessmentWordLanguage)}
         </p>
         {item.item_type === "multiple_choice_assessment" && isMultiQuestionMcq ? (
           <div className="space-y-3">
@@ -526,7 +792,7 @@ export default function StudentModulePlayerPage() {
               return (
                 <div className="rounded-xl border border-brandBorder bg-white px-3 py-3" key={entry.question_key}>
                   <p className="mb-2 text-sm font-semibold text-slate-800">
-                    {questionIndex + 1}. {entry.question}
+                    {questionIndex + 1}. {localizeAssessmentCopy(entry.question, assessmentWordLanguage)}
                   </p>
                   {questionPrompt ? (
                     <div className="mb-3 rounded-lg border border-brandBorder bg-brandOffWhite p-2">
@@ -549,13 +815,124 @@ export default function StudentModulePlayerPage() {
                         }
                         type="button"
                       >
-                        {choice}
+                        {localizeAssessmentCopy(choice, assessmentWordLanguage)}
                       </button>
                     ))}
                   </div>
                 </div>
               );
             })}
+          </div>
+        ) : item.item_type === "identification_assessment" && isMultiQuestionIdentification ? (
+          <div className="space-y-3">
+            {promptMedia && !hasIdentificationQuestionPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(promptMedia)}
+              </div>
+            ) : null}
+            {identificationQuestionSet.map((entry, questionIndex) => {
+              const questionPrompt = getIdentificationQuestionPromptAsset(attachments, entry.question_key);
+              return (
+                <div className="rounded-xl border border-brandBorder bg-white px-3 py-3" key={entry.question_key}>
+                  <p className="mb-2 text-sm font-semibold text-slate-800">
+                    {questionIndex + 1}. {localizeAssessmentCopy(entry.question, assessmentWordLanguage)}
+                  </p>
+                  {questionPrompt ? (
+                    <div className="mb-3 rounded-lg border border-brandBorder bg-brandOffWhite p-2">
+                      {renderReadableAsset(questionPrompt)}
+                    </div>
+                  ) : null}
+                  <input
+                    className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) =>
+                      setIdentificationAnswersByItem((current) => ({
+                        ...current,
+                        [item.id]: {
+                          ...(current[item.id] ?? {}),
+                          [entry.question_key]: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="Type your answer here."
+                    value={identificationAnswers[entry.question_key] ?? ""}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : item.item_type === "signing_lab_assessment" && isMultiEntrySigningLab ? (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-brandBorder bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="mb-0 text-sm font-semibold text-slate-800">
+                  Entry {currentSigningEntryIndex + 1} of {signingLabEntrySet.length}
+                </p>
+                <span className="rounded-full bg-brandBlueLight px-2 py-1 text-xs font-semibold text-brandBlue">
+                  Answered {answeredSigningEntries}/{signingLabEntrySet.length}
+                </span>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  disabled={currentSigningEntryIndex <= 0}
+                  onClick={() =>
+                    setSigningLabEntryIndexByItem((current) => ({
+                      ...current,
+                      [item.id]: Math.max((current[item.id] ?? 0) - 1, 0),
+                    }))
+                  }
+                  type="button"
+                >
+                  Previous
+                </button>
+                <button
+                  className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  disabled={currentSigningEntryIndex >= signingLabEntrySet.length - 1}
+                  onClick={() =>
+                    setSigningLabEntryIndexByItem((current) => ({
+                      ...current,
+                      [item.id]: Math.min(
+                        (current[item.id] ?? 0) + 1,
+                        signingLabEntrySet.length - 1
+                      ),
+                    }))
+                  }
+                  type="button"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+            {currentSigningEntry ? (
+                <div className="rounded-xl border border-brandBorder bg-white px-3 py-3">
+                  <p className="mb-2 text-sm font-semibold text-slate-800">
+                    {currentSigningEntry.question
+                      ? localizeAssessmentCopy(currentSigningEntry.question, assessmentWordLanguage)
+                      : "No prompt for this entry yet."}
+                  </p>
+                <input
+                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                  onChange={(event) =>
+                    setSigningLabAnswersByItem((current) => ({
+                      ...current,
+                      [item.id]: {
+                        ...(current[item.id] ?? {}),
+                        [currentSigningEntry.question_key]: event.target.value,
+                      },
+                    }))
+                  }
+                  placeholder="Type the detected sign result here."
+                  value={signingLabAnswers[currentSigningEntry.question_key] ?? ""}
+                />
+              </div>
+            ) : null}
+            {signingLabRequirement ? (
+              <p className="mb-0 rounded-xl border border-brandYellow/35 bg-brandYellowLight px-4 py-3 text-sm text-slate-800">
+                {signingLabRequirement.requireAll
+                  ? `You must answer all ${signingLabEntrySet.length} entries before submitting.`
+                  : `You must answer at least ${signingLabRequirement.requiredCount} of ${signingLabEntrySet.length} entries before submitting.`}
+              </p>
+            ) : null}
           </div>
         ) : item.item_type === "multiple_choice_assessment" && choices.length > 0 ? (
           <div className="space-y-3">
@@ -572,27 +949,51 @@ export default function StudentModulePlayerPage() {
                   onClick={() => setAnswerByItem((current) => ({ ...current, [item.id]: choice }))}
                   type="button"
                 >
-                  {choice}
+                  {localizeAssessmentCopy(choice, assessmentWordLanguage)}
                 </button>
               ))}
             </div>
           </div>
+        ) : item.item_type === "identification_assessment" ? (
+          <div className="space-y-3">
+            {singleIdentificationPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(singleIdentificationPrompt)}
+              </div>
+            ) : null}
+            <input
+              className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+              onChange={(event) => setAnswerByItem((current) => ({ ...current, [item.id]: event.target.value }))}
+              placeholder="Type your answer here."
+              value={answerByItem[item.id] ?? ""}
+            />
+          </div>
+        ) : item.item_type === "signing_lab_assessment" ? (
+          <input
+            className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+            onChange={(event) => setAnswerByItem((current) => ({ ...current, [item.id]: event.target.value }))}
+            placeholder="Type the sign result after checking your camera practice."
+            value={answerByItem[item.id] ?? ""}
+          />
         ) : (
           <input
             className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
             onChange={(event) => setAnswerByItem((current) => ({ ...current, [item.id]: event.target.value }))}
-            placeholder={
-              item.item_type === "signing_lab_assessment"
-                ? "Type the sign result after checking your camera practice."
-                : "Type your answer here."
-            }
+            placeholder="Type your answer here."
             value={answerByItem[item.id] ?? ""}
           />
         )}
         {item.item_type === "signing_lab_assessment" ? (
-          <p className="rounded-xl border border-brandYellow/35 bg-brandYellowLight px-4 py-3 text-sm text-slate-800">
-            Open the free signing lab in another tab if you need help checking your sign, then return here and submit the result.
-          </p>
+          <div className="space-y-2">
+            <p className="rounded-xl border border-brandYellow/35 bg-brandYellowLight px-4 py-3 text-sm text-slate-800">
+              Open the free signing lab in another tab if you need help checking your sign, then return here and submit the result.
+            </p>
+            {String(item.config.lab_mode || "").toLowerCase() === "words" ? (
+              <p className="mb-0 rounded-xl border border-brandBlue/20 bg-brandBlueLight px-4 py-3 text-sm text-slate-800">
+                Words assessment accepts English and Tagalog answers.
+              </p>
+            ) : null}
+          </div>
         ) : null}
         <button className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white" type="submit">
           Submit Answer
@@ -698,7 +1099,7 @@ export default function StudentModulePlayerPage() {
 
             {certificateStatus?.eligible ? (
               <div className="mt-6 rounded-2xl border border-brandGreen/30 bg-brandGreenLight px-4 py-4 text-sm text-slate-800">
-                Certificate requirements are complete. Open the profile or download route to get your certificate.
+                Certificate requirements are complete. Go back to the modules list and download your e-certificate.
               </div>
             ) : null}
 

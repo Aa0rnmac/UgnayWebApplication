@@ -280,6 +280,7 @@ export type StudentCertificateDownloadStatus = {
   template_id?: number | null;
   section_name?: string | null;
   message: string;
+  completion_date?: string | null;
 };
 
 // Backward-compatible alias for older pages still using the previous name.

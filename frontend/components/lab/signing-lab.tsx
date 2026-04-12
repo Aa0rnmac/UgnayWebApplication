@@ -15,6 +15,11 @@ import {
   predictSignFromImage,
   predictWordsFromFrames,
 } from "@/lib/api";
+import {
+  displayWordLabel,
+  displayWordLabels,
+  type WordDisplayLanguage,
+} from "@/lib/word-localization";
 
 type SigningLabVariant = "student" | "teacher";
 
@@ -169,6 +174,7 @@ export function SigningLab({
   const [mode, setMode] = useState<RecognitionMode>("alphabet");
   const [numbersCategory, setNumbersCategory] = useState<NumbersCategory>("0-10");
   const [wordsCategory, setWordsCategory] = useState<WordsCategory>("greeting");
+  const [wordDisplayLanguage, setWordDisplayLanguage] = useState<WordDisplayLanguage>("filipino");
   const [captureStatus, setCaptureStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -181,6 +187,7 @@ export function SigningLab({
   const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
   const [lastTestedAt, setLastTestedAt] = useState<number | null>(null);
   const [guideBoxWarning, setGuideBoxWarning] = useState<string | null>(null);
+  const [latestWordsResult, setLatestWordsResult] = useState<LabPrediction | null>(null);
 
   const isSequenceMode = mode === "numbers" || mode === "words";
   const modeParam = searchParams.get("mode");
@@ -216,6 +223,7 @@ export function SigningLab({
     setBlockedTokenAfterClear(null);
     setLastTestedAt(null);
     setGuideBoxWarning(null);
+    setLatestWordsResult(null);
     lastAcceptedRef.current = { token: null, at: 0 };
     wordsHistoryRef.current = [];
   }, [mode, isSequenceMode]);
@@ -255,6 +263,7 @@ export function SigningLab({
     setBlockedTokenAfterClear(null);
     setLastTestedAt(null);
     setGuideBoxWarning(null);
+    setLatestWordsResult(null);
     lastAcceptedRef.current = { token: null, at: 0 };
   }, [wordsCategory, mode]);
 
@@ -272,8 +281,17 @@ export function SigningLab({
     setBlockedTokenAfterClear(null);
     setLastTestedAt(null);
     setGuideBoxWarning(null);
+    setLatestWordsResult(null);
     lastAcceptedRef.current = { token: null, at: 0 };
   }, [numbersCategory, mode]);
+
+  useEffect(() => {
+    if (mode !== "words" || !latestWordsResult) {
+      return;
+    }
+    setPrediction(displayWordLabel(latestWordsResult.prediction, wordDisplayLanguage));
+    setTopCandidates(displayWordLabels(latestWordsResult.top_candidates, wordDisplayLanguage));
+  }, [latestWordsResult, mode, wordDisplayLanguage]);
 
   useEffect(() => {
     if (isTeacherTester || mode === "alphabet") {
@@ -709,9 +727,15 @@ export function SigningLab({
   }
 
   function markPredictionResult(result: LabPrediction) {
-    setPrediction(result.prediction);
+    if (mode === "words") {
+      setLatestWordsResult(result);
+      setPrediction(displayWordLabel(result.prediction, wordDisplayLanguage));
+      setTopCandidates(displayWordLabels(result.top_candidates, wordDisplayLanguage));
+    } else {
+      setPrediction(result.prediction);
+      setTopCandidates(result.top_candidates);
+    }
     setConfidence(result.confidence);
-    setTopCandidates(result.top_candidates);
     setLastTestedAt(Date.now());
   }
 
@@ -975,11 +999,18 @@ export function SigningLab({
     "Keep your hand inside the guide box, choose the correct range first, and use the manual analyze button when you are ready.";
   const modeLabel = isTeacherTester ? "Recognition Mode" : "What do you want to sign?";
   const actionLabel = "Analyze Sign Now";
-  const outputLabel = "Prediction Output";
+  const outputLabel =
+    mode === "words"
+      ? `Prediction Output (${wordDisplayLanguage === "filipino" ? "Filipino" : "English"})`
+      : "Prediction Output";
   const recognizedLabel = mode === "alphabet" ? "Recognized Text" : "Recognized Gesture";
   const recognizedPlaceholder =
     mode === "alphabet"
       ? "Detected letters will build here..."
+      : mode === "words"
+        ? `Recognized gesture/phrase appears here in ${
+            wordDisplayLanguage === "filipino" ? "Filipino" : "English"
+          }...`
       : "Recognized gesture/phrase appears here...";
   const idleStatus = isTeacherTester
     ? isSequenceMode
@@ -1116,6 +1147,23 @@ export function SigningLab({
                     <option value="relationship">People</option>
                     <option value="color">Color</option>
                   </select>
+                  <label className="form-label lms-label mt-3" htmlFor="words-language">
+                    Word Display Language
+                  </label>
+                  <select
+                    className="form-select"
+                    id="words-language"
+                    onChange={(event) =>
+                      setWordDisplayLanguage(event.target.value as WordDisplayLanguage)
+                    }
+                    value={wordDisplayLanguage}
+                  >
+                    <option value="english">English</option>
+                    <option value="filipino">Filipino</option>
+                  </select>
+                  <p className="mt-2 mb-0 small text-secondary">
+                    Gestures are the same. Only the meaning/word labels are translated.
+                  </p>
                 </div>
               ) : null}
 

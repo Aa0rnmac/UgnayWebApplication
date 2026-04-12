@@ -22,11 +22,38 @@ function resolveActorCompany(event: SystemActivityEvent): string {
   return "-";
 }
 
+function formatActionType(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function toStartOfDayTimestamp(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const date = new Date(`${trimmed}T00:00:00`);
+  const timestamp = date.getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function toEndOfDayTimestamp(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const date = new Date(`${trimmed}T23:59:59.999`);
+  const timestamp = date.getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 export default function AdminReportsPage() {
   const [loginReport, setLoginReport] = useState<LoginActivityReport | null>(null);
   const [activityEvents, setActivityEvents] = useState<SystemActivityEvent[]>([]);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
+  const [actionTypeFilter, setActionTypeFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,13 +76,36 @@ export default function AdminReportsPage() {
     return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
   }, [activityEvents]);
 
+  const actionTypeOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const event of activityEvents) {
+      const actionType = event.action_type?.trim();
+      if (actionType) {
+        set.add(actionType);
+      }
+    }
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+  }, [activityEvents]);
+
+  const dateFromTimestamp = useMemo(() => toStartOfDayTimestamp(dateFrom), [dateFrom]);
+  const dateToTimestamp = useMemo(() => toEndOfDayTimestamp(dateTo), [dateTo]);
+
   const filteredLoginEvents = useMemo(() => {
     const rows = loginReport?.events ?? [];
-    if (roleFilter === "all") {
-      return rows;
-    }
-    return rows.filter((event) => event.role === roleFilter);
-  }, [loginReport, roleFilter]);
+    return rows.filter((event) => {
+      if (roleFilter !== "all" && event.role !== roleFilter) {
+        return false;
+      }
+      const loginTimestamp = new Date(event.logged_in_at).getTime();
+      if (dateFromTimestamp !== null && loginTimestamp < dateFromTimestamp) {
+        return false;
+      }
+      if (dateToTimestamp !== null && loginTimestamp > dateToTimestamp) {
+        return false;
+      }
+      return true;
+    });
+  }, [dateFromTimestamp, dateToTimestamp, loginReport, roleFilter]);
 
   const filteredActivityEvents = useMemo(() => {
     return activityEvents.filter((event) => {
@@ -64,9 +114,22 @@ export default function AdminReportsPage() {
         return false;
       }
       const company = resolveActorCompany(event);
-      return companyFilter === "all" || company === companyFilter;
+      if (companyFilter !== "all" && company !== companyFilter) {
+        return false;
+      }
+      if (actionTypeFilter !== "all" && event.action_type !== actionTypeFilter) {
+        return false;
+      }
+      const eventTimestamp = new Date(event.created_at).getTime();
+      if (dateFromTimestamp !== null && eventTimestamp < dateFromTimestamp) {
+        return false;
+      }
+      if (dateToTimestamp !== null && eventTimestamp > dateToTimestamp) {
+        return false;
+      }
+      return true;
     });
-  }, [activityEvents, companyFilter, roleFilter]);
+  }, [actionTypeFilter, activityEvents, companyFilter, dateFromTimestamp, dateToTimestamp, roleFilter]);
 
   return (
     <section className="space-y-6">
@@ -74,7 +137,7 @@ export default function AdminReportsPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Admin LMS</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">Reports and Login Activity</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Monitor login sessions and system activity with role and company filters.
+          Monitor login sessions and system activity with date, role, company, and action filters.
         </p>
       </div>
 
@@ -108,7 +171,27 @@ export default function AdminReportsPage() {
       </div>
 
       <div className="panel">
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <label className="text-sm font-semibold text-slate-800">
+            Date From
+            <input
+              className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2"
+              max={dateTo || undefined}
+              onChange={(event) => setDateFrom(event.target.value)}
+              type="date"
+              value={dateFrom}
+            />
+          </label>
+          <label className="text-sm font-semibold text-slate-800">
+            Date To
+            <input
+              className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2"
+              min={dateFrom || undefined}
+              onChange={(event) => setDateTo(event.target.value)}
+              type="date"
+              value={dateTo}
+            />
+          </label>
           <label className="text-sm font-semibold text-slate-800">
             Role Filter
             <select
@@ -120,6 +203,21 @@ export default function AdminReportsPage() {
               <option value="teacher">Teacher</option>
               <option value="student">Student</option>
               <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label className="text-sm font-semibold text-slate-800">
+            Action Type
+            <select
+              className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2"
+              onChange={(event) => setActionTypeFilter(event.target.value)}
+              value={actionTypeFilter}
+            >
+              <option value="all">All Actions</option>
+              {actionTypeOptions.map((actionType) => (
+                <option key={actionType} value={actionType}>
+                  {formatActionType(actionType)}
+                </option>
+              ))}
             </select>
           </label>
           <label className="text-sm font-semibold text-slate-800">
@@ -137,6 +235,21 @@ export default function AdminReportsPage() {
               ))}
             </select>
           </label>
+          <div className="flex items-end">
+            <button
+              className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-brandBlueLight"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+                setRoleFilter("all");
+                setActionTypeFilter("all");
+                setCompanyFilter("all");
+              }}
+              type="button"
+            >
+              Reset Filters
+            </button>
+          </div>
         </div>
       </div>
 
@@ -218,7 +331,7 @@ export default function AdminReportsPage() {
                   <td className="px-2 py-3 text-slate-700">{event.actor_last_name ?? "-"}</td>
                   <td className="px-2 py-3 text-slate-700">{resolveActorCompany(event)}</td>
                   <td className="px-2 py-3 font-semibold text-slate-900">
-                    {event.action_type.replaceAll("_", " ")}
+                    {formatActionType(event.action_type)}
                   </td>
                 </tr>
               ))}

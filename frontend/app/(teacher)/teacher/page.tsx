@@ -19,7 +19,7 @@ export default function TeacherDashboardPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Teacher LMS</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">Assigned Sections</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Build modules, monitor students, and upload certificate templates for your sections.
+          Build modules and monitor student progress across your assigned sections.
         </p>
       </div>
 
@@ -66,8 +66,8 @@ export default function TeacherDashboardPage() {
                 <p className="mt-2 font-semibold">{entry.published_module_count}</p>
               </div>
               <div className="rounded-xl bg-brandOffWhite px-3 py-3 text-sm text-slate-800">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Certificate</p>
-                <p className="mt-2 font-semibold capitalize">{entry.pending_certificate_status ?? "none"}</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Section Status</p>
+                <p className="mt-2 font-semibold capitalize">{entry.section.status}</p>
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">

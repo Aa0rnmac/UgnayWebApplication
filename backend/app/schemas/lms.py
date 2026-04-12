@@ -155,6 +155,8 @@ class ModuleItemChoiceConfig(BaseModel):
         "relationship",
         "color",
     ] | None = None
+    require_all: bool | None = None
+    required_count: int | None = Field(default=None, ge=1, le=500)
     resource_url: str | None = None
     resource_file_name: str | None = None
     resource_file_path: str | None = None
@@ -340,6 +342,7 @@ class CertificateStudentDownloadOut(BaseModel):
     template_id: int | None = None
     section_name: str | None = None
     message: str
+    completion_date: str | None = None
 
 
 class LoginActivityEventOut(BaseModel):

@@ -26,6 +26,13 @@ type StudentTableRow = {
   latest_activity_at: string | null;
 };
 
+function formatScore(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  return `${value.toFixed(1)}%`;
+}
+
 function formatDateTime(value: string | null | undefined): string {
   if (!value) {
     return "No activity";
@@ -74,6 +81,145 @@ function formatModuleDuration(status: string, totalSeconds: number): string {
   return status === "completed" ? formatDuration(totalSeconds) : "0s";
 }
 
+function toPdfSafeText(value: string): string {
+  return value.replace(/[^\x20-\x7E]/g, "?");
+}
+
+function escapePdfText(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function pdfByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function wrapPdfLine(value: string, maxChars = 96): string[] {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return [""];
+  }
+
+  const words = normalized.split(" ");
+  const lines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    if (!current) {
+      if (word.length <= maxChars) {
+        current = word;
+      } else {
+        for (let index = 0; index < word.length; index += maxChars) {
+          lines.push(word.slice(index, index + maxChars));
+        }
+      }
+      continue;
+    }
+    const candidate = `${current} ${word}`;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+      continue;
+    }
+    lines.push(current);
+    if (word.length <= maxChars) {
+      current = word;
+    } else {
+      for (let index = 0; index < word.length; index += maxChars) {
+        const chunk = word.slice(index, index + maxChars);
+        if (chunk.length === maxChars || index + maxChars < word.length) {
+          lines.push(chunk);
+        } else {
+          current = chunk;
+        }
+      }
+      if (current === lines[lines.length - 1]) {
+        current = "";
+      }
+    }
+  }
+
+  if (current) {
+    lines.push(current);
+  }
+  return lines.length > 0 ? lines : [normalized];
+}
+
+function buildPdfBlobFromLines(lines: string[]): Blob {
+  const maxLinesPerPage = 48;
+  const pages: string[][] = [];
+  for (let index = 0; index < lines.length; index += maxLinesPerPage) {
+    pages.push(lines.slice(index, index + maxLinesPerPage));
+  }
+  if (pages.length === 0) {
+    pages.push(["No report data available."]);
+  }
+
+  const objects = new Map<number, string>();
+  const pageEntries: Array<{ pageObj: number; contentObj: number }> = [];
+  let nextObject = 3;
+
+  for (const pageLines of pages) {
+    const contentObjectId = nextObject++;
+    const pageObjectId = nextObject++;
+
+    const commands: string[] = ["BT", "/F1 10 Tf", "14 TL", "40 770 Td"];
+    pageLines.forEach((line, lineIndex) => {
+      const safeLine = escapePdfText(toPdfSafeText(line));
+      if (lineIndex === 0) {
+        commands.push(`(${safeLine}) Tj`);
+      } else {
+        commands.push(`T* (${safeLine}) Tj`);
+      }
+    });
+    commands.push("ET");
+
+    const stream = commands.join("\n");
+    objects.set(
+      contentObjectId,
+      `<< /Length ${pdfByteLength(stream)} >>\nstream\n${stream}\nendstream`
+    );
+    pageEntries.push({ pageObj: pageObjectId, contentObj: contentObjectId });
+  }
+
+  const fontObjectId = nextObject++;
+  objects.set(fontObjectId, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+
+  pageEntries.forEach((entry) => {
+    objects.set(
+      entry.pageObj,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${entry.contentObj} 0 R >>`
+    );
+  });
+
+  const kids = pageEntries.map((entry) => `${entry.pageObj} 0 R`).join(" ");
+  objects.set(2, `<< /Type /Pages /Count ${pageEntries.length} /Kids [${kids}] >>`);
+  objects.set(1, "<< /Type /Catalog /Pages 2 0 R >>");
+
+  const maxObject = nextObject - 1;
+  const header = "%PDF-1.4\n%\u00E2\u00E3\u00CF\u00D3\n";
+  const parts: string[] = [header];
+  const offsets: number[] = new Array(maxObject + 1).fill(0);
+  let cursor = pdfByteLength(header);
+
+  for (let objectId = 1; objectId <= maxObject; objectId += 1) {
+    const body = objects.get(objectId) ?? "";
+    const objectText = `${objectId} 0 obj\n${body}\nendobj\n`;
+    offsets[objectId] = cursor;
+    parts.push(objectText);
+    cursor += pdfByteLength(objectText);
+  }
+
+  const xrefOffset = cursor;
+  let xref = `xref\n0 ${maxObject + 1}\n`;
+  xref += "0000000000 65535 f \n";
+  for (let objectId = 1; objectId <= maxObject; objectId += 1) {
+    xref += `${String(offsets[objectId]).padStart(10, "0")} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${maxObject + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  parts.push(xref, trailer);
+
+  return new Blob(parts, { type: "application/pdf" });
+}
+
 function buildAssessmentRows(
   report: TeacherStudentProgressReport
 ): Array<TeacherStudentItemReport & { module_id: number; module_title: string }> {
@@ -93,6 +239,54 @@ function studentDisplayName(
 ): string {
   const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
   return fullName || student.username;
+}
+
+function buildStudentReportLines(
+  report: TeacherStudentProgressReport,
+  student: StudentTableRow
+): string[] {
+  const lines: string[] = [];
+  const pushWrapped = (value: string) => {
+    wrapPdfLine(value).forEach((line) => lines.push(line));
+  };
+
+  const generatedAt = new Date().toLocaleString("en-PH");
+  lines.push("UGNAY LMS - STUDENT PROGRESS REPORT");
+  lines.push(`Generated: ${generatedAt}`);
+  lines.push("");
+  pushWrapped(`Student: ${student.student_name}`);
+  pushWrapped(`Email: ${student.student_email ?? "-"}`);
+  pushWrapped(`Section: ${report.section?.name ?? student.section_name}`);
+  pushWrapped(`Current Finished Module: ${report.current_finished_module ?? "No finished module yet"}`);
+  pushWrapped(`Verdict / Focus: ${report.verdict}`);
+  lines.push("");
+  lines.push("GENERAL MODULE PROGRESS");
+
+  for (const module of report.module_reports) {
+    pushWrapped(`Module: ${module.module_title}`);
+    pushWrapped(
+      `Status: ${displayStatus(module.status)} | Progress: ${module.progress_percent}% | Correct: ${module.correct_count} | Mistakes: ${module.wrong_count} | Attempts: ${module.attempt_count} | Duration: ${formatModuleDuration(module.status, module.total_duration_seconds)}`
+    );
+    lines.push("");
+  }
+
+  lines.push("ASSESSMENT DETAILS");
+  const assessmentRows = buildAssessmentRows(report);
+  if (assessmentRows.length === 0) {
+    lines.push("No assessment details yet.");
+    return lines;
+  }
+
+  for (const item of assessmentRows) {
+    pushWrapped(`Module: ${item.module_title}`);
+    pushWrapped(`Assessment: ${item.order_index}. ${item.item_title}`);
+    pushWrapped(
+      `Type: ${displayType(item.item_type)} | Status: ${displayStatus(item.status)} | Score: ${formatScore(item.score_percent)} | Attempts: ${item.attempt_count} | Duration: ${formatDuration(item.duration_seconds)} | Completed At: ${formatDateTime(item.completed_at)}`
+    );
+    lines.push("");
+  }
+
+  return lines;
 }
 
 export default function TeacherReportsPage() {
@@ -213,6 +407,27 @@ export default function TeacherReportsPage() {
     setSelectedDetailModuleId("all");
     setDetailError(null);
     setIsDetailLoading(false);
+  }
+
+  function downloadStudentReportPdf() {
+    if (!selectedStudent || !detailReport) {
+      return;
+    }
+    const lines = buildStudentReportLines(detailReport, selectedStudent);
+    const blob = buildPdfBlobFromLines(lines);
+    const url = URL.createObjectURL(blob);
+    const safeName =
+      selectedStudent.student_name
+        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .toLowerCase() || `student_${selectedStudent.student_id}`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeName}_full_report.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   return (
@@ -475,6 +690,14 @@ export default function TeacherReportsPage() {
                 ) : null}
               </div>
               <div className="modal-footer">
+                <button
+                  className="btn btn-primary"
+                  disabled={!detailReport || isDetailLoading}
+                  onClick={downloadStudentReportPdf}
+                  type="button"
+                >
+                  Download PDF
+                </button>
                 <button className="btn btn-secondary" onClick={closeDetails} type="button">
                   Close
                 </button>

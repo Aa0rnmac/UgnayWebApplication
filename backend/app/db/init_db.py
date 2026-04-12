@@ -1129,6 +1129,198 @@ def _seed_module_for_order(order_index: int) -> dict | None:
     return None
 
 
+def _normalize_seed_question_key(value: str, fallback: str) -> str:
+    normalized = "".join(char.lower() if char.isalnum() else "-" for char in value.strip())
+    normalized = normalized.strip("-")
+    while "--" in normalized:
+        normalized = normalized.replace("--", "-")
+    return normalized or fallback
+
+
+def _parse_positive_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        parsed = value.strip()
+        if parsed.isdigit():
+            as_int = int(parsed)
+            return as_int if as_int > 0 else None
+    return None
+
+
+def _item_seed_key(item: SectionModuleItem) -> str:
+    if not isinstance(item.config, dict):
+        return ""
+    return str(item.config.get("seed_key") or "").strip()
+
+
+def _seeded_assessment_payload(order_index: int, blueprint: dict) -> dict | None:
+    activity_key = str(blueprint.get("activity_key") or "").strip()
+    if not activity_key:
+        return None
+
+    item_title = str(blueprint.get("title") or "Assessment").strip() or "Assessment"
+    instructions = str(blueprint.get("instructions") or "").strip() or None
+    activity_type = str(blueprint.get("activity_type") or "").strip().lower()
+    definition = blueprint.get("definition") if isinstance(blueprint.get("definition"), dict) else {}
+    seed_key = f"alpha-{activity_key}"
+
+    if activity_type == "multiple_choice":
+        raw_items = definition.get("items") if isinstance(definition.get("items"), list) else []
+        questions: list[dict] = []
+        for index, entry in enumerate(raw_items, start=1):
+            if not isinstance(entry, dict):
+                continue
+            prompt = str(entry.get("prompt") or "").strip()
+            raw_choices = entry.get("choices") if isinstance(entry.get("choices"), list) else []
+            choices = [str(choice).strip() for choice in raw_choices if str(choice).strip()]
+            correct_answer = str(entry.get("expected_answer") or "").strip()
+            if not prompt or len(choices) < 2 or not correct_answer:
+                continue
+            raw_item_key = str(entry.get("item_key") or f"q{index}").strip()
+            question_key = _normalize_seed_question_key(raw_item_key, f"q{index}")
+            questions.append(
+                {
+                    "question_key": question_key,
+                    "question": prompt,
+                    "choices": choices,
+                    "correct_answer": correct_answer,
+                }
+            )
+
+        if not questions:
+            return None
+        first_question = questions[0]
+        return {
+            "seed_key": seed_key,
+            "title": item_title,
+            "item_type": "multiple_choice_assessment",
+            "instructions": instructions or "Answer all questions.",
+            "config": {
+                "seed_key": seed_key,
+                "question": first_question["question"],
+                "choices": first_question["choices"],
+                "correct_answer": first_question["correct_answer"],
+                "questions": questions,
+            },
+        }
+
+    if activity_type == "identification":
+        raw_items = definition.get("items") if isinstance(definition.get("items"), list) else []
+        questions: list[dict] = []
+        for index, entry in enumerate(raw_items, start=1):
+            if not isinstance(entry, dict):
+                continue
+            prompt = str(entry.get("prompt") or "").strip()
+            correct_answer = str(entry.get("expected_answer") or "").strip()
+            if not prompt or not correct_answer:
+                continue
+            raw_item_key = str(entry.get("item_key") or f"q{index}").strip()
+            question_key = _normalize_seed_question_key(raw_item_key, f"q{index}")
+            accepted_answers = [correct_answer]
+            questions.append(
+                {
+                    "question_key": question_key,
+                    "question": prompt,
+                    "correct_answer": correct_answer,
+                    "accepted_answers": accepted_answers,
+                }
+            )
+
+        if not questions:
+            return None
+        first_question = questions[0]
+        return {
+            "seed_key": seed_key,
+            "title": item_title,
+            "item_type": "identification_assessment",
+            "instructions": instructions or "Type the correct answer for each prompt.",
+            "config": {
+                "seed_key": seed_key,
+                "question": first_question["question"],
+                "correct_answer": first_question["correct_answer"],
+                "accepted_answers": first_question["accepted_answers"],
+                "questions": questions,
+            },
+        }
+
+    if activity_type == "practical_camera":
+        raw_targets = definition.get("targets") if isinstance(definition.get("targets"), list) else []
+        targets = [str(target).strip() for target in raw_targets if str(target).strip()]
+        if not targets:
+            return None
+
+        lab_mode = str(definition.get("ai_mode") or "").strip().lower()
+        if lab_mode not in {"alphabet", "numbers", "words"}:
+            lab_mode = "alphabet"
+
+        question_set: list[dict] = []
+        for index, target in enumerate(targets, start=1):
+            question_set.append(
+                {
+                    "question_key": f"q{index}",
+                    "question": f"Sign: {target}",
+                    "correct_answer": target,
+                }
+            )
+
+        requested_required_count = _parse_positive_int(definition.get("min_required"))
+        max_entries = len(question_set)
+        required_count = requested_required_count if requested_required_count is not None else max_entries
+        required_count = max(1, min(required_count, max_entries))
+        require_all = required_count >= max_entries
+
+        numbers_category = None
+        words_category = None
+        if lab_mode == "numbers":
+            candidate = str(definition.get("number_group") or "").strip()
+            if candidate in {
+                "0-10",
+                "11-20",
+                "21-30",
+                "31-40",
+                "41-50",
+                "51-60",
+                "61-70",
+                "71-80",
+                "81-90",
+                "91-100",
+            }:
+                numbers_category = candidate
+        if lab_mode == "words":
+            candidate = str(definition.get("word_group") or "").strip()
+            if candidate in {"greeting", "responses", "date", "family", "relationship", "color"}:
+                words_category = candidate
+
+        helper_text = "Open the camera interface, analyze your sign, and submit the detected result."
+        if lab_mode == "numbers":
+            helper_text = "Choose the range first, then sign each target inside the camera box."
+        elif lab_mode == "words":
+            helper_text = "Choose the words category first, then sign each target inside the camera box."
+
+        first_question = question_set[0]
+        return {
+            "seed_key": seed_key,
+            "title": item_title,
+            "item_type": "signing_lab_assessment",
+            "instructions": instructions or "Complete the camera interface tasks.",
+            "config": {
+                "seed_key": seed_key,
+                "question": first_question["question"],
+                "expected_answer": first_question["correct_answer"],
+                "helper_text": helper_text,
+                "lab_mode": lab_mode,
+                "numbers_category": numbers_category,
+                "words_category": words_category,
+                "questions": question_set,
+                "require_all": require_all,
+                "required_count": required_count,
+            },
+        }
+
+    return None
+
+
 def sync_alpha_section_assessment_one_items(db: Session) -> None:
     alpha_section = (
         db.query(Section)
@@ -1160,6 +1352,7 @@ def sync_alpha_section_assessment_one_items(db: Session) -> None:
         seed_module = _seed_module_for_order(order_index)
         if seed_module is None:
             continue
+        module_slug = str(seed_module.get("slug") or "").strip()
 
         section_module = modules_by_order.get(order_index)
         if section_module is None:
@@ -1176,88 +1369,128 @@ def sync_alpha_section_assessment_one_items(db: Session) -> None:
             modules_by_order[order_index] = section_module
             changed = True
 
-        # Clean up old per-question seeded items so each module has one Assessment 1 item with 5 questions.
-        for legacy_item in list(section_module.items):
-            if legacy_item.item_type != "multiple_choice_assessment" or not isinstance(legacy_item.config, dict):
+        raw_blueprints = MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.get(module_slug) or []
+        target_assessments = []
+        for blueprint in raw_blueprints:
+            if not isinstance(blueprint, dict):
                 continue
-            seed_key = str(legacy_item.config.get("seed_key") or "")
-            if seed_key.startswith(f"alpha-m{order_index}-assessment1-q"):
-                db.delete(legacy_item)
-                changed = True
-
-        question_set = []
-        for question_index, question in enumerate(seed_module.get("assessments", []), start=1):
-            prompt = str(question.get("question") or "").strip()
-            choices = [str(choice).strip() for choice in question.get("choices", []) if str(choice).strip()]
-            correct_answer = str(question.get("answer") or "").strip()
-            if not prompt or len(choices) < 2 or not correct_answer:
-                continue
-            question_set.append(
-                {
-                    "question_key": f"q{question_index}",
-                    "question": prompt,
-                    "choices": choices,
-                    "correct_answer": correct_answer,
-                }
-            )
-        if not question_set:
+            payload = _seeded_assessment_payload(order_index, blueprint)
+            if payload:
+                target_assessments.append(payload)
+        if not target_assessments:
             continue
 
-        module_seed_key = f"alpha-m{order_index}-assessment1"
-        first_question = question_set[0]
-        config = {
-            "seed_key": module_seed_key,
-            "question": first_question["question"],
-            "choices": first_question["choices"],
-            "correct_answer": first_question["correct_answer"],
-            "questions": question_set,
-        }
-        existing_item = next(
-            (
-                item
-                for item in section_module.items
-                if item.item_type == "multiple_choice_assessment"
-                and isinstance(item.config, dict)
-                and item.config.get("seed_key") == module_seed_key
-            ),
-            None,
-        )
-        if existing_item is None:
-            existing_item = next(
-                (
-                    item
-                    for item in section_module.items
-                    if item.item_type == "multiple_choice_assessment"
-                    and str(item.title).strip().lower() == "assessment 1"
-                ),
-                None,
-            )
+        target_seed_keys = {str(payload["seed_key"]) for payload in target_assessments}
+        module_seed_prefix = f"alpha-m{order_index}-"
 
-        if existing_item:
-            existing_item.title = "Assessment 1"
-            existing_item.instructions = "Answer all five questions."
-            existing_item.content_text = None
-            existing_item.config = config
-            existing_item.is_required = True
-            existing_item.is_published = True
-            db.add(existing_item)
-            changed = True
-        else:
-            next_order = max((item.order_index for item in section_module.items), default=0) + 1
-            db.add(
-                SectionModuleItem(
+        # Remove stale seeded assessment rows for this module.
+        for item in list(section_module.items):
+            seed_key = _item_seed_key(item)
+            if seed_key.startswith(module_seed_prefix) and seed_key not in target_seed_keys:
+                db.delete(item)
+                changed = True
+        db.flush()
+
+        current_items = (
+            db.query(SectionModuleItem)
+            .filter(SectionModuleItem.section_module_id == section_module.id)
+            .order_by(SectionModuleItem.order_index.asc(), SectionModuleItem.id.asc())
+            .all()
+        )
+        existing_by_seed_key = {key: item for item in current_items if (key := _item_seed_key(item))}
+
+        for payload in target_assessments:
+            seed_key = str(payload["seed_key"])
+            target_title = str(payload["title"])
+            target_item_type = str(payload["item_type"])
+            target_instructions = payload["instructions"]
+            target_config = payload["config"]
+
+            item = existing_by_seed_key.get(seed_key)
+            if item is None:
+                normalized_title = target_title.strip().lower()
+                item = next(
+                    (
+                        candidate
+                        for candidate in current_items
+                        if candidate.item_type == target_item_type
+                        and candidate.title.strip().lower() == normalized_title
+                        and not _item_seed_key(candidate)
+                    ),
+                    None,
+                )
+
+            if item is None:
+                item = SectionModuleItem(
                     section_module_id=section_module.id,
-                    title="Assessment 1",
-                    item_type="multiple_choice_assessment",
-                    order_index=next_order,
-                    instructions="Answer all five questions.",
+                    title=target_title,
+                    item_type=target_item_type,
+                    order_index=max((row.order_index for row in current_items), default=0) + 1,
+                    instructions=target_instructions,
                     content_text=None,
-                    config=config,
+                    config=target_config,
                     is_required=True,
                     is_published=True,
                 )
-            )
-            changed = True
+                db.add(item)
+                db.flush()
+                current_items.append(item)
+                existing_by_seed_key[seed_key] = item
+                changed = True
+                continue
+
+            item_changed = False
+            if item.title != target_title:
+                item.title = target_title
+                item_changed = True
+            if item.item_type != target_item_type:
+                item.item_type = target_item_type
+                item_changed = True
+            if item.instructions != target_instructions:
+                item.instructions = target_instructions
+                item_changed = True
+            if item.content_text is not None:
+                item.content_text = None
+                item_changed = True
+            if item.config != target_config:
+                item.config = target_config
+                item_changed = True
+            if not item.is_required:
+                item.is_required = True
+                item_changed = True
+            if not item.is_published:
+                item.is_published = True
+                item_changed = True
+            if item_changed:
+                db.add(item)
+                changed = True
+            existing_by_seed_key[seed_key] = item
+
+        # Keep existing readable/custom items first, then place seeded assessments in blueprint order.
+        refreshed_items = (
+            db.query(SectionModuleItem)
+            .filter(SectionModuleItem.section_module_id == section_module.id)
+            .order_by(SectionModuleItem.order_index.asc(), SectionModuleItem.id.asc())
+            .all()
+        )
+        refreshed_seeded_keys = {_item_seed_key(item) for item in refreshed_items if _item_seed_key(item)}
+        non_seeded_items = [
+            item for item in refreshed_items if _item_seed_key(item) not in target_seed_keys
+        ]
+        ordered_items = list(non_seeded_items)
+        for payload in target_assessments:
+            key = str(payload["seed_key"])
+            if key not in refreshed_seeded_keys:
+                continue
+            seeded_item = next((item for item in refreshed_items if _item_seed_key(item) == key), None)
+            if seeded_item:
+                ordered_items.append(seeded_item)
+
+        for new_index, item in enumerate(ordered_items, start=1):
+            if item.order_index != new_index:
+                item.order_index = new_index
+                db.add(item)
+                changed = True
 
     if changed:
         db.commit()

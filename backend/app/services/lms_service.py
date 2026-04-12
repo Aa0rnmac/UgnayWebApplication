@@ -15,6 +15,7 @@ from app.models.session import UserSession
 from app.models.section import Section, SectionStudentAssignment, SectionTeacherAssignment
 from app.models.section_module import SectionModule, SectionModuleItem
 from app.models.user import User
+from app.services.word_localization import canonicalize_word_label
 from app.schemas.lms import (
     SectionMemberOut,
     SectionModuleItemOut,
@@ -266,33 +267,150 @@ def evaluate_item_submission(
                 correct_count = 0
                 for question in question_rows:
                     selected = submitted_answers.get(question["question_key"], "")
-                    if selected.casefold() == question["correct_answer"].casefold():
+                    if canonicalize_word_label(selected) == canonicalize_word_label(
+                        question["correct_answer"]
+                    ):
                         correct_count += 1
                 computed_score = (correct_count / total_questions) * 100 if total_questions else 0.0
                 is_correct = total_questions > 0 and correct_count == total_questions
                 return is_correct, round(computed_score, 2)
 
         expected = str(config.get("correct_answer") or "").strip()
-        is_correct = normalized.casefold() == expected.casefold()
+        is_correct = canonicalize_word_label(normalized) == canonicalize_word_label(expected)
         return is_correct, 100.0 if is_correct else 0.0
 
     if item.item_type == "identification_assessment":
-        accepted = [
-            str(value).strip().casefold()
+        raw_questions = config.get("questions")
+        if isinstance(raw_questions, list) and raw_questions:
+            question_rows: list[dict[str, Any]] = []
+            for index, entry in enumerate(raw_questions, start=1):
+                if not isinstance(entry, dict):
+                    continue
+                question = str(entry.get("question") or "").strip()
+                correct_answer = str(entry.get("correct_answer") or "").strip()
+                question_key = str(entry.get("question_key") or f"q{index}").strip() or f"q{index}"
+                raw_accepted_answers = entry.get("accepted_answers")
+                accepted_answers = {
+                    canonicalize_word_label(str(value))
+                    for value in (raw_accepted_answers if isinstance(raw_accepted_answers, list) else [])
+                    if str(value).strip()
+                }
+                canonical_correct_answer = canonicalize_word_label(correct_answer)
+                if canonical_correct_answer:
+                    accepted_answers.add(canonical_correct_answer)
+                if not question or not accepted_answers:
+                    continue
+                question_rows.append(
+                    {
+                        "question_key": question_key,
+                        "accepted_answers": accepted_answers,
+                    }
+                )
+            if question_rows:
+                submitted_answers: dict[str, str] = {}
+                if isinstance(extra_payload, dict):
+                    raw_answers = extra_payload.get("question_answers")
+                    if isinstance(raw_answers, dict):
+                        submitted_answers = {
+                            str(key).strip(): str(value).strip()
+                            for key, value in raw_answers.items()
+                            if str(key).strip() and str(value).strip()
+                        }
+                if not submitted_answers and len(question_rows) == 1 and normalized:
+                    submitted_answers[question_rows[0]["question_key"]] = normalized
+
+                total_questions = len(question_rows)
+                correct_count = 0
+                for question_row in question_rows:
+                    selected = canonicalize_word_label(
+                        submitted_answers.get(question_row["question_key"], "")
+                    )
+                    if selected and selected in question_row["accepted_answers"]:
+                        correct_count += 1
+                computed_score = (correct_count / total_questions) * 100 if total_questions else 0.0
+                is_correct = total_questions > 0 and correct_count == total_questions
+                return is_correct, round(computed_score, 2)
+
+        accepted = {
+            canonicalize_word_label(str(value))
             for value in (config.get("accepted_answers") or [])
             if str(value).strip()
-        ]
-        expected = str(config.get("correct_answer") or "").strip().casefold()
+        }
+        expected = canonicalize_word_label(str(config.get("correct_answer") or "").strip())
         if expected:
-            accepted.append(expected)
-        is_correct = normalized.casefold() in set(accepted)
+            accepted.add(expected)
+        is_correct = canonicalize_word_label(normalized) in accepted
         return is_correct, 100.0 if is_correct else 0.0
 
     if item.item_type == "signing_lab_assessment":
+        raw_questions = config.get("questions")
+        if isinstance(raw_questions, list) and raw_questions:
+            question_rows: list[dict[str, str]] = []
+            for index, entry in enumerate(raw_questions, start=1):
+                if not isinstance(entry, dict):
+                    continue
+                question = str(entry.get("question") or "").strip()
+                correct_answer = str(entry.get("correct_answer") or "").strip()
+                question_key = str(entry.get("question_key") or f"q{index}").strip() or f"q{index}"
+                if not question or not correct_answer:
+                    continue
+                question_rows.append(
+                    {
+                        "question_key": question_key,
+                        "correct_answer": correct_answer,
+                    }
+                )
+            if question_rows:
+                submitted_answers: dict[str, str] = {}
+                if isinstance(extra_payload, dict):
+                    raw_answers = extra_payload.get("question_answers")
+                    if isinstance(raw_answers, dict):
+                        submitted_answers = {
+                            str(key).strip(): str(value).strip()
+                            for key, value in raw_answers.items()
+                            if str(key).strip() and str(value).strip()
+                        }
+                if not submitted_answers and len(question_rows) == 1 and normalized:
+                    submitted_answers[question_rows[0]["question_key"]] = normalized
+
+                total_questions = len(question_rows)
+                raw_required_count = config.get("required_count")
+                if isinstance(raw_required_count, str):
+                    raw_required_count = int(raw_required_count) if raw_required_count.isdigit() else None
+                required_count = (
+                    int(raw_required_count)
+                    if isinstance(raw_required_count, int) and raw_required_count > 0
+                    else total_questions
+                )
+                required_count = max(1, min(required_count, total_questions))
+                require_all_value = config.get("require_all")
+                require_all = (
+                    require_all_value if isinstance(require_all_value, bool) else str(require_all_value).lower() == "true"
+                )
+                if require_all:
+                    required_count = total_questions
+
+                answered_count = 0
+                correct_count = 0
+                for question in question_rows:
+                    selected = submitted_answers.get(question["question_key"], "").strip()
+                    if not selected:
+                        continue
+                    answered_count += 1
+                    if canonicalize_word_label(selected) == canonicalize_word_label(
+                        question["correct_answer"]
+                    ):
+                        correct_count += 1
+
+                meets_requirement = answered_count >= required_count
+                computed_score = (correct_count / total_questions) * 100 if total_questions else 0.0
+                is_correct = meets_requirement and correct_count >= required_count
+                return is_correct, round(computed_score, 2)
+
         expected = str(config.get("expected_answer") or "").strip()
         if not expected:
             return None, score_percent
-        is_correct = normalized.casefold() == expected.casefold()
+        is_correct = canonicalize_word_label(normalized) == canonicalize_word_label(expected)
         return is_correct, score_percent if score_percent is not None else (100.0 if is_correct else 0.0)
 
     return None, score_percent

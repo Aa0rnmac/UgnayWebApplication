@@ -1,4 +1,7 @@
 import logging
+from datetime import datetime
+from html import escape
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session, joinedload
@@ -6,7 +9,6 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import get_current_student
 from app.core.datetime_utils import utc_now
 from app.db.session import get_db
-from app.models.certificate import CertificateTemplate
 from app.models.lms_progress import SectionModuleItemProgress
 from app.models.section import SectionStudentAssignment
 from app.models.section_module import SectionModule, SectionModuleItem
@@ -21,9 +23,7 @@ from app.schemas.lms import (
 from app.services.lms_service import (
     SELF_PACED_CONTENT_ITEM_TYPES,
     auto_archive_due_students,
-    ensure_issued_certificate,
     evaluate_item_submission,
-    latest_approved_template,
     refresh_student_completion_schedule,
     section_completion_ready,
     serialize_course_for_student,
@@ -34,6 +34,84 @@ from app.services.audit_log_service import log_user_activity
 
 router = APIRouter(prefix="/student", tags=["student-lms"])
 logger = logging.getLogger(__name__)
+
+
+def _parse_required_count(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed.isdigit():
+            parsed = int(trimmed)
+            return parsed if parsed > 0 else None
+    return None
+
+
+def _parse_bool_flag(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return None
+
+
+def _format_certificate_date(value: datetime | None) -> str:
+    resolved = value or utc_now()
+    return f"{resolved.strftime('%B')} {resolved.day}, {resolved.year}"
+
+
+def _enforce_signing_multi_entry_requirement(
+    item: SectionModuleItem, payload: StudentAssessmentSubmissionRequest
+) -> None:
+    if item.item_type != "signing_lab_assessment":
+        return
+    config = dict(item.config or {})
+    raw_questions = config.get("questions")
+    if not isinstance(raw_questions, list) or len(raw_questions) <= 1:
+        return
+
+    question_keys: list[str] = []
+    for index, entry in enumerate(raw_questions, start=1):
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question") or "").strip()
+        expected = str(entry.get("correct_answer") or "").strip()
+        question_key = str(entry.get("question_key") or f"q{index}").strip() or f"q{index}"
+        if not question or not expected:
+            continue
+        question_keys.append(question_key)
+    if len(question_keys) <= 1:
+        return
+
+    answers_payload = payload.extra_payload.get("question_answers") if isinstance(payload.extra_payload, dict) else None
+    submitted_answers: dict[str, str] = {}
+    if isinstance(answers_payload, dict):
+        submitted_answers = {
+            str(key).strip(): str(value).strip()
+            for key, value in answers_payload.items()
+            if str(key).strip() and str(value).strip()
+        }
+
+    total_questions = len(question_keys)
+    require_all = _parse_bool_flag(config.get("require_all"))
+    required_count = _parse_required_count(config.get("required_count"))
+    if require_all is not False:
+        resolved_required_count = total_questions
+    else:
+        resolved_required_count = max(1, min(required_count or total_questions, total_questions))
+
+    answered_count = sum(1 for key in question_keys if submitted_answers.get(key, "").strip())
+    if answered_count < resolved_required_count:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Answer at least {resolved_required_count} camera entries before submitting.",
+        )
 
 
 def _safe_log_user_activity(
@@ -187,6 +265,7 @@ def submit_learning_item(
     current_student: User = Depends(get_current_student),
 ) -> StudentProgressUpdateOut:
     item, module, _ = _find_student_item(db, current_student, item_id)
+    _enforce_signing_multi_entry_requirement(item, payload)
     is_correct, resolved_score = evaluate_item_submission(
         item,
         payload.response_text,
@@ -266,33 +345,23 @@ def get_student_certificate_status(
             message="You are not assigned to a section yet.",
         )
     refresh_student_completion_schedule(db, student_id=current_student.id)
-    template = latest_approved_template(db, assignment.section_id)
-    if template is None:
+    is_ready = section_completion_ready(db, current_student.id, assignment.section_id)
+    completion_date = assignment.course_completed_at
+    if not is_ready:
+        db.commit()
         return CertificateStudentDownloadOut(
             eligible=False,
-            section_name=assignment.section.name,
-            message="Certificate template is not available yet for this section.",
-        )
-    if not section_completion_ready(db, current_student.id, assignment.section_id):
-        return CertificateStudentDownloadOut(
-            eligible=False,
-            template_id=template.id,
             section_name=assignment.section.name,
             message="Finish all published modules first before downloading your certificate.",
+            completion_date=_format_certificate_date(completion_date) if completion_date else None,
         )
-    ensure_issued_certificate(
-        db,
-        template=template,
-        student_id=current_student.id,
-        section_id=assignment.section_id,
-    )
     auto_archive_due_students(db)
     db.commit()
     return CertificateStudentDownloadOut(
         eligible=True,
-        template_id=template.id,
         section_name=assignment.section.name,
         message="Certificate is ready to download.",
+        completion_date=_format_certificate_date(completion_date),
     )
 
 
@@ -311,38 +380,29 @@ def download_student_certificate(
     if not assignment or not assignment.section:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found.")
 
-    template = latest_approved_template(db, assignment.section_id)
-    if template is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Certificate template is not available yet for this section.",
-        )
+    refresh_student_completion_schedule(db, student_id=current_student.id)
     if not section_completion_ready(db, current_student.id, assignment.section_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Finish all published modules first before downloading your certificate.",
         )
-    ensure_issued_certificate(
-        db,
-        template=template,
-        student_id=current_student.id,
-        section_id=assignment.section_id,
-    )
     _safe_log_user_activity(
         db,
         actor=current_student,
         action_type="student_certificate_downloaded",
-        target_type="certificate_template",
-        target_id=template.id,
+        target_type="section",
+        target_id=assignment.section_id,
         details={"section_id": assignment.section_id, "section_name": assignment.section.name},
     )
-    refresh_student_completion_schedule(db, student_id=current_student.id)
     auto_archive_due_students(db)
     db.commit()
 
     display_name = " ".join(
         part for part in [current_student.first_name, current_student.last_name] if part
     ).strip() or current_student.username
+    completion_date = _format_certificate_date(assignment.course_completed_at)
+    safe_display_name = escape(display_name)
+    safe_completion_date = escape(completion_date)
     html = f"""
 <!doctype html>
 <html>
@@ -361,9 +421,12 @@ def download_student_certificate(
     <div class="card">
       <p>UGNAY Learning Hub</p>
       <h1>Certificate of Completion</h1>
-      <p>This certifies that <span class="accent">{display_name}</span> completed the LMS course for <span class="accent">{assignment.section.name}</span>.</p>
-      <p>Approved certificate template: {template.original_file_name}</p>
-      <p class="meta">Generated by the system after completing all published modules.</p>
+      <p>This certificate is awarded to</p>
+      <p class="accent">{safe_display_name}</p>
+      <p>for successfully completing</p>
+      <p class="accent">FSL Basic Coarse</p>
+      <p>offered by Hand and Heart</p>
+      <p class="meta">Date completed: {safe_completion_date}</p>
     </div>
   </body>
 </html>
