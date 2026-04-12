@@ -1,8 +1,8 @@
 import json
 from datetime import datetime
 
-from sqlalchemy import inspect
-from sqlalchemy.orm import Session
+from sqlalchemy import func, inspect
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql import text
 
 from app.core.config import settings
@@ -1122,6 +1122,126 @@ def seed_module_activities(db: Session) -> None:
     db.commit()
 
 
+def _seed_module_for_order(order_index: int) -> dict | None:
+    for item in SEED_MODULES:
+        if item.get("order_index") == order_index:
+            return item
+    return None
+
+
+def sync_alpha_section_assessment_one_items(db: Session) -> None:
+    alpha_section = (
+        db.query(Section)
+        .options(joinedload(Section.modules).joinedload(SectionModule.items))
+        .filter(func.lower(Section.code) == "alpha")
+        .first()
+    )
+    if alpha_section is None:
+        alpha_section = (
+            db.query(Section)
+            .options(joinedload(Section.modules).joinedload(SectionModule.items))
+            .filter(func.lower(Section.name) == "alpha")
+            .first()
+        )
+    if alpha_section is None:
+        return
+
+    teacher = (
+        db.query(User)
+        .filter(User.role == "teacher", User.archived_at.is_(None))
+        .order_by(User.id.asc())
+        .first()
+    )
+    teacher_id = teacher.id if teacher else None
+
+    changed = False
+    modules_by_order = {module.order_index: module for module in alpha_section.modules}
+    for order_index in range(1, 9):
+        seed_module = _seed_module_for_order(order_index)
+        if seed_module is None:
+            continue
+
+        section_module = modules_by_order.get(order_index)
+        if section_module is None:
+            section_module = SectionModule(
+                section_id=alpha_section.id,
+                title=seed_module["title"],
+                description=seed_module["description"],
+                order_index=order_index,
+                is_published=True,
+                created_by_teacher_id=teacher_id,
+            )
+            db.add(section_module)
+            db.flush()
+            modules_by_order[order_index] = section_module
+            changed = True
+
+        max_item_order = max((item.order_index for item in section_module.items), default=0)
+        for question_index, question in enumerate(seed_module.get("assessments", []), start=1):
+            seed_key = f"alpha-m{order_index}-assessment1-q{question_index}"
+            expected_question = str(question.get("question") or "").strip()
+            choices = [str(choice).strip() for choice in question.get("choices", []) if str(choice).strip()]
+            correct_answer = str(question.get("answer") or "").strip()
+            config = {
+                "question": expected_question,
+                "choices": choices,
+                "correct_answer": correct_answer,
+                "accepted_answers": [correct_answer] if correct_answer else [],
+                "seed_key": seed_key,
+            }
+
+            existing_item = next(
+                (
+                    item
+                    for item in section_module.items
+                    if item.item_type == "multiple_choice_assessment"
+                    and isinstance(item.config, dict)
+                    and item.config.get("seed_key") == seed_key
+                ),
+                None,
+            )
+            if existing_item is None:
+                existing_item = next(
+                    (
+                        item
+                        for item in section_module.items
+                        if item.item_type == "multiple_choice_assessment"
+                        and isinstance(item.config, dict)
+                        and str(item.config.get("question") or "").strip() == expected_question
+                    ),
+                    None,
+                )
+
+            if existing_item:
+                existing_item.title = f"Assessment 1 - Q{question_index}"
+                existing_item.instructions = "Choose the correct answer."
+                existing_item.content_text = None
+                existing_item.config = config
+                existing_item.is_required = True
+                existing_item.is_published = True
+                db.add(existing_item)
+                changed = True
+            else:
+                max_item_order += 1
+                db.add(
+                    SectionModuleItem(
+                        section_module_id=section_module.id,
+                        title=f"Assessment 1 - Q{question_index}",
+                        item_type="multiple_choice_assessment",
+                        order_index=max_item_order,
+                        instructions="Choose the correct answer.",
+                        content_text=None,
+                        config=config,
+                        is_required=True,
+                        is_published=True,
+                    )
+                )
+                changed = True
+
+    if changed:
+        db.commit()
+
+
 def seed_demo_user(db: Session) -> None:
     existing_user = db.query(User).filter(User.username == "student_demo").first()
     if existing_user:
@@ -1567,3 +1687,4 @@ def init_db() -> None:
         seed_admin_user(db)
         backfill_enrollments(db)
         backfill_legacy_activity_attempts(db)
+        sync_alpha_section_assessment_one_items(db)

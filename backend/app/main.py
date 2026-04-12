@@ -12,6 +12,11 @@ from app.api.routes import (
     auth,
     health,
     lab,
+    modules,
+    progress,
+    registrations,
+    teacher_enrollment,
+    teacher_reports,
     student_lms,
     teacher_lms,
 )
@@ -79,6 +84,11 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(admin_lms.router, prefix="/api")
 app.include_router(teacher_lms.router, prefix="/api")
 app.include_router(student_lms.router, prefix="/api")
+app.include_router(modules.router, prefix="/api")
+app.include_router(progress.router, prefix="/api")
+app.include_router(registrations.router, prefix="/api")
+app.include_router(teacher_enrollment.router, prefix="/api")
+app.include_router(teacher_reports.router, prefix="/api")
 app.include_router(lab.router, prefix="/api")
 
 uploads_root = (Path(__file__).resolve().parents[1] / "uploads").resolve()

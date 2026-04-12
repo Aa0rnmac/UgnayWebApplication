@@ -625,6 +625,11 @@ export default function TeacherSectionsPage() {
                   </div>
                 </div>
                 {slideAsset ? renderPreviewAsset(slideAsset) : null}
+                {slideAsset ? (
+                  <p className="small fw-semibold mt-2 mb-0 text-center">
+                    {resolveAssetLabel(slideAsset)}
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -1191,7 +1196,7 @@ export default function TeacherSectionsPage() {
                         <div className="card border-brandBorder">
                           <div className="card-body">
                             <div className="d-flex justify-content-between align-items-center mb-2">
-                              <p className="mb-0 fw-semibold">Choices (Google Forms style)</p>
+                              <p className="mb-0 fw-semibold">Choices</p>
                               <button
                                 className="btn btn-outline-primary btn-sm"
                                 onClick={() => setMcqChoices((current) => [...current, ""])}

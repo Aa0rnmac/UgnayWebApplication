@@ -949,6 +949,9 @@ type TeacherAssessmentReportsResponse = {
   reports: TeacherAssessmentReport[];
 };
 
+let runtimeApiBaseOverride: string | null = null;
+let useApiProxyTransport = false;
+
 function formatApiErrorDetail(detail: unknown): string {
   if (typeof detail === "string") {
     return detail;
@@ -982,8 +985,47 @@ function formatApiErrorDetail(detail: unknown): string {
   return "Request failed";
 }
 
+function resolveFallbackApiBase(apiBase: string): string | null {
+  try {
+    const parsed = new URL(apiBase);
+    const hostname = parsed.hostname.toLowerCase();
+    const candidates: string[] = [];
+
+    if (hostname === "localhost") {
+      candidates.push("127.0.0.1");
+    } else if (hostname === "127.0.0.1" || hostname === "::1") {
+      candidates.push("localhost");
+    }
+
+    if (typeof window !== "undefined" && isLocalHostname(hostname)) {
+      const browserHost = window.location.hostname.toLowerCase();
+      if (browserHost && browserHost !== hostname) {
+        candidates.unshift(browserHost);
+      }
+    }
+
+    const nextHost = candidates.find((candidate) => candidate !== hostname);
+    if (!nextHost) {
+      return null;
+    }
+
+    parsed.hostname = nextHost;
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+async function performProxyRequest(path: string, options: RequestInit, headers: Headers) {
+  return fetch(`/api/proxy${path}`, {
+    ...options,
+    headers,
+    cache: "no-store",
+  });
+}
+
 async function performRequest(path: string, options?: RequestInit, token?: string): Promise<Response> {
-  const apiBase = resolveApiBase();
+  const apiBase = runtimeApiBaseOverride ?? resolveApiBase();
   const headers = new Headers(options?.headers);
   if (!(options?.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -994,15 +1036,79 @@ async function performRequest(path: string, options?: RequestInit, token?: strin
     headers.set("Authorization", `Bearer ${authToken}`);
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${apiBase}${path}`, {
-      ...options,
-      headers,
-      cache: "no-store",
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "Unknown network error";
+  const requestOptions: RequestInit = {
+    ...options,
+    headers,
+    cache: "no-store",
+  };
+
+  const canUseProxy = typeof window !== "undefined";
+  let response: Response | null = null;
+  let directError: unknown = null;
+  let fallbackError: unknown = null;
+  let proxyError: unknown = null;
+
+  if (canUseProxy && useApiProxyTransport) {
+    try {
+      response = await performProxyRequest(path, requestOptions, headers);
+    } catch {
+      useApiProxyTransport = false;
+      response = null;
+    }
+  }
+
+  if (!response) {
+    try {
+      response = await fetch(`${apiBase}${path}`, requestOptions);
+      useApiProxyTransport = false;
+    } catch (error) {
+      directError = error;
+      const fallbackBase = resolveFallbackApiBase(apiBase);
+      if (fallbackBase && fallbackBase !== apiBase) {
+        try {
+          response = await fetch(`${fallbackBase}${path}`, requestOptions);
+          runtimeApiBaseOverride = fallbackBase;
+          useApiProxyTransport = false;
+        } catch (secondError) {
+          fallbackError = secondError;
+        }
+      }
+
+      if (!response && canUseProxy) {
+        try {
+          response = await performProxyRequest(path, requestOptions, headers);
+          useApiProxyTransport = true;
+          runtimeApiBaseOverride = null;
+        } catch (lastError) {
+          proxyError = lastError;
+        }
+      }
+
+      if (!response) {
+        const fallbackBase = resolveFallbackApiBase(apiBase);
+        const directReason =
+          directError instanceof Error ? directError.message : "Unknown network error";
+        const fallbackReason =
+          fallbackError instanceof Error ? fallbackError.message : null;
+        const proxyReason = proxyError instanceof Error ? proxyError.message : null;
+        const attemptedBase = fallbackBase && fallbackBase !== apiBase
+          ? `${apiBase} and ${fallbackBase}`
+          : apiBase;
+        const extraReasons = [fallbackReason, proxyReason].filter(Boolean).join(" | ");
+        const combinedReason = extraReasons ? `${directReason} | ${extraReasons}` : directReason;
+        const proxyNote = canUseProxy
+          ? " Direct and proxy access failed."
+          : "";
+
+        throw new Error(
+          `Unable to reach API at ${attemptedBase}. ${combinedReason}.${proxyNote} Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
+        );
+      }
+    }
+  }
+
+  if (!response) {
+    const reason = directError instanceof Error ? directError.message : "Unknown network error";
     throw new Error(
       `Unable to reach API at ${apiBase}. ${reason}. Make sure the backend server is running and NEXT_PUBLIC_API_BASE_URL is correct.`
     );
@@ -1011,18 +1117,27 @@ async function performRequest(path: string, options?: RequestInit, token?: strin
   if (!response.ok) {
     const fallback = "Request failed";
     let detail = fallback;
+    let rawBody = "";
     try {
-      const data = (await response.json()) as { detail?: unknown; message?: unknown };
-      detail =
-        formatApiErrorDetail(data.detail) ||
-        formatApiErrorDetail(data.message) ||
-        fallback;
+      rawBody = await response.text();
     } catch {
-      try {
-        detail = (await response.text()) || fallback;
-      } catch {}
+      rawBody = "";
     }
-    throw new Error(detail);
+
+    if (rawBody) {
+      try {
+        const data = JSON.parse(rawBody) as { detail?: unknown; message?: unknown };
+        detail =
+          formatApiErrorDetail(data.detail) ||
+          formatApiErrorDetail(data.message) ||
+          rawBody.trim() ||
+          fallback;
+      } catch {
+        detail = rawBody.trim() || fallback;
+      }
+    }
+
+    throw new Error(detail || fallback);
   }
 
   return response;

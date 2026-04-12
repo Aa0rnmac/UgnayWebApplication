@@ -651,7 +651,10 @@ def get_teacher_student_report(
         correct_count = sum(1 for entry in assessment_reports if entry.is_correct is True)
         wrong_count = sum(1 for entry in assessment_reports if entry.is_correct is False)
         total_attempts = sum(entry.attempt_count for entry in assessment_reports)
-        total_duration = sum(entry.duration_seconds for entry in assessment_reports)
+        total_module_duration = sum(entry.duration_seconds for entry in item_reports)
+        module_duration_for_summary = (
+            total_module_duration if progress.status == "completed" else 0
+        )
         module_reports.append(
             TeacherStudentModuleReportOut(
                 module_id=module.id,
@@ -661,7 +664,7 @@ def get_teacher_student_report(
                 correct_count=correct_count,
                 wrong_count=wrong_count,
                 attempt_count=total_attempts,
-                total_duration_seconds=total_duration,
+                total_duration_seconds=module_duration_for_summary,
                 item_reports=item_reports,
             )
         )
