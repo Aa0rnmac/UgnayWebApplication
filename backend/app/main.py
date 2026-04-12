@@ -12,12 +12,6 @@ from app.api.routes import (
     auth,
     health,
     lab,
-    modules,
-    progress,
-    registrations,
-    teacher_enrollment,
-    teacher_modules,
-    teacher_reports,
     student_lms,
     teacher_lms,
 )

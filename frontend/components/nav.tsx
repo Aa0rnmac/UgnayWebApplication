@@ -57,9 +57,9 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
             width={32}
           />
           <div className="leading-tight">
-            <p className="text-sm font-semibold text-slate-900">UGNAY Learning hub</p>
-            <p className="text-[10px] text-slate-900">basic FSL course</p>
-            <p className="text-[10px] text-slate-900">hand and heart</p>
+            <p className="text-[15px] font-black uppercase tracking-[0.18em] text-brandBlue">UGNAY LEARNING HUB</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-900">BASIC FSL COURSE</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-900">HAND AND HEART</p>
           </div>
         </div>
       </div>
@@ -89,11 +89,11 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
             />
             {!collapsed ? (
               <div className="min-w-0 md:block">
-                <h1 className="truncate text-sm font-semibold tracking-wide text-slate-900">
-                  UGNAY Learning hub
+                <h1 className="text-base leading-tight font-black uppercase tracking-[0.12em] text-brandBlue whitespace-normal break-words">
+                  UGNAY LEARNING HUB
                 </h1>
-                <p className="text-[11px] text-slate-900">basic FSL course</p>
-                <p className="text-[11px] text-slate-900">hand and heart</p>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-900">BASIC FSL COURSE</p>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-900">HAND AND HEART</p>
               </div>
             ) : null}
 
