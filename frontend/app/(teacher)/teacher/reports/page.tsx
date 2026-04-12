@@ -70,12 +70,19 @@ function displayType(value: string): string {
   return value.replaceAll("_", " ").replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function buildAssessmentRows(report: TeacherStudentProgressReport): Array<TeacherStudentItemReport & { module_title: string }> {
+function formatModuleDuration(status: string, totalSeconds: number): string {
+  return status === "completed" ? formatDuration(totalSeconds) : "0s";
+}
+
+function buildAssessmentRows(
+  report: TeacherStudentProgressReport
+): Array<TeacherStudentItemReport & { module_id: number; module_title: string }> {
   return report.module_reports.flatMap((module) =>
     (module.item_reports ?? [])
       .filter((item) => item.item_type.endsWith("_assessment"))
       .map((item) => ({
         ...item,
+        module_id: module.module_id,
         module_title: module.module_title
       }))
   );
@@ -99,6 +106,7 @@ export default function TeacherReportsPage() {
 
   const [selectedStudent, setSelectedStudent] = useState<StudentTableRow | null>(null);
   const [detailReport, setDetailReport] = useState<TeacherStudentProgressReport | null>(null);
+  const [selectedDetailModuleId, setSelectedDetailModuleId] = useState<number | "all">("all");
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
@@ -176,12 +184,17 @@ export default function TeacherReportsPage() {
     if (!detailReport) {
       return [];
     }
-    return buildAssessmentRows(detailReport);
-  }, [detailReport]);
+    const allRows = buildAssessmentRows(detailReport);
+    if (selectedDetailModuleId === "all") {
+      return allRows;
+    }
+    return allRows.filter((entry) => entry.module_id === selectedDetailModuleId);
+  }, [detailReport, selectedDetailModuleId]);
 
   async function onViewDetails(row: StudentTableRow) {
     setSelectedStudent(row);
     setDetailReport(null);
+    setSelectedDetailModuleId("all");
     setDetailError(null);
     setIsDetailLoading(true);
     try {
@@ -197,6 +210,7 @@ export default function TeacherReportsPage() {
   function closeDetails() {
     setSelectedStudent(null);
     setDetailReport(null);
+    setSelectedDetailModuleId("all");
     setDetailError(null);
     setIsDetailLoading(false);
   }
@@ -367,6 +381,7 @@ export default function TeacherReportsPage() {
                               <th>Mistakes</th>
                               <th>Attempts</th>
                               <th>Duration</th>
+                              <th>Action</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -378,7 +393,16 @@ export default function TeacherReportsPage() {
                                 <td>{module.correct_count}</td>
                                 <td>{module.wrong_count}</td>
                                 <td>{module.attempt_count}</td>
-                                <td>{formatDuration(module.total_duration_seconds)}</td>
+                                <td>{formatModuleDuration(module.status, module.total_duration_seconds)}</td>
+                                <td>
+                                  <button
+                                    className={`btn btn-sm ${selectedDetailModuleId === module.module_id ? "btn-primary" : "btn-outline-primary"}`}
+                                    onClick={() => setSelectedDetailModuleId(module.module_id)}
+                                    type="button"
+                                  >
+                                    View in Detailed
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -387,7 +411,25 @@ export default function TeacherReportsPage() {
                     </div>
 
                     <div>
-                      <h6 className="fw-bold mb-2">Assessment Details</h6>
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                        <h6 className="fw-bold mb-0">Assessment Details</h6>
+                        <div className="d-flex align-items-center gap-2">
+                          <span className="badge text-bg-light border">
+                            {selectedDetailModuleId === "all"
+                              ? "Showing all modules"
+                              : `Filtered by module ${selectedDetailModuleId}`}
+                          </span>
+                          {selectedDetailModuleId !== "all" ? (
+                            <button
+                              className="btn btn-sm btn-outline-secondary"
+                              onClick={() => setSelectedDetailModuleId("all")}
+                              type="button"
+                            >
+                              Show All
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
                       <div className="table-responsive">
                         <table className="table table-sm align-middle mb-0">
                           <thead>
@@ -398,7 +440,7 @@ export default function TeacherReportsPage() {
                               <th>Status</th>
                               <th>Score</th>
                               <th>Attempts</th>
-                              <th>Duration</th>
+                              <th>Assessment Duration</th>
                               <th>Completed At</th>
                             </tr>
                           </thead>

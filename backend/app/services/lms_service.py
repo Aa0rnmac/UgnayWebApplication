@@ -224,6 +224,7 @@ def evaluate_item_submission(
     item: SectionModuleItem,
     response_text: str,
     score_percent: float | None = None,
+    extra_payload: dict[str, Any] | None = None,
 ) -> tuple[bool | None, float | None]:
     config = dict(item.config or {})
     normalized = response_text.strip()
@@ -231,6 +232,46 @@ def evaluate_item_submission(
         return True, 100.0
 
     if item.item_type == "multiple_choice_assessment":
+        raw_questions = config.get("questions")
+        if isinstance(raw_questions, list) and raw_questions:
+            question_rows: list[dict[str, str]] = []
+            for index, entry in enumerate(raw_questions, start=1):
+                if not isinstance(entry, dict):
+                    continue
+                question = str(entry.get("question") or "").strip()
+                correct_answer = str(entry.get("correct_answer") or "").strip()
+                question_key = str(entry.get("question_key") or f"q{index}").strip() or f"q{index}"
+                if not question or not correct_answer:
+                    continue
+                question_rows.append(
+                    {
+                        "question_key": question_key,
+                        "correct_answer": correct_answer,
+                    }
+                )
+            if question_rows:
+                submitted_answers: dict[str, str] = {}
+                if isinstance(extra_payload, dict):
+                    raw_answers = extra_payload.get("question_answers")
+                    if isinstance(raw_answers, dict):
+                        submitted_answers = {
+                            str(key).strip(): str(value).strip()
+                            for key, value in raw_answers.items()
+                            if str(key).strip() and str(value).strip()
+                        }
+                if not submitted_answers and len(question_rows) == 1 and normalized:
+                    submitted_answers[question_rows[0]["question_key"]] = normalized
+
+                total_questions = len(question_rows)
+                correct_count = 0
+                for question in question_rows:
+                    selected = submitted_answers.get(question["question_key"], "")
+                    if selected.casefold() == question["correct_answer"].casefold():
+                        correct_count += 1
+                computed_score = (correct_count / total_questions) * 100 if total_questions else 0.0
+                is_correct = total_questions > 0 and correct_count == total_questions
+                return is_correct, round(computed_score, 2)
+
         expected = str(config.get("correct_answer") or "").strip()
         is_correct = normalized.casefold() == expected.casefold()
         return is_correct, 100.0 if is_correct else 0.0

@@ -1,7 +1,10 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_student
+from app.core.datetime_utils import utc_now
 from app.db.session import get_db
 from app.models.certificate import CertificateTemplate
 from app.models.lms_progress import SectionModuleItemProgress
@@ -30,6 +33,31 @@ from app.services.audit_log_service import log_user_activity
 
 
 router = APIRouter(prefix="/student", tags=["student-lms"])
+logger = logging.getLogger(__name__)
+
+
+def _safe_log_user_activity(
+    db: Session,
+    *,
+    actor: User,
+    action_type: str,
+    target_type: str,
+    target_id: int | None = None,
+    details: dict | None = None,
+) -> None:
+    try:
+        with db.begin_nested():
+            log_user_activity(
+                db,
+                actor=actor,
+                action_type=action_type,
+                target_type=target_type,
+                target_id=target_id,
+                details=details,
+            )
+            db.flush()
+    except Exception:
+        logger.exception("Unable to persist activity log for action %s", action_type)
 
 
 def _find_student_item(
@@ -85,58 +113,70 @@ def complete_readable_item(
     db: Session = Depends(get_db),
     current_student: User = Depends(get_current_student),
 ) -> StudentProgressUpdateOut:
-    item, module, _ = _find_student_item(db, current_student, item_id)
-    if item.item_type not in SELF_PACED_CONTENT_ITEM_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Only content items can be marked as completed.",
-        )
+    try:
+        item, module, _ = _find_student_item(db, current_student, item_id)
+        if item.item_type not in SELF_PACED_CONTENT_ITEM_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Only content items can be marked as completed.",
+            )
 
-    progress = (
-        db.query(SectionModuleItemProgress)
-        .filter(
-            SectionModuleItemProgress.student_id == current_student.id,
-            SectionModuleItemProgress.section_module_item_id == item.id,
+        progress = (
+            db.query(SectionModuleItemProgress)
+            .filter(
+                SectionModuleItemProgress.student_id == current_student.id,
+                SectionModuleItemProgress.section_module_item_id == item.id,
+            )
+            .first()
         )
-        .first()
-    )
-    if progress is None:
-        progress = SectionModuleItemProgress(
-            student_id=current_student.id,
-            section_module_id=module.id,
-            section_module_item_id=item.id,
+        if progress is None:
+            progress = SectionModuleItemProgress(
+                student_id=current_student.id,
+                section_module_id=module.id,
+                section_module_item_id=item.id,
+                submitted_payload={},
+            )
+        progress.status = "completed"
+        progress.is_correct = True
+        progress.score_percent = 100
+        progress.attempt_count = max(progress.attempt_count or 0, 1)
+        progress.duration_seconds = max(progress.duration_seconds or 0, payload.duration_seconds)
+        progress.completed_at = utc_now()
+        db.add(progress)
+        _safe_log_user_activity(
+            db,
+            actor=current_student,
+            action_type="student_item_completed",
+            target_type="section_module_item",
+            target_id=item.id,
+            details={
+                "module_id": module.id,
+                "item_type": item.item_type,
+                "duration_seconds": payload.duration_seconds,
+            },
         )
-    progress.status = "completed"
-    progress.is_correct = True
-    progress.score_percent = 100
-    progress.attempt_count = max(progress.attempt_count, 1)
-    progress.duration_seconds = max(progress.duration_seconds, payload.duration_seconds)
-    db.add(progress)
-    log_user_activity(
-        db,
-        actor=current_student,
-        action_type="student_item_completed",
-        target_type="section_module_item",
-        target_id=item.id,
-        details={
-            "module_id": module.id,
-            "item_type": item.item_type,
-            "duration_seconds": payload.duration_seconds,
-        },
-    )
-    module_progress = sync_module_progress(db, student_id=current_student.id, module=module)
-    refresh_student_completion_schedule(db, student_id=current_student.id)
-    auto_archive_due_students(db)
-    db.commit()
-    return StudentProgressUpdateOut(
-        module_id=module.id,
-        item_id=item.id,
-        module_status=module_progress.status,
-        module_progress_percent=module_progress.progress_percent,
-        item_status=progress.status,
-        is_correct=progress.is_correct,
-        score_percent=progress.score_percent,
-    )
+        module_progress = sync_module_progress(db, student_id=current_student.id, module=module)
+        refresh_student_completion_schedule(db, student_id=current_student.id)
+        auto_archive_due_students(db)
+        db.commit()
+        return StudentProgressUpdateOut(
+            module_id=module.id,
+            item_id=item.id,
+            module_status=module_progress.status,
+            module_progress_percent=module_progress.progress_percent,
+            item_status=progress.status,
+            is_correct=progress.is_correct,
+            score_percent=progress.score_percent,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("complete_readable_item failed for item_id=%s student_id=%s", item_id, current_student.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to complete this item right now.",
+        ) from exc
 
 
 @router.post("/module-items/{item_id}/submit", response_model=StudentProgressUpdateOut)
@@ -147,7 +187,12 @@ def submit_learning_item(
     current_student: User = Depends(get_current_student),
 ) -> StudentProgressUpdateOut:
     item, module, _ = _find_student_item(db, current_student, item_id)
-    is_correct, resolved_score = evaluate_item_submission(item, payload.response_text, payload.score_percent)
+    is_correct, resolved_score = evaluate_item_submission(
+        item,
+        payload.response_text,
+        payload.score_percent,
+        payload.extra_payload,
+    )
     progress = (
         db.query(SectionModuleItemProgress)
         .filter(
@@ -161,6 +206,7 @@ def submit_learning_item(
             student_id=current_student.id,
             section_module_id=module.id,
             section_module_item_id=item.id,
+            submitted_payload={},
         )
 
     progress.status = "completed"
@@ -170,8 +216,9 @@ def submit_learning_item(
     progress.attempt_count += 1
     progress.duration_seconds += payload.duration_seconds
     progress.submitted_payload = dict(payload.extra_payload or {})
+    progress.completed_at = utc_now()
     db.add(progress)
-    log_user_activity(
+    _safe_log_user_activity(
         db,
         actor=current_student,
         action_type="student_item_submitted",
@@ -281,7 +328,7 @@ def download_student_certificate(
         student_id=current_student.id,
         section_id=assignment.section_id,
     )
-    log_user_activity(
+    _safe_log_user_activity(
         db,
         actor=current_student,
         action_type="student_certificate_downloaded",

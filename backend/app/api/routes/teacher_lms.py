@@ -429,10 +429,16 @@ def upload_teacher_module_item_asset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module item not found.")
     _require_teacher_section(db, current_teacher, item.module.section_id)
 
-    if item.item_type not in {"readable", "identification_assessment"}:
+    allowed_item_types = {"readable", "identification_assessment", "multiple_choice_assessment"}
+    if item.item_type not in allowed_item_types:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Assets can only be uploaded for readable and identification items.",
+            detail="Assets can only be uploaded for readable, identification, and multiple-choice items.",
+        )
+    if usage == "prompt" and item.item_type not in {"identification_assessment", "multiple_choice_assessment"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Prompt media is only available for identification and multiple-choice items.",
         )
 
     uploaded_asset = _save_module_asset(item.module.id, resource_file)
@@ -651,7 +657,10 @@ def get_teacher_student_report(
         correct_count = sum(1 for entry in assessment_reports if entry.is_correct is True)
         wrong_count = sum(1 for entry in assessment_reports if entry.is_correct is False)
         total_attempts = sum(entry.attempt_count for entry in assessment_reports)
-        total_duration = sum(entry.duration_seconds for entry in assessment_reports)
+        total_module_duration = sum(entry.duration_seconds for entry in item_reports)
+        module_duration_for_summary = (
+            total_module_duration if progress.status == "completed" else 0
+        )
         module_reports.append(
             TeacherStudentModuleReportOut(
                 module_id=module.id,
@@ -661,7 +670,7 @@ def get_teacher_student_report(
                 correct_count=correct_count,
                 wrong_count=wrong_count,
                 attempt_count=total_attempts,
-                total_duration_seconds=total_duration,
+                total_duration_seconds=module_duration_for_summary,
                 item_reports=item_reports,
             )
         )

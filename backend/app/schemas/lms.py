@@ -160,6 +160,7 @@ class ModuleItemChoiceConfig(BaseModel):
     resource_file_path: str | None = None
     resource_mime_type: str | None = None
     resource_kind: Literal["video", "image", "document", "interactive", "external_link"] | None = None
+    questions: list[dict[str, Any]] = Field(default_factory=list)
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     prompt_media: dict[str, Any] | None = None
 
