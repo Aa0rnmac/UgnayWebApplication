@@ -1,7 +1,6 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 
 import {
   ApiUser,
@@ -18,6 +17,7 @@ import {
   isValidPhilippinePhone,
   normalizePhilippinePhone
 } from "@/lib/validation";
+import { useAuth } from "@/components/auth-context";
 
 type ProfileForm = {
   firstName: string;
@@ -40,7 +40,7 @@ const EMPTY_PROFILE: ProfileForm = {
 };
 
 export default function ProfilePage() {
-  const searchParams = useSearchParams();
+  const { clearMustChangePassword } = useAuth();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [form, setForm] = useState<ProfileForm>(EMPTY_PROFILE);
   const [loading, setLoading] = useState(false);
@@ -101,10 +101,10 @@ export default function ProfilePage() {
     if (!user) {
       return;
     }
-    if (user.must_change_password || searchParams.get("forcePasswordChange") === "1") {
+    if (user.must_change_password) {
       setShowPasswordDialog(true);
     }
-  }, [searchParams, user]);
+  }, [user]);
 
   function updateField<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -196,6 +196,7 @@ export default function ProfilePage() {
       setShowNewPassword(false);
       setPasswordMessage(response.message);
       setUser((prev) => (prev ? { ...prev, must_change_password: false } : prev));
+      clearMustChangePassword();
       setShowPasswordDialog(false);
     } catch (passwordError) {
       const message =

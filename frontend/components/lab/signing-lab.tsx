@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useSearchParams } from "next/navigation";
 
 import {
   getAlphabetModelStatus,
@@ -45,6 +46,66 @@ const RECOGNIZED_INPUT_NAV_KEYS = new Set([
   "Escape",
 ]);
 
+const NUMBER_CATEGORY_VALUES: NumbersCategory[] = [
+  "0-10",
+  "11-20",
+  "21-30",
+  "31-40",
+  "41-50",
+  "51-60",
+  "61-70",
+  "71-80",
+  "81-90",
+  "91-100",
+];
+
+const WORD_CATEGORY_VALUES: WordsCategory[] = [
+  "greeting",
+  "responses",
+  "date",
+  "family",
+  "relationship",
+  "color",
+];
+
+function parseRecognitionMode(value: string | null): RecognitionMode | null {
+  return value === "alphabet" || value === "numbers" || value === "words" ? value : null;
+}
+
+function parseNumbersCategoryParam(value: string | null): NumbersCategory | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1-10") {
+    return "0-10";
+  }
+  return NUMBER_CATEGORY_VALUES.includes(normalized as NumbersCategory)
+    ? (normalized as NumbersCategory)
+    : null;
+}
+
+function parseWordsCategoryParam(value: string | null): WordsCategory | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  const aliases: Record<string, WordsCategory> = {
+    greetings: "greeting",
+    response: "responses",
+    responses: "responses",
+    days: "date",
+    dates: "date",
+    relationships: "relationship",
+    people: "relationship",
+    colors: "color",
+  };
+  const candidate = aliases[normalized] ?? normalized;
+  return WORD_CATEGORY_VALUES.includes(candidate as WordsCategory)
+    ? (candidate as WordsCategory)
+    : null;
+}
+
 function formatResultTime(value: number | null) {
   if (!value) {
     return "No test run yet.";
@@ -79,6 +140,7 @@ function appendAlphabetText(previous: string, token: string) {
 export function SigningLab({ variant = "student" }: SigningLabProps) {
   const REPEAT_TOKEN_COOLDOWN_MS = 1400;
   const isTeacherTester = variant === "teacher";
+  const searchParams = useSearchParams();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -113,6 +175,9 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
   const [guideBoxWarning, setGuideBoxWarning] = useState<string | null>(null);
 
   const isSequenceMode = mode === "numbers" || mode === "words";
+  const modeParam = searchParams.get("mode");
+  const numbersParam = searchParams.get("numbers");
+  const wordsParam = searchParams.get("words");
 
   useEffect(() => {
     predictionRef.current = prediction;
@@ -146,6 +211,26 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
     lastAcceptedRef.current = { token: null, at: 0 };
     wordsHistoryRef.current = [];
   }, [mode, isSequenceMode]);
+
+  useEffect(() => {
+    const presetMode = parseRecognitionMode(modeParam);
+    if (!presetMode) {
+      return;
+    }
+    setMode(presetMode);
+    if (presetMode === "numbers") {
+      const presetNumbersCategory = parseNumbersCategoryParam(numbersParam);
+      if (presetNumbersCategory) {
+        setNumbersCategory(presetNumbersCategory);
+      }
+    }
+    if (presetMode === "words") {
+      const presetWordsCategory = parseWordsCategoryParam(wordsParam);
+      if (presetWordsCategory) {
+        setWordsCategory(presetWordsCategory);
+      }
+    }
+  }, [modeParam, numbersParam, wordsParam]);
 
   useEffect(() => {
     if (mode !== "words") {
@@ -451,13 +536,13 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
 
         if (isStaticRange && !status.ready) {
           const message =
-            "Numbers 0-10 recognition is unavailable because the trained model artifact is missing. Run scripts/train_numbers_model.py to create backend/artifacts/numbers_model.joblib.";
+            "Numbers 1-10 recognition is unavailable because the trained model artifact is missing. Run scripts/train_numbers_model.py to create backend/artifacts/numbers_model.joblib.";
           modeCheckRef.current = { key: currentKey, ready: false, message };
           setModeReady(false);
           setModeStatusMessage(message);
           setError(message);
           if (options?.fromCamera) {
-            setCaptureStatus("Camera ready, but numbers 0-10 recognition is unavailable.");
+            setCaptureStatus("Camera ready, but numbers 1-10 recognition is unavailable.");
           }
           return false;
         }
@@ -478,8 +563,8 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
 
         const message = isStaticRange
           ? status.ten_motion_ready
-            ? "Numbers 0-10 models loaded and ready."
-            : "Numbers 0-10 static model loaded. Ten-motion assist is unavailable, but static recognition is ready."
+            ? "Numbers 1-10 models loaded and ready."
+            : "Numbers 1-10 static model loaded. Ten-motion assist is unavailable, but static recognition is ready."
           : `Numbers ${numbersCategory} motion model loaded and ready.`;
         modeCheckRef.current = { key: currentKey, ready: true, message };
         setModeReady(true);
@@ -487,7 +572,7 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
         if (options?.fromCamera) {
           setCaptureStatus(
             isStaticRange
-              ? "Camera ready. Numbers 0-10 model warmed."
+              ? "Camera ready. Numbers 1-10 model warmed."
               : `Camera ready. Numbers ${numbersCategory} model warmed.`
           );
         }
@@ -988,7 +1073,7 @@ export function SigningLab({ variant = "student" }: SigningLabProps) {
                     onChange={(event) => setNumbersCategory(event.target.value as NumbersCategory)}
                     value={numbersCategory}
                   >
-                    <option value="0-10">0-10</option>
+                    <option value="0-10">1-10</option>
                     <option value="11-20">11-20</option>
                     <option value="21-30">21-30</option>
                     <option value="31-40">31-40</option>

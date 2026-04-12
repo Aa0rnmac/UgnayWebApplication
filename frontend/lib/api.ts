@@ -150,6 +150,17 @@ export type LmsModuleItemType =
   | "identification_assessment"
   | "signing_lab_assessment";
 
+export type ModuleAssetKind = "video" | "image" | "document" | "interactive";
+
+export type ModuleAsset = {
+  resource_kind: ModuleAssetKind;
+  resource_file_name: string;
+  resource_file_path: string;
+  resource_mime_type?: string | null;
+  resource_url?: string | null;
+  label?: string | null;
+};
+
 export type LmsModuleItem = {
   id: number;
   title: string;
@@ -230,6 +241,20 @@ export type TeacherStudentModuleReport = {
   wrong_count: number;
   attempt_count: number;
   total_duration_seconds: number;
+  item_reports?: TeacherStudentItemReport[];
+};
+
+export type TeacherStudentItemReport = {
+  item_id: number;
+  item_title: string;
+  item_type: LmsModuleItemType;
+  order_index: number;
+  status: string;
+  is_correct?: boolean | null;
+  score_percent?: number | null;
+  attempt_count: number;
+  duration_seconds: number;
+  completed_at?: string | null;
 };
 
 export type TeacherStudentProgressReport = {
@@ -1334,6 +1359,31 @@ export function uploadTeacherModuleItemResource(
 
   return request<TeacherSectionModule>(
     `/teacher/modules/${moduleId}/items/upload`,
+    {
+      method: "POST",
+      body: data,
+    },
+    token
+  );
+}
+
+export function uploadTeacherModuleItemAsset(
+  itemId: number,
+  payload: {
+    file: File;
+    usage?: "attachment" | "prompt";
+    label?: string;
+  },
+  token?: string
+): Promise<TeacherSectionModule> {
+  const data = new FormData();
+  data.append("resource_file", payload.file);
+  data.append("usage", payload.usage ?? "attachment");
+  if (payload.label && payload.label.trim()) {
+    data.append("label", payload.label.trim());
+  }
+  return request<TeacherSectionModule>(
+    `/teacher/module-items/${itemId}/assets/upload`,
     {
       method: "POST",
       body: data,

@@ -32,6 +32,7 @@ type SessionState = AuthUser & {
 type AuthState = SessionState & {
   login: (username: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
+  clearMustChangePassword: () => void;
 };
 
 type LoginResponse = {
@@ -70,6 +71,7 @@ const AuthContext = createContext<AuthState>({
   loading: true,
   login: async () => GUEST_USER,
   logout: async () => {},
+  clearMustChangePassword: () => {},
 });
 
 const GUEST_USER: AuthUser = {
@@ -190,8 +192,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  function clearMustChangePassword() {
+    setState((previous) => ({
+      ...previous,
+      mustChangePassword: false,
+    }));
+  }
+
   return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
+    <AuthContext.Provider value={{ ...state, login, logout, clearMustChangePassword }}>
       {children}
     </AuthContext.Provider>
   );

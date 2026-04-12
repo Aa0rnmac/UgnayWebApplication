@@ -1,11 +1,11 @@
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_teacher
-from app.core.datetime_utils import utc_now
 from app.db.session import get_db
 from app.models.certificate import CertificateTemplate
 from app.models.lms_progress import SectionModuleItemProgress
@@ -21,8 +21,10 @@ from app.schemas.lms import (
     TeacherSectionModuleOut,
     TeacherSectionModuleUpdateRequest,
     TeacherSectionSummaryOut,
+    TeacherStudentItemReportOut,
     TeacherStudentModuleReportOut,
     TeacherStudentReportOut,
+    UploadedModuleAssetOut,
 )
 from app.services.lms_service import (
     RESOURCE_ITEM_TYPES,
@@ -99,6 +101,39 @@ def _resource_kind_for_item_type(item_type: str) -> str:
     if item_type == "interactive_resource":
         return "interactive"
     return "external_link"
+
+
+def _resource_kind_for_file(
+    extension: str,
+    content_type: str | None,
+) -> Literal["video", "image", "document", "interactive"]:
+    normalized_content_type = (content_type or "").strip().lower()
+    if normalized_content_type.startswith("image/"):
+        return "image"
+    if normalized_content_type.startswith("video/"):
+        return "video"
+    if extension in {".zip", ".rar", ".7z", ".scorm"} or normalized_content_type in {
+        "application/zip",
+        "application/x-zip-compressed",
+    }:
+        return "interactive"
+    return "document"
+
+
+def _save_module_asset(module_id: int, resource_file: UploadFile) -> UploadedModuleAssetOut:
+    extension = Path(resource_file.filename or "").suffix.lower() or ".bin"
+    saved_name = f"module-{module_id}-{uuid4().hex}{extension}"
+    saved_path = MODULE_RESOURCES_DIR / saved_name
+    with saved_path.open("wb") as file_handle:
+        file_handle.write(resource_file.file.read())
+    relative_file_path = f"uploads/module-resources/{saved_name}"
+    return UploadedModuleAssetOut(
+        resource_kind=_resource_kind_for_file(extension, resource_file.content_type),
+        resource_file_name=resource_file.filename or saved_name,
+        resource_file_path=relative_file_path,
+        resource_mime_type=resource_file.content_type,
+        resource_url=f"/{relative_file_path}",
+    )
 
 
 @router.get("/dashboard", response_model=list[TeacherSectionSummaryOut])
@@ -335,18 +370,13 @@ def upload_teacher_module_item_resource(
             detail="Invalid resource item type.",
         )
 
-    extension = Path(resource_file.filename or "").suffix.lower() or ".bin"
-    saved_name = f"module-{module.id}-{uuid4().hex}{extension}"
-    saved_path = MODULE_RESOURCES_DIR / saved_name
-    with saved_path.open("wb") as file_handle:
-        file_handle.write(resource_file.file.read())
-
-    relative_file_path = f"uploads/module-resources/{saved_name}"
+    uploaded_asset = _save_module_asset(module.id, resource_file)
     config = {
         "resource_kind": _resource_kind_for_item_type(item_type),
-        "resource_file_name": resource_file.filename or saved_name,
-        "resource_file_path": relative_file_path,
-        "resource_mime_type": resource_file.content_type,
+        "resource_file_name": uploaded_asset.resource_file_name,
+        "resource_file_path": uploaded_asset.resource_file_path,
+        "resource_mime_type": uploaded_asset.resource_mime_type,
+        "resource_url": uploaded_asset.resource_url,
     }
     item = SectionModuleItem(
         section_module_id=module.id,
@@ -378,6 +408,68 @@ def upload_teacher_module_item_resource(
     db.commit()
     db.refresh(module)
     return _module_out(module)
+
+
+@router.post("/module-items/{item_id}/assets/upload", response_model=TeacherSectionModuleOut)
+def upload_teacher_module_item_asset(
+    item_id: int,
+    usage: Literal["attachment", "prompt"] = Form(default="attachment"),
+    label: str | None = Form(default=None),
+    resource_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherSectionModuleOut:
+    item = (
+        db.query(SectionModuleItem)
+        .options(joinedload(SectionModuleItem.module).joinedload(SectionModule.items))
+        .filter(SectionModuleItem.id == item_id)
+        .first()
+    )
+    if not item or not item.module:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module item not found.")
+    _require_teacher_section(db, current_teacher, item.module.section_id)
+
+    if item.item_type not in {"readable", "identification_assessment"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Assets can only be uploaded for readable and identification items.",
+        )
+
+    uploaded_asset = _save_module_asset(item.module.id, resource_file)
+    config = dict(item.config or {})
+    normalized_label = (label or "").strip()
+    serialized_asset = uploaded_asset.model_dump()
+    serialized_asset["label"] = normalized_label or None
+
+    if usage == "prompt":
+        config["prompt_media"] = serialized_asset
+    else:
+        existing_attachments = config.get("attachments") or []
+        attachments = [entry for entry in existing_attachments if isinstance(entry, dict)]
+        attachments.append(serialized_asset)
+        config["attachments"] = attachments
+
+    item.config = config
+    db.add(item)
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_item_asset_uploaded",
+        target_type="section_module_item",
+        target_id=item.id,
+        details={
+            "section_id": item.module.section_id,
+            "module_id": item.module.id,
+            "item_id": item.id,
+            "item_type": item.item_type,
+            "usage": usage,
+            "resource_file_name": uploaded_asset.resource_file_name,
+            "resource_kind": uploaded_asset.resource_kind,
+        },
+    )
+    db.commit()
+    db.refresh(item.module)
+    return _module_out(item.module)
 
 
 @router.patch("/module-items/{item_id}", response_model=TeacherSectionModuleOut)
@@ -481,41 +573,9 @@ def upload_certificate_template(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ) -> CertificateTemplateOut:
-    section = _require_teacher_section(db, current_teacher, section_id)
-    extension = Path(certificate_file.filename or "").suffix.lower() or ".bin"
-    saved_name = f"{section.code.lower()}-{uuid4().hex}{extension}"
-    saved_path = CERTIFICATE_TEMPLATES_DIR / saved_name
-    with saved_path.open("wb") as file_handle:
-        file_handle.write(certificate_file.file.read())
-
-    template = CertificateTemplate(
-        section_id=section_id,
-        uploaded_by_teacher_id=current_teacher.id,
-        original_file_name=certificate_file.filename or saved_name,
-        file_path=str(saved_path),
-        status="approved",
-        approved_by_user_id=current_teacher.id,
-        approved_at=utc_now(),
-    )
-    db.add(template)
-    db.flush()
-    log_user_activity(
-        db,
-        actor=current_teacher,
-        action_type="teacher_certificate_template_uploaded",
-        target_type="certificate_template",
-        target_id=template.id,
-        details={"section_id": section_id, "file_name": template.original_file_name, "status": template.status},
-    )
-    db.commit()
-    return CertificateTemplateOut(
-        id=template.id,
-        section_id=section_id,
-        section_name=section.name,
-        original_file_name=template.original_file_name,
-        status=template.status,
-        review_remarks=template.review_remarks,
-        created_at=template.created_at,
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Teacher certificate uploads have been disabled.",
     )
 
 
@@ -524,25 +584,7 @@ def list_teacher_certificate_templates(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ) -> list[CertificateTemplateOut]:
-    templates = (
-        db.query(CertificateTemplate)
-        .options(joinedload(CertificateTemplate.section))
-        .filter(CertificateTemplate.uploaded_by_teacher_id == current_teacher.id)
-        .order_by(CertificateTemplate.created_at.desc())
-        .all()
-    )
-    return [
-        CertificateTemplateOut(
-            id=item.id,
-            section_id=item.section_id,
-            section_name=item.section.name if item.section else "Unknown section",
-            original_file_name=item.original_file_name,
-            status=item.status,
-            review_remarks=item.review_remarks,
-            created_at=item.created_at,
-        )
-        for item in templates
-    ]
+    return []
 
 
 @router.get("/students/{student_id}/report", response_model=TeacherStudentReportOut)
@@ -565,6 +607,11 @@ def get_teacher_student_report(
     module_reports: list[TeacherStudentModuleReportOut] = []
     current_finished_module: str | None = None
     focus_areas: list[str] = []
+    assessment_types = {
+        "multiple_choice_assessment",
+        "identification_assessment",
+        "signing_lab_assessment",
+    }
 
     for module in sorted(student_assignment.section.modules, key=lambda row: row.order_index):
         progress = sync_module_progress(db, student_id=student_id, module=module)
@@ -576,10 +623,35 @@ def get_teacher_student_report(
             )
             .all()
         )
-        correct_count = sum(1 for entry in item_progress_entries if entry.is_correct is True)
-        wrong_count = sum(1 for entry in item_progress_entries if entry.is_correct is False)
-        total_attempts = sum(entry.attempt_count for entry in item_progress_entries)
-        total_duration = sum(entry.duration_seconds for entry in item_progress_entries)
+        item_progress_by_item_id = {
+            entry.section_module_item_id: entry for entry in item_progress_entries
+        }
+        published_items = [
+            item for item in sorted(module.items, key=lambda row: row.order_index) if item.is_published
+        ]
+        item_reports = [
+            TeacherStudentItemReportOut(
+                item_id=item.id,
+                item_title=item.title,
+                item_type=item.item_type,
+                order_index=item.order_index,
+                status=(progress_entry.status if progress_entry else "not_started"),
+                is_correct=(progress_entry.is_correct if progress_entry else None),
+                score_percent=(progress_entry.score_percent if progress_entry else None),
+                attempt_count=(progress_entry.attempt_count if progress_entry else 0),
+                duration_seconds=(progress_entry.duration_seconds if progress_entry else 0),
+                completed_at=(progress_entry.completed_at if progress_entry else None),
+            )
+            for item in published_items
+            for progress_entry in [item_progress_by_item_id.get(item.id)]
+        ]
+        assessment_reports = [
+            entry for entry in item_reports if entry.item_type in assessment_types
+        ]
+        correct_count = sum(1 for entry in assessment_reports if entry.is_correct is True)
+        wrong_count = sum(1 for entry in assessment_reports if entry.is_correct is False)
+        total_attempts = sum(entry.attempt_count for entry in assessment_reports)
+        total_duration = sum(entry.duration_seconds for entry in assessment_reports)
         module_reports.append(
             TeacherStudentModuleReportOut(
                 module_id=module.id,
@@ -590,6 +662,7 @@ def get_teacher_student_report(
                 wrong_count=wrong_count,
                 attempt_count=total_attempts,
                 total_duration_seconds=total_duration,
+                item_reports=item_reports,
             )
         )
         if progress.status == "completed":

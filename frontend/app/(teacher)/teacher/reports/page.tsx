@@ -3,145 +3,443 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { getTeacherSection, getTeacherSections, getTeacherStudentProgressReport, type LmsSection, type TeacherSectionSummary, type TeacherStudentProgressReport } from "@/lib/api";
+import {
+  getTeacherReportStudents,
+  getTeacherSections,
+  getTeacherStudentProgressReport,
+  type TeacherSectionSummary,
+  type TeacherStudentItemReport,
+  type TeacherStudentProgressReport,
+  type TeacherStudentReportRow
+} from "@/lib/api";
+
+type StudentTableRow = {
+  student_id: number;
+  student_name: string;
+  student_email: string | null;
+  section_id: number;
+  section_name: string;
+  total_assessments: number;
+  pending_reports: number;
+  generated_reports: number;
+  average_score_percent: number;
+  latest_activity_at: string | null;
+};
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) {
+    return "No activity";
+  }
+  try {
+    return new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" }).format(
+      new Date(value)
+    );
+  } catch {
+    return value;
+  }
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "0%";
+  }
+  return `${value.toFixed(1)}%`;
+}
+
+function formatDuration(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return "0s";
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function displayStatus(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function displayType(value: string): string {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function buildAssessmentRows(report: TeacherStudentProgressReport): Array<TeacherStudentItemReport & { module_title: string }> {
+  return report.module_reports.flatMap((module) =>
+    (module.item_reports ?? [])
+      .filter((item) => item.item_type.endsWith("_assessment"))
+      .map((item) => ({
+        ...item,
+        module_title: module.module_title
+      }))
+  );
+}
+
+function studentDisplayName(
+  student: TeacherSectionSummary["section"]["students"][number]
+): string {
+  const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+  return fullName || student.username;
+}
 
 export default function TeacherReportsPage() {
   const params = useSearchParams();
   const [sections, setSections] = useState<TeacherSectionSummary[]>([]);
-  const [section, setSection] = useState<LmsSection | null>(null);
-  const [selectedSectionId, setSelectedSectionId] = useState(params.get("studentSection") ?? "");
-  const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [report, setReport] = useState<TeacherStudentProgressReport | null>(null);
+  const [allStudents, setAllStudents] = useState<StudentTableRow[]>([]);
+  const [selectedSectionId, setSelectedSectionId] = useState(params.get("studentSection") ?? "all");
+  const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [selectedStudent, setSelectedStudent] = useState<StudentTableRow | null>(null);
+  const [detailReport, setDetailReport] = useState<TeacherStudentProgressReport | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   useEffect(() => {
-    getTeacherSections()
-      .then(async (data) => {
-        setSections(data);
-        const initial = params.get("studentSection") ?? (data[0] ? String(data[0].section.id) : "");
-        setSelectedSectionId(initial);
-        if (initial) {
-          const sectionData = await getTeacherSection(Number(initial));
-          setSection(sectionData);
+    async function load() {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [sectionsData, reportRowsData] = await Promise.all([
+          getTeacherSections(),
+          getTeacherReportStudents()
+        ]);
+        setSections(sectionsData);
+
+        const reportMap = new Map<number, TeacherStudentReportRow>();
+        for (const row of reportRowsData.students) {
+          reportMap.set(row.student_id, row);
         }
-      })
-      .catch((requestError: Error) => setError(requestError.message));
-  }, [params]);
 
-  const studentOptions = useMemo(() => section?.students ?? [], [section]);
+        const studentMap = new Map<number, StudentTableRow>();
+        for (const sectionEntry of sectionsData) {
+          const sectionInfo = sectionEntry.section;
+          for (const student of sectionInfo.students) {
+            const reportRow = reportMap.get(student.id);
+            studentMap.set(student.id, {
+              student_id: student.id,
+              student_name: studentDisplayName(student),
+              student_email: student.email ?? null,
+              section_id: sectionInfo.id,
+              section_name: sectionInfo.name,
+              total_assessments: reportRow?.total_assessments ?? 0,
+              pending_reports: reportRow?.pending_reports ?? 0,
+              generated_reports: reportRow?.generated_reports ?? 0,
+              average_score_percent: reportRow?.average_score_percent ?? 0,
+              latest_activity_at: reportRow?.latest_activity_at ?? null
+            });
+          }
+        }
 
-  async function onLoadSection(sectionId: string) {
-    setSelectedSectionId(sectionId);
-    setSelectedStudentId("");
-    setReport(null);
-    if (!sectionId) {
-      setSection(null);
-      return;
+        const rows = Array.from(studentMap.values()).sort((a, b) => {
+          const aTime = a.latest_activity_at ? new Date(a.latest_activity_at).getTime() : 0;
+          const bTime = b.latest_activity_at ? new Date(b.latest_activity_at).getTime() : 0;
+          if (bTime !== aTime) {
+            return bTime - aTime;
+          }
+          return a.student_name.localeCompare(b.student_name);
+        });
+        setAllStudents(rows);
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "Unable to load teacher reports.");
+      } finally {
+        setIsLoading(false);
+      }
     }
+
+    void load();
+  }, []);
+
+  const filteredStudents = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return allStudents.filter((row) => {
+      const sectionOk = selectedSectionId === "all" || String(row.section_id) === selectedSectionId;
+      if (!sectionOk) {
+        return false;
+      }
+      if (!term) {
+        return true;
+      }
+      const haystack = `${row.student_name} ${row.student_email ?? ""}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [allStudents, search, selectedSectionId]);
+
+  const assessmentRows = useMemo(() => {
+    if (!detailReport) {
+      return [];
+    }
+    return buildAssessmentRows(detailReport);
+  }, [detailReport]);
+
+  async function onViewDetails(row: StudentTableRow) {
+    setSelectedStudent(row);
+    setDetailReport(null);
+    setDetailError(null);
+    setIsDetailLoading(true);
     try {
-      setSection(await getTeacherSection(Number(sectionId)));
+      const report = await getTeacherStudentProgressReport(row.student_id);
+      setDetailReport(report);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load section.");
+      setDetailError(requestError instanceof Error ? requestError.message : "Unable to load student details.");
+    } finally {
+      setIsDetailLoading(false);
     }
   }
 
-  async function onLoadReport(studentId: string) {
-    setSelectedStudentId(studentId);
-    if (!studentId) {
-      setReport(null);
-      return;
-    }
-    try {
-      setReport(await getTeacherStudentProgressReport(Number(studentId)));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to load report.");
-    }
+  function closeDetails() {
+    setSelectedStudent(null);
+    setDetailReport(null);
+    setDetailError(null);
+    setIsDetailLoading(false);
   }
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-4">
       <div className="panel">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Teacher LMS</p>
-        <h2 className="mt-3 text-3xl font-bold title-gradient">Student Reports</h2>
+        <p className="text-xs fw-semibold text-uppercase tracking-[0.2em] text-brandBlue">Teacher LMS</p>
+        <h2 className="mt-2 text-3xl fw-bold title-gradient">Student Reports</h2>
+        <p className="mt-2 text-sm text-slate-700">
+          View all students, filter by section, search by name, and open full progress details.
+        </p>
       </div>
 
-      {error ? <p className="rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm text-brandRed">{error}</p> : null}
+      {error ? (
+        <div className="alert alert-danger mb-0" role="alert">
+          {error}
+        </div>
+      ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <label className="panel text-sm font-semibold text-slate-800">
-          Section
-          <select className="mt-2 w-full rounded-lg border border-brandBorder bg-white px-3 py-2" onChange={(event) => void onLoadSection(event.target.value)} value={selectedSectionId}>
-            <option value="">Choose a section</option>
-            {sections.map((entry) => (
-              <option key={entry.section.id} value={entry.section.id}>
-                {entry.section.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="panel text-sm font-semibold text-slate-800">
-          Student
-          <select className="mt-2 w-full rounded-lg border border-brandBorder bg-white px-3 py-2" onChange={(event) => void onLoadReport(event.target.value)} value={selectedStudentId}>
-            <option value="">Choose a student</option>
-            {studentOptions.map((student) => (
-              <option key={student.id} value={student.id}>
-                {student.username}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {report ? (
-        <>
-          <div className="panel">
-            <p className="text-xs uppercase tracking-[0.22em] label-accent">Student Summary</p>
-            <h3 className="mt-2 text-2xl font-bold text-slate-900">{report.student.username}</h3>
-            <p className="mt-2 text-sm text-slate-700">{report.verdict}</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm text-slate-800">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Section</p>
-                <p className="mt-2 font-semibold">{report.section?.name ?? "Not assigned"}</p>
-              </div>
-              <div className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm text-slate-800">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Current Finished Module</p>
-                <p className="mt-2 font-semibold">{report.current_finished_module ?? "No finished module yet"}</p>
-              </div>
-            </div>
+      <div className="panel">
+        <div className="row g-3">
+          <div className="col-md-4">
+            <label className="form-label fw-semibold mb-1">Section Filter</label>
+            <select
+              className="form-select"
+              onChange={(event) => setSelectedSectionId(event.target.value)}
+              value={selectedSectionId}
+            >
+              <option value="all">All Sections</option>
+              {sections.map((entry) => (
+                <option key={entry.section.id} value={entry.section.id}>
+                  {entry.section.name}
+                </option>
+              ))}
+            </select>
           </div>
+          <div className="col-md-8">
+            <label className="form-label fw-semibold mb-1">Search Student</label>
+            <input
+              className="form-control"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by student name or email..."
+              type="text"
+              value={search}
+            />
+          </div>
+        </div>
+      </div>
 
-          <div className="panel">
-            <p className="text-xs uppercase tracking-[0.22em] label-accent">Module Progress</p>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b border-brandBorder text-left text-xs uppercase tracking-[0.2em] text-slate-500">
-                    <th className="px-2 py-3">Module</th>
-                    <th className="px-2 py-3">Status</th>
-                    <th className="px-2 py-3">Progress</th>
-                    <th className="px-2 py-3">Correct</th>
-                    <th className="px-2 py-3">Wrong</th>
-                    <th className="px-2 py-3">Attempts</th>
-                    <th className="px-2 py-3">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.module_reports.map((module) => (
-                    <tr className="border-b border-brandBorder/70" key={module.module_id}>
-                      <td className="px-2 py-3 font-semibold text-slate-900">{module.module_title}</td>
-                      <td className="px-2 py-3 capitalize text-slate-700">{module.status.replaceAll("_", " ")}</td>
-                      <td className="px-2 py-3 text-slate-700">{module.progress_percent}%</td>
-                      <td className="px-2 py-3 text-brandGreen">{module.correct_count}</td>
-                      <td className="px-2 py-3 text-brandRed">{module.wrong_count}</td>
-                      <td className="px-2 py-3 text-slate-700">{module.attempt_count}</td>
-                      <td className="px-2 py-3 text-slate-700">{Math.round(module.total_duration_seconds / 60)} min</td>
+      <div className="panel">
+        <div className="d-flex align-items-center justify-content-between mb-3">
+          <h3 className="h5 fw-bold mb-0">Student Table</h3>
+          <span className="badge text-bg-light border">Showing {filteredStudents.length}</span>
+        </div>
+        <div className="table-responsive">
+          <table className="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Email</th>
+                <th>Section</th>
+                <th>Total Assessments</th>
+                <th>Average Score</th>
+                <th>Latest Activity</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td className="text-muted" colSpan={7}>
+                    Loading students...
+                  </td>
+                </tr>
+              ) : null}
+              {!isLoading && filteredStudents.length === 0 ? (
+                <tr>
+                  <td className="text-muted" colSpan={7}>
+                    No students found for this filter/search.
+                  </td>
+                </tr>
+              ) : null}
+              {!isLoading
+                ? filteredStudents.map((row) => (
+                    <tr key={row.student_id}>
+                      <td className="fw-semibold">{row.student_name}</td>
+                      <td>{row.student_email || "-"}</td>
+                      <td>{row.section_name}</td>
+                      <td>{row.total_assessments}</td>
+                      <td>{formatPercent(row.average_score_percent)}</td>
+                      <td>{formatDateTime(row.latest_activity_at)}</td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => void onViewDetails(row)}
+                          type="button"
+                        >
+                          View Details
+                        </button>
+                      </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  ))
+                : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {selectedStudent ? (
+        <div
+          aria-modal="true"
+          className="modal fade show d-block"
+          role="dialog"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.45)" }}
+        >
+          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  Student Details: {selectedStudent.student_name}
+                </h5>
+                <button aria-label="Close" className="btn-close" onClick={closeDetails} type="button" />
+              </div>
+              <div className="modal-body">
+                {isDetailLoading ? (
+                  <p className="mb-0 text-muted">Loading detailed report...</p>
+                ) : null}
+                {detailError ? (
+                  <div className="alert alert-danger mb-0" role="alert">
+                    {detailError}
+                  </div>
+                ) : null}
+
+                {detailReport ? (
+                  <div className="vstack gap-4">
+                    <div className="row g-3">
+                      <div className="col-md-4">
+                        <div className="rounded-3 bg-brandOffWhite px-3 py-3 h-100">
+                          <p className="text-xs text-uppercase tracking-[0.14em] text-slate-500 mb-1">Section</p>
+                          <p className="mb-0 fw-semibold">{detailReport.section?.name ?? selectedStudent.section_name}</p>
+                        </div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="rounded-3 bg-brandOffWhite px-3 py-3 h-100">
+                          <p className="text-xs text-uppercase tracking-[0.14em] text-slate-500 mb-1">Current Finished Module</p>
+                          <p className="mb-0 fw-semibold">{detailReport.current_finished_module ?? "No finished module yet"}</p>
+                        </div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="rounded-3 bg-brandOffWhite px-3 py-3 h-100">
+                          <p className="text-xs text-uppercase tracking-[0.14em] text-slate-500 mb-1">Verdict / Focus</p>
+                          <p className="mb-0">{detailReport.verdict}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h6 className="fw-bold mb-2">General Module Progress</h6>
+                      <div className="table-responsive">
+                        <table className="table table-sm align-middle mb-0">
+                          <thead>
+                            <tr>
+                              <th>Module</th>
+                              <th>Status</th>
+                              <th>Progress</th>
+                              <th>Correct</th>
+                              <th>Mistakes</th>
+                              <th>Attempts</th>
+                              <th>Duration</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detailReport.module_reports.map((module) => (
+                              <tr key={module.module_id}>
+                                <td className="fw-semibold">{module.module_title}</td>
+                                <td className="text-capitalize">{displayStatus(module.status)}</td>
+                                <td>{module.progress_percent}%</td>
+                                <td>{module.correct_count}</td>
+                                <td>{module.wrong_count}</td>
+                                <td>{module.attempt_count}</td>
+                                <td>{formatDuration(module.total_duration_seconds)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h6 className="fw-bold mb-2">Assessment Details</h6>
+                      <div className="table-responsive">
+                        <table className="table table-sm align-middle mb-0">
+                          <thead>
+                            <tr>
+                              <th>Module</th>
+                              <th>Assessment</th>
+                              <th>Type</th>
+                              <th>Status</th>
+                              <th>Score</th>
+                              <th>Attempts</th>
+                              <th>Duration</th>
+                              <th>Completed At</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {assessmentRows.length === 0 ? (
+                              <tr>
+                                <td className="text-muted" colSpan={8}>
+                                  No assessment details yet.
+                                </td>
+                              </tr>
+                            ) : (
+                              assessmentRows.map((item) => (
+                                <tr key={item.item_id}>
+                                  <td className="fw-semibold">{item.module_title}</td>
+                                  <td>
+                                    {item.order_index}. {item.item_title}
+                                  </td>
+                                  <td>{displayType(item.item_type)}</td>
+                                  <td className="text-capitalize">{displayStatus(item.status)}</td>
+                                  <td>{item.score_percent === null || item.score_percent === undefined ? "-" : `${item.score_percent.toFixed(1)}%`}</td>
+                                  <td>{item.attempt_count}</td>
+                                  <td>{formatDuration(item.duration_seconds)}</td>
+                                  <td>{formatDateTime(item.completed_at)}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={closeDetails} type="button">
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        </>
+        </div>
       ) : null}
     </section>
   );

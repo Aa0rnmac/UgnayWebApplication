@@ -133,11 +133,35 @@ class ModuleItemChoiceConfig(BaseModel):
     accepted_answers: list[str] = Field(default_factory=list)
     expected_answer: str | None = None
     helper_text: str | None = None
+    presentation_mode: Literal["cards", "slideshow"] | None = None
+    lab_mode: Literal["alphabet", "numbers", "words"] | None = None
+    numbers_category: Literal[
+        "0-10",
+        "11-20",
+        "21-30",
+        "31-40",
+        "41-50",
+        "51-60",
+        "61-70",
+        "71-80",
+        "81-90",
+        "91-100",
+    ] | None = None
+    words_category: Literal[
+        "greeting",
+        "responses",
+        "date",
+        "family",
+        "relationship",
+        "color",
+    ] | None = None
     resource_url: str | None = None
     resource_file_name: str | None = None
     resource_file_path: str | None = None
     resource_mime_type: str | None = None
-    resource_kind: Literal["video", "document", "interactive", "external_link"] | None = None
+    resource_kind: Literal["video", "image", "document", "interactive", "external_link"] | None = None
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_media: dict[str, Any] | None = None
 
 
 class ModuleItemCreateRequest(BaseModel):
@@ -263,6 +287,19 @@ class StudentProgressUpdateOut(BaseModel):
     score_percent: float | None = None
 
 
+class TeacherStudentItemReportOut(BaseModel):
+    item_id: int
+    item_title: str
+    item_type: ModuleItemType
+    order_index: int
+    status: str
+    is_correct: bool | None = None
+    score_percent: float | None = None
+    attempt_count: int
+    duration_seconds: int
+    completed_at: datetime | None = None
+
+
 class TeacherStudentModuleReportOut(BaseModel):
     module_id: int
     module_title: str
@@ -272,6 +309,7 @@ class TeacherStudentModuleReportOut(BaseModel):
     wrong_count: int
     attempt_count: int
     total_duration_seconds: int
+    item_reports: list[TeacherStudentItemReportOut] = Field(default_factory=list)
 
 
 class TeacherStudentReportOut(BaseModel):
@@ -345,3 +383,12 @@ class SystemActivityEventOut(BaseModel):
     target_id: int | None = None
     details: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+
+
+class UploadedModuleAssetOut(BaseModel):
+    resource_kind: Literal["video", "image", "document", "interactive"]
+    resource_file_name: str
+    resource_file_path: str
+    resource_mime_type: str | None = None
+    resource_url: str | None = None
+    label: str | None = None
