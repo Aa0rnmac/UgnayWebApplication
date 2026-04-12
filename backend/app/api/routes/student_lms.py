@@ -187,7 +187,12 @@ def submit_learning_item(
     current_student: User = Depends(get_current_student),
 ) -> StudentProgressUpdateOut:
     item, module, _ = _find_student_item(db, current_student, item_id)
-    is_correct, resolved_score = evaluate_item_submission(item, payload.response_text, payload.score_percent)
+    is_correct, resolved_score = evaluate_item_submission(
+        item,
+        payload.response_text,
+        payload.score_percent,
+        payload.extra_payload,
+    )
     progress = (
         db.query(SectionModuleItemProgress)
         .filter(

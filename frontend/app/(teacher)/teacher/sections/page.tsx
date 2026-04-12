@@ -54,6 +54,7 @@ const READABLE_ACCEPT = [
 ].join(",");
 
 const IDENTIFICATION_PROMPT_ACCEPT = ["image/*", "video/*"].join(",");
+const MCQ_PROMPT_ACCEPT = ["image/*"].join(",");
 
 const READABLE_PRESENTATION_OPTIONS = [
   { value: "auto", label: "No Selection (Auto)" },
@@ -117,6 +118,102 @@ type ReadableUploadEntry = {
   label: string;
 };
 
+type McqQuestionDraft = {
+  id: string;
+  question: string;
+  choices: string[];
+  correctIndex: number;
+  promptFile: File | null;
+};
+
+function createMcqQuestionId() {
+  return `mcq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createMcqQuestionDraft(partial?: Partial<McqQuestionDraft>): McqQuestionDraft {
+  const choices = Array.isArray(partial?.choices) ? partial.choices.map((choice) => choice ?? "") : [];
+  const paddedChoices = [...choices];
+  while (paddedChoices.length < 4) {
+    paddedChoices.push("");
+  }
+  const normalizedCorrectIndex =
+    typeof partial?.correctIndex === "number" && partial.correctIndex >= 0
+      ? Math.min(partial.correctIndex, paddedChoices.length - 1)
+      : 0;
+  return {
+    id: partial?.id ?? createMcqQuestionId(),
+    question: partial?.question ?? "",
+    choices: paddedChoices,
+    correctIndex: normalizedCorrectIndex,
+    promptFile: partial?.promptFile ?? null,
+  };
+}
+
+function normalizeMcqQuestionKey(value: string, index: number): string {
+  const fallback = `q${index + 1}`;
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const normalized = trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+function mcqQuestionAssetLabel(questionKey: string): string {
+  return `mcq-question:${questionKey}`;
+}
+
+function parseMcqQuestionDrafts(item: LmsModuleItem): McqQuestionDraft[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const choices = Array.isArray(row.choices)
+          ? (row.choices as unknown[]).map((value) => String(value))
+          : [];
+        const correctAnswer = typeof row.correct_answer === "string" ? row.correct_answer : "";
+        const matchedIndex = choices.findIndex(
+          (choice) => choice.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
+        );
+        return createMcqQuestionDraft({
+          id: typeof row.question_key === "string" && row.question_key.trim()
+            ? row.question_key.trim()
+            : `q${index + 1}`,
+          question: typeof row.question === "string" ? row.question : "",
+          choices,
+          correctIndex: matchedIndex >= 0 ? matchedIndex : 0,
+        });
+      })
+      .filter((entry): entry is McqQuestionDraft => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const rawChoices = Array.isArray(item.config.choices)
+    ? (item.config.choices as unknown[]).map((entry) => String(entry))
+    : [];
+  const correctAnswer = typeof item.config.correct_answer === "string" ? item.config.correct_answer : "";
+  const matchedIndex = rawChoices.findIndex(
+    (choice) => choice.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
+  );
+  return [
+    createMcqQuestionDraft({
+      id: "q1",
+      question: typeof item.config.question === "string" ? item.config.question : "",
+      choices: rawChoices,
+      correctIndex: matchedIndex >= 0 ? matchedIndex : 0,
+    }),
+  ];
+}
+
 function buildReadableUploadId(file: File): string {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
@@ -170,6 +267,17 @@ function getItemAttachments(item: LmsModuleItem): ModuleAsset[] {
 
 function getPromptMedia(item: LmsModuleItem): ModuleAsset | null {
   return parseAsset(item.config.prompt_media);
+}
+
+function getMcqQuestionPromptAsset(attachments: ModuleAsset[], questionKey: string): ModuleAsset | null {
+  const targetLabel = mcqQuestionAssetLabel(questionKey).toLowerCase();
+  for (let index = attachments.length - 1; index >= 0; index -= 1) {
+    const label = (attachments[index]?.label ?? "").trim().toLowerCase();
+    if (label === targetLabel) {
+      return attachments[index] ?? null;
+    }
+  }
+  return null;
 }
 
 function parseLabMode(value: unknown): RecognitionMode | null {
@@ -271,8 +379,9 @@ export default function TeacherSectionsPage() {
   const [itemQuestion, setItemQuestion] = useState("");
   const [itemAnswer, setItemAnswer] = useState("");
   const [itemAcceptedAnswers, setItemAcceptedAnswers] = useState("");
-  const [mcqChoices, setMcqChoices] = useState<string[]>(["", "", "", ""]);
-  const [mcqCorrectIndex, setMcqCorrectIndex] = useState(0);
+  const [mcqQuestions, setMcqQuestions] = useState<McqQuestionDraft[]>([
+    createMcqQuestionDraft({ id: "q1" }),
+  ]);
   const [readableFiles, setReadableFiles] = useState<ReadableUploadEntry[]>([]);
   const [isReadableDropActive, setIsReadableDropActive] = useState(false);
   const [readablePresentationMode, setReadablePresentationMode] =
@@ -300,6 +409,12 @@ export default function TeacherSectionsPage() {
       return 0;
     }
     return getItemAttachments(editingItem).length;
+  }, [editingItem]);
+  const editingItemAttachments = useMemo(() => {
+    if (!editingItem) {
+      return [];
+    }
+    return getItemAttachments(editingItem);
   }, [editingItem]);
 
   function appendReadableFiles(files: File[]) {
@@ -433,8 +548,7 @@ export default function TeacherSectionsPage() {
     setItemQuestion("");
     setItemAnswer("");
     setItemAcceptedAnswers("");
-    setMcqChoices(["", "", "", ""]);
-    setMcqCorrectIndex(0);
+    setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
     setReadableFiles([]);
     setIsReadableDropActive(false);
     setReadablePresentationMode("auto");
@@ -460,24 +574,14 @@ export default function TeacherSectionsPage() {
       setItemQuestion("");
       setItemAnswer("");
       setItemAcceptedAnswers("");
-      setMcqChoices(["", "", "", ""]);
-      setMcqCorrectIndex(0);
+      setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
       return;
     }
 
     if (item.item_type === "multiple_choice_assessment") {
-      const rawChoices = Array.isArray(item.config.choices)
-        ? (item.config.choices as unknown[]).map((entry) => String(entry))
-        : [];
-      const choices = rawChoices.length >= 2 ? rawChoices : [...rawChoices, "", ""].slice(0, 4);
-      setMcqChoices(choices);
-      const correctAnswer = typeof item.config.correct_answer === "string" ? item.config.correct_answer : "";
-      setItemQuestion(typeof item.config.question === "string" ? item.config.question : "");
-      setItemAnswer(correctAnswer);
-      const matchedIndex = choices.findIndex(
-        (choice) => choice.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
-      );
-      setMcqCorrectIndex(matchedIndex >= 0 ? matchedIndex : 0);
+      setMcqQuestions(parseMcqQuestionDrafts(item));
+      setItemQuestion("");
+      setItemAnswer("");
       setItemAcceptedAnswers("");
       return;
     }
@@ -489,8 +593,7 @@ export default function TeacherSectionsPage() {
       setItemQuestion(typeof item.config.question === "string" ? item.config.question : "");
       setItemAnswer(typeof item.config.correct_answer === "string" ? item.config.correct_answer : "");
       setItemAcceptedAnswers(acceptedAnswers.join(", "));
-      setMcqChoices(["", "", "", ""]);
-      setMcqCorrectIndex(0);
+      setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
       return;
     }
 
@@ -500,8 +603,7 @@ export default function TeacherSectionsPage() {
       setSigningLabMode(parseLabMode(item.config.lab_mode) ?? "alphabet");
       setSigningLabNumbersRange(parseNumbersCategory(item.config.numbers_category) ?? "0-10");
       setSigningLabWordsCategory(parseWordsCategory(item.config.words_category) ?? "greeting");
-      setMcqChoices(["", "", "", ""]);
-      setMcqCorrectIndex(0);
+      setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
       setItemAcceptedAnswers("");
       return;
     }
@@ -509,8 +611,103 @@ export default function TeacherSectionsPage() {
     setItemQuestion("");
     setItemAnswer("");
     setItemAcceptedAnswers("");
-    setMcqChoices(["", "", "", ""]);
-    setMcqCorrectIndex(0);
+    setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
+  }
+
+  function addMcqQuestion(afterIndex?: number) {
+    setMcqQuestions((current) => {
+      const next = [...current];
+      const insertAt =
+        typeof afterIndex === "number"
+          ? Math.min(Math.max(afterIndex + 1, 0), next.length)
+          : next.length;
+      next.splice(insertAt, 0, createMcqQuestionDraft());
+      return next;
+    });
+  }
+
+  function removeMcqQuestion(questionIndex: number) {
+    setMcqQuestions((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+      return current.filter((_, index) => index !== questionIndex);
+    });
+  }
+
+  function updateMcqQuestionText(questionIndex: number, value: string) {
+    setMcqQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex ? { ...entry, question: value } : entry
+      )
+    );
+  }
+
+  function updateMcqChoice(questionIndex: number, choiceIndex: number, value: string) {
+    setMcqQuestions((current) =>
+      current.map((entry, index) => {
+        if (index !== questionIndex) {
+          return entry;
+        }
+        return {
+          ...entry,
+          choices: entry.choices.map((choice, indexInChoices) =>
+            indexInChoices === choiceIndex ? value : choice
+          ),
+        };
+      })
+    );
+  }
+
+  function setMcqQuestionCorrect(questionIndex: number, choiceIndex: number) {
+    setMcqQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex ? { ...entry, correctIndex: choiceIndex } : entry
+      )
+    );
+  }
+
+  function addMcqChoice(questionIndex: number) {
+    setMcqQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex ? { ...entry, choices: [...entry.choices, ""] } : entry
+      )
+    );
+  }
+
+  function removeMcqChoice(questionIndex: number, choiceIndex: number) {
+    setMcqQuestions((current) =>
+      current.map((entry, index) => {
+        if (index !== questionIndex || entry.choices.length <= 2) {
+          return entry;
+        }
+        const nextChoices = entry.choices.filter((_, indexInChoices) => indexInChoices !== choiceIndex);
+        const nextCorrectIndex =
+          entry.correctIndex === choiceIndex
+            ? 0
+            : entry.correctIndex > choiceIndex
+              ? entry.correctIndex - 1
+              : entry.correctIndex;
+        return {
+          ...entry,
+          choices: nextChoices,
+          correctIndex: Math.max(0, Math.min(nextCorrectIndex, nextChoices.length - 1)),
+        };
+      })
+    );
+  }
+
+  function setMcqQuestionPromptFile(questionIndex: number, file: File | null) {
+    setMcqQuestions((current) =>
+      current.map((entry, index) =>
+        index === questionIndex
+          ? {
+              ...entry,
+              promptFile: file,
+            }
+          : entry
+      )
+    );
   }
 
   function openPreview(item: LmsModuleItem) {
@@ -641,21 +838,77 @@ export default function TeacherSectionsPage() {
     }
 
     if (item.item_type === "multiple_choice_assessment") {
-      const question = typeof item.config.question === "string" ? item.config.question : "";
-      const choices = Array.isArray(item.config.choices)
+      const attachments = getItemAttachments(item);
+      const sharedPromptMedia = getPromptMedia(item);
+      const questionSet = Array.isArray(item.config.questions)
+        ? (item.config.questions as unknown[])
+            .map((entry, index) => {
+              if (!entry || typeof entry !== "object") {
+                return null;
+              }
+              const row = entry as Record<string, unknown>;
+              const question = typeof row.question === "string" ? row.question : "";
+              const choices = Array.isArray(row.choices)
+                ? (row.choices as unknown[]).map((choice) => String(choice))
+                : [];
+              return {
+                key:
+                  typeof row.question_key === "string" && row.question_key.trim()
+                    ? row.question_key.trim()
+                    : `q${index + 1}`,
+                question,
+                choices,
+              };
+            })
+            .filter((entry): entry is { key: string; question: string; choices: string[] } => Boolean(entry))
+        : [];
+      const fallbackQuestion =
+        typeof item.config.question === "string" ? item.config.question : "";
+      const fallbackChoices = Array.isArray(item.config.choices)
         ? (item.config.choices as unknown[]).map((entry) => String(entry))
         : [];
+      const displayQuestions =
+        questionSet.length > 0
+          ? questionSet
+          : [{ key: "q1", question: fallbackQuestion, choices: fallbackChoices }];
+      const hasPerQuestionPrompt = displayQuestions.some((entry) =>
+        Boolean(getMcqQuestionPromptAsset(attachments, entry.key))
+      );
       return (
         <div className="vstack gap-2">
           <p className="mb-0 rounded-3 bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
-            {question || item.instructions || "No question yet."}
+            {item.instructions || "Students answer each question in this item before submitting."}
           </p>
-          {choices.map((choice, index) => (
-            <div className="form-check" key={`${choice}-${index}`}>
-              <input className="form-check-input" disabled type="radio" />
-              <label className="form-check-label text-sm">{choice}</label>
+          {sharedPromptMedia && !hasPerQuestionPrompt ? (
+            <div className="card border-brandBorder">
+              <div className="card-body">
+                <p className="small fw-semibold mb-2">{sharedPromptMedia.resource_file_name}</p>
+                {renderPreviewAsset(sharedPromptMedia)}
+              </div>
             </div>
-          ))}
+          ) : null}
+          {displayQuestions.map((entry, questionIndex) => {
+            const questionPrompt = getMcqQuestionPromptAsset(attachments, entry.key);
+            return (
+              <div className="rounded-3 border border-brandBorder bg-white px-3 py-3" key={entry.key}>
+                <p className="mb-2 fw-semibold text-sm">
+                  {questionIndex + 1}. {entry.question || "No question yet."}
+                </p>
+                {questionPrompt ? (
+                  <div className="mb-3">
+                    <p className="small fw-semibold mb-2">{questionPrompt.resource_file_name}</p>
+                    {renderPreviewAsset(questionPrompt)}
+                  </div>
+                ) : null}
+                {entry.choices.map((choice, index) => (
+                  <div className="form-check" key={`${entry.key}-${choice}-${index}`}>
+                    <input className="form-check-input" disabled type="radio" />
+                    <label className="form-check-label text-sm">{choice}</label>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </div>
       );
     }
@@ -743,22 +996,49 @@ export default function TeacherSectionsPage() {
 
     try {
       let config: Record<string, unknown> = {};
+      let mcqQuestionsForUpload: Array<{ question_key: string; promptFile: File | null }> = [];
 
       if (itemType === "multiple_choice_assessment") {
-        const choices = mcqChoices.map((choice) => choice.trim()).filter(Boolean);
-        if (choices.length < 2) {
-          setError("Add at least 2 answer choices.");
+        if (mcqQuestions.length === 0) {
+          setError("Add at least one question.");
           return;
         }
-        const selectedAnswer = (mcqChoices[mcqCorrectIndex] || "").trim();
-        if (!selectedAnswer) {
-          setError("Choose a valid correct answer.");
-          return;
-        }
+        const normalizedQuestions = mcqQuestions.map((entry, index) => {
+          const questionKey = normalizeMcqQuestionKey(entry.id, index);
+          const question = entry.question.trim();
+          const choices = entry.choices.map((choice) => choice.trim()).filter(Boolean);
+          const selectedAnswer = choices[entry.correctIndex] || "";
+          if (!question) {
+            throw new Error(`Question ${index + 1} is required.`);
+          }
+          if (choices.length < 2) {
+            throw new Error(`Question ${index + 1} needs at least two choices.`);
+          }
+          if (!selectedAnswer) {
+            throw new Error(`Question ${index + 1} needs one correct answer.`);
+          }
+          return {
+            question_key: questionKey,
+            question,
+            choices,
+            correct_answer: selectedAnswer,
+            promptFile: entry.promptFile,
+          };
+        });
+        mcqQuestionsForUpload = normalizedQuestions.map((entry) => ({
+          question_key: entry.question_key,
+          promptFile: entry.promptFile,
+        }));
+        const firstQuestion = normalizedQuestions[0];
         config = {
-          question: itemQuestion.trim(),
-          choices,
-          correct_answer: selectedAnswer
+          question: firstQuestion.question,
+          choices: firstQuestion.choices,
+          correct_answer: firstQuestion.correct_answer,
+          questions: normalizedQuestions.map(({ promptFile: _promptFile, ...questionConfig }) => questionConfig),
+          prompt_media:
+            isEditingItem && editingItem
+              ? (editingItem.config.prompt_media as unknown) ?? null
+              : null,
         };
       } else if (itemType === "identification_assessment") {
         const primaryAnswer = itemAnswer.trim();
@@ -772,7 +1052,11 @@ export default function TeacherSectionsPage() {
         config = {
           question: itemQuestion.trim(),
           correct_answer: primaryAnswer,
-          accepted_answers: acceptedAnswers
+          accepted_answers: acceptedAnswers,
+          prompt_media:
+            isEditingItem && editingItem
+              ? (editingItem.config.prompt_media as unknown) ?? null
+              : null,
         };
       } else if (itemType === "signing_lab_assessment") {
         const expectedAnswer = itemAnswer.trim();
@@ -852,6 +1136,18 @@ export default function TeacherSectionsPage() {
           file: identificationPromptFile,
           usage: "prompt"
         });
+      }
+      if (itemType === "multiple_choice_assessment") {
+        for (const question of mcqQuestionsForUpload) {
+          if (!question.promptFile) {
+            continue;
+          }
+          updatedModule = await uploadTeacherModuleItemAsset(targetItemId, {
+            file: question.promptFile,
+            usage: "attachment",
+            label: mcqQuestionAssetLabel(question.question_key),
+          });
+        }
       }
 
       setModules((current) =>
@@ -1185,72 +1481,122 @@ export default function TeacherSectionsPage() {
 
                     {itemType === "multiple_choice_assessment" ? (
                       <>
-                        <div>
-                          <label className="form-label fw-semibold">Question</label>
-                          <input
-                            className="form-control"
-                            onChange={(event) => setItemQuestion(event.target.value)}
-                            value={itemQuestion}
-                          />
+                        <div className="d-flex justify-content-between align-items-center">
+                          <label className="form-label fw-semibold mb-0">Questions</label>
                         </div>
-                        <div className="card border-brandBorder">
-                          <div className="card-body">
-                            <div className="d-flex justify-content-between align-items-center mb-2">
-                              <p className="mb-0 fw-semibold">Choices</p>
-                              <button
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => setMcqChoices((current) => [...current, ""])}
-                                type="button"
-                              >
-                                Add Choice
-                              </button>
-                            </div>
-                            <div className="vstack gap-2">
-                              {mcqChoices.map((choice, index) => (
-                                <div className="input-group" key={`choice-${index}`}>
-                                  <span className="input-group-text">
-                                    <input
-                                      checked={mcqCorrectIndex === index}
-                                      className="form-check-input mt-0"
-                                      onChange={() => setMcqCorrectIndex(index)}
-                                      title="Correct answer"
-                                      type="radio"
-                                    />
-                                  </span>
+                        <div className="vstack gap-3">
+                          {mcqQuestions.map((question, questionIndex) => {
+                            const questionKey = normalizeMcqQuestionKey(question.id, questionIndex);
+                            const existingQuestionPrompt =
+                              isEditingItem && editingItem?.item_type === "multiple_choice_assessment"
+                                ? getMcqQuestionPromptAsset(editingItemAttachments, questionKey)
+                                : null;
+                            return (
+                              <div className="card border-brandBorder" key={question.id}>
+                                <div className="card-body vstack gap-2">
+                                  <div className="d-flex justify-content-between align-items-center">
+                                    <p className="mb-0 fw-semibold">Question {questionIndex + 1}</p>
+                                    <div className="d-flex gap-2">
+                                      {questionIndex === mcqQuestions.length - 1 ? (
+                                        <button
+                                          className="btn btn-outline-primary btn-sm"
+                                          onClick={() => addMcqQuestion(questionIndex)}
+                                          type="button"
+                                        >
+                                          Add Question
+                                        </button>
+                                      ) : null}
+                                      <button
+                                        className="btn btn-outline-danger btn-sm"
+                                        disabled={mcqQuestions.length <= 1}
+                                        onClick={() => removeMcqQuestion(questionIndex)}
+                                        type="button"
+                                      >
+                                        Remove Question
+                                      </button>
+                                    </div>
+                                  </div>
                                   <input
                                     className="form-control"
-                                    onChange={(event) =>
-                                      setMcqChoices((current) =>
-                                        current.map((entry, choiceIndex) =>
-                                          choiceIndex === index ? event.target.value : entry
-                                        )
-                                      )
-                                    }
-                                    placeholder={`Choice ${index + 1}`}
-                                    value={choice}
+                                    onChange={(event) => updateMcqQuestionText(questionIndex, event.target.value)}
+                                    placeholder={`Type question ${questionIndex + 1}`}
+                                    value={question.question}
                                   />
-                                  <button
-                                    className="btn btn-outline-danger"
-                                    disabled={mcqChoices.length <= 2}
-                                    onClick={() => {
-                                      setMcqChoices((current) =>
-                                        current.filter((_, choiceIndex) => choiceIndex !== index)
-                                      );
-                                      setMcqCorrectIndex((current) =>
-                                        current >= index && current > 0 ? current - 1 : current
-                                      );
-                                    }}
-                                    type="button"
-                                  >
-                                    Remove
-                                  </button>
+                                  <div>
+                                    <label className="form-label fw-semibold mb-1">Question Image (Optional)</label>
+                                    <input
+                                      accept={MCQ_PROMPT_ACCEPT}
+                                      className="form-control"
+                                      onChange={(event) =>
+                                        setMcqQuestionPromptFile(questionIndex, event.target.files?.[0] ?? null)
+                                      }
+                                      type="file"
+                                    />
+                                    <div className="form-text">
+                                      This image will be shown only for Question {questionIndex + 1}.
+                                    </div>
+                                    {question.promptFile ? (
+                                      <p className="mb-0 mt-1 small text-slate-700">
+                                        Selected image: <span className="fw-semibold">{question.promptFile.name}</span>
+                                      </p>
+                                    ) : existingQuestionPrompt ? (
+                                      <p className="mb-0 mt-1 small text-slate-700">
+                                        Current image:{" "}
+                                        <span className="fw-semibold">{existingQuestionPrompt.resource_file_name}</span>
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                  <div className="d-flex justify-content-between align-items-center">
+                                    <p className="mb-0 fw-semibold">Choices</p>
+                                    <button
+                                      className="btn btn-outline-secondary btn-sm"
+                                      onClick={() => addMcqChoice(questionIndex)}
+                                      type="button"
+                                    >
+                                      Add Choice
+                                    </button>
+                                  </div>
+                                  <div className="vstack gap-2">
+                                    {question.choices.map((choice, choiceIndex) => (
+                                      <div className="input-group" key={`${question.id}-choice-${choiceIndex}`}>
+                                        <span className="input-group-text">
+                                          <input
+                                            checked={question.correctIndex === choiceIndex}
+                                            className="form-check-input mt-0"
+                                            onChange={() => setMcqQuestionCorrect(questionIndex, choiceIndex)}
+                                            title="Correct answer"
+                                            type="radio"
+                                          />
+                                        </span>
+                                        <input
+                                          className="form-control"
+                                          onChange={(event) =>
+                                            updateMcqChoice(questionIndex, choiceIndex, event.target.value)
+                                          }
+                                          placeholder={`Choice ${choiceIndex + 1}`}
+                                          value={choice}
+                                        />
+                                        <button
+                                          className="btn btn-outline-danger"
+                                          disabled={question.choices.length <= 2}
+                                          onClick={() => removeMcqChoice(questionIndex, choiceIndex)}
+                                          type="button"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="mb-0 small text-slate-600 fw-normal">
+                                    Click the radio button to select the correct answer for this question.
+                                  </p>
                                 </div>
-                              ))}
-                            </div>
-                            <p className="mb-0 mt-2 text-xs text-slate-600">
-                              Mark one radio button to set the correct answer.
-                            </p>
-                          </div>
+                              </div>
+                            );
+                          })}
+                          <p className="mb-0 text-xs text-slate-600">
+                            One item can contain multiple questions. Students must answer all before submission.
+                          </p>
                         </div>
                       </>
                     ) : null}
@@ -1418,8 +1764,15 @@ export default function TeacherSectionsPage() {
                                   {item.instructions || "No instructions yet."}
                                 </p>
                               </div>
-                              <span className="badge rounded-pill text-bg-light border">
-                                {item.is_published ? "Live" : "Draft"}
+                              <span
+                                className={`badge rounded-pill border d-inline-flex align-items-center justify-content-center px-2 py-1 fw-semibold text-nowrap ${
+                                  item.is_published
+                                    ? "bg-success-subtle text-success border-success-subtle"
+                                    : "bg-light text-secondary"
+                                }`}
+                                style={{ fontSize: "0.68rem", minWidth: "74px" }}
+                              >
+                                {item.is_published ? "Published" : "Draft"}
                               </span>
                             </div>
 

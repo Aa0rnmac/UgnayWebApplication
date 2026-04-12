@@ -1176,67 +1176,88 @@ def sync_alpha_section_assessment_one_items(db: Session) -> None:
             modules_by_order[order_index] = section_module
             changed = True
 
-        max_item_order = max((item.order_index for item in section_module.items), default=0)
+        # Clean up old per-question seeded items so each module has one Assessment 1 item with 5 questions.
+        for legacy_item in list(section_module.items):
+            if legacy_item.item_type != "multiple_choice_assessment" or not isinstance(legacy_item.config, dict):
+                continue
+            seed_key = str(legacy_item.config.get("seed_key") or "")
+            if seed_key.startswith(f"alpha-m{order_index}-assessment1-q"):
+                db.delete(legacy_item)
+                changed = True
+
+        question_set = []
         for question_index, question in enumerate(seed_module.get("assessments", []), start=1):
-            seed_key = f"alpha-m{order_index}-assessment1-q{question_index}"
-            expected_question = str(question.get("question") or "").strip()
+            prompt = str(question.get("question") or "").strip()
             choices = [str(choice).strip() for choice in question.get("choices", []) if str(choice).strip()]
             correct_answer = str(question.get("answer") or "").strip()
-            config = {
-                "question": expected_question,
-                "choices": choices,
-                "correct_answer": correct_answer,
-                "accepted_answers": [correct_answer] if correct_answer else [],
-                "seed_key": seed_key,
-            }
+            if not prompt or len(choices) < 2 or not correct_answer:
+                continue
+            question_set.append(
+                {
+                    "question_key": f"q{question_index}",
+                    "question": prompt,
+                    "choices": choices,
+                    "correct_answer": correct_answer,
+                }
+            )
+        if not question_set:
+            continue
 
+        module_seed_key = f"alpha-m{order_index}-assessment1"
+        first_question = question_set[0]
+        config = {
+            "seed_key": module_seed_key,
+            "question": first_question["question"],
+            "choices": first_question["choices"],
+            "correct_answer": first_question["correct_answer"],
+            "questions": question_set,
+        }
+        existing_item = next(
+            (
+                item
+                for item in section_module.items
+                if item.item_type == "multiple_choice_assessment"
+                and isinstance(item.config, dict)
+                and item.config.get("seed_key") == module_seed_key
+            ),
+            None,
+        )
+        if existing_item is None:
             existing_item = next(
                 (
                     item
                     for item in section_module.items
                     if item.item_type == "multiple_choice_assessment"
-                    and isinstance(item.config, dict)
-                    and item.config.get("seed_key") == seed_key
+                    and str(item.title).strip().lower() == "assessment 1"
                 ),
                 None,
             )
-            if existing_item is None:
-                existing_item = next(
-                    (
-                        item
-                        for item in section_module.items
-                        if item.item_type == "multiple_choice_assessment"
-                        and isinstance(item.config, dict)
-                        and str(item.config.get("question") or "").strip() == expected_question
-                    ),
-                    None,
-                )
 
-            if existing_item:
-                existing_item.title = f"Assessment 1 - Q{question_index}"
-                existing_item.instructions = "Choose the correct answer."
-                existing_item.content_text = None
-                existing_item.config = config
-                existing_item.is_required = True
-                existing_item.is_published = True
-                db.add(existing_item)
-                changed = True
-            else:
-                max_item_order += 1
-                db.add(
-                    SectionModuleItem(
-                        section_module_id=section_module.id,
-                        title=f"Assessment 1 - Q{question_index}",
-                        item_type="multiple_choice_assessment",
-                        order_index=max_item_order,
-                        instructions="Choose the correct answer.",
-                        content_text=None,
-                        config=config,
-                        is_required=True,
-                        is_published=True,
-                    )
+        if existing_item:
+            existing_item.title = "Assessment 1"
+            existing_item.instructions = "Answer all five questions."
+            existing_item.content_text = None
+            existing_item.config = config
+            existing_item.is_required = True
+            existing_item.is_published = True
+            db.add(existing_item)
+            changed = True
+        else:
+            next_order = max((item.order_index for item in section_module.items), default=0) + 1
+            db.add(
+                SectionModuleItem(
+                    section_module_id=section_module.id,
+                    title="Assessment 1",
+                    item_type="multiple_choice_assessment",
+                    order_index=next_order,
+                    instructions="Answer all five questions.",
+                    content_text=None,
+                    config=config,
+                    is_required=True,
+                    is_published=True,
                 )
-                changed = True
+            )
+            changed = True
 
     if changed:
         db.commit()

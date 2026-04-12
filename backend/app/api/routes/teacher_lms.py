@@ -429,10 +429,16 @@ def upload_teacher_module_item_asset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module item not found.")
     _require_teacher_section(db, current_teacher, item.module.section_id)
 
-    if item.item_type not in {"readable", "identification_assessment"}:
+    allowed_item_types = {"readable", "identification_assessment", "multiple_choice_assessment"}
+    if item.item_type not in allowed_item_types:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Assets can only be uploaded for readable and identification items.",
+            detail="Assets can only be uploaded for readable, identification, and multiple-choice items.",
+        )
+    if usage == "prompt" and item.item_type not in {"identification_assessment", "multiple_choice_assessment"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Prompt media is only available for identification and multiple-choice items.",
         )
 
     uploaded_asset = _save_module_asset(item.module.id, resource_file)

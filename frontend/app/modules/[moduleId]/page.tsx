@@ -127,6 +127,25 @@ function getItemAttachments(item: StudentCourseItem): ModuleAsset[] {
   return legacyAsset ? [legacyAsset] : [];
 }
 
+function getPromptMedia(item: StudentCourseItem): ModuleAsset | null {
+  return parseAsset(item.config.prompt_media);
+}
+
+function mcqQuestionAssetLabel(questionKey: string): string {
+  return `mcq-question:${questionKey}`;
+}
+
+function getMcqQuestionPromptAsset(attachments: ModuleAsset[], questionKey: string): ModuleAsset | null {
+  const targetLabel = mcqQuestionAssetLabel(questionKey).toLowerCase();
+  for (let index = attachments.length - 1; index >= 0; index -= 1) {
+    const label = (attachments[index]?.label ?? "").trim().toLowerCase();
+    if (label === targetLabel) {
+      return attachments[index] ?? null;
+    }
+  }
+  return null;
+}
+
 function resolveAssetUrl(asset: ModuleAsset): string {
   if (asset.resource_url && /^https?:\/\//i.test(asset.resource_url)) {
     return asset.resource_url;
@@ -147,11 +166,60 @@ function resolveAssetLabel(asset: ModuleAsset): string {
   return baseName || asset.resource_file_name;
 }
 
+type McqQuestionConfig = {
+  question_key: string;
+  question: string;
+  choices: string[];
+};
+
+function getMcqQuestionSet(item: StudentCourseItem): McqQuestionConfig[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const question = typeof row.question === "string" ? row.question.trim() : "";
+        const choices = Array.isArray(row.choices)
+          ? (row.choices as unknown[]).map((choice) => String(choice).trim()).filter(Boolean)
+          : [];
+        const questionKey =
+          typeof row.question_key === "string" && row.question_key.trim()
+            ? row.question_key.trim()
+            : `q${index + 1}`;
+        if (!question || choices.length < 2) {
+          return null;
+        }
+        return {
+          question_key: questionKey,
+          question,
+          choices,
+        };
+      })
+      .filter((entry): entry is McqQuestionConfig => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const question = typeof item.config.question === "string" ? item.config.question.trim() : "";
+  const choices = Array.isArray(item.config.choices)
+    ? (item.config.choices as unknown[]).map((choice) => String(choice).trim()).filter(Boolean)
+    : [];
+  if (question && choices.length >= 2) {
+    return [{ question_key: "q1", question, choices }];
+  }
+  return [];
+}
+
 export default function StudentModulePlayerPage() {
   const params = useParams<{ moduleId: string }>();
   const [course, setCourse] = useState<StudentCourse | null>(null);
   const [certificateStatus, setCertificateStatus] = useState<StudentCertificateDownloadStatus | null>(null);
   const [answerByItem, setAnswerByItem] = useState<Record<number, string>>({});
+  const [mcqAnswersByItem, setMcqAnswersByItem] = useState<Record<number, Record<string, string>>>({});
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [slideshowIndexByItem, setSlideshowIndexByItem] = useState<Record<number, number>>({});
   const [error, setError] = useState<string | null>(null);
@@ -257,11 +325,33 @@ export default function StudentModulePlayerPage() {
     event.preventDefault();
     try {
       setError(null);
+      let responseText = answerByItem[item.id] ?? "";
+      const extraPayload: Record<string, unknown> = { helper: "student-module-player" };
+      if (item.item_type === "multiple_choice_assessment") {
+        const questionSet = getMcqQuestionSet(item);
+        if (questionSet.length > 1) {
+          const questionAnswers = mcqAnswersByItem[item.id] ?? {};
+          const hasMissingAnswer = questionSet.some(
+            (question) => !(questionAnswers[question.question_key] ?? "").trim()
+          );
+          if (hasMissingAnswer) {
+            setError("Please answer all questions before submitting.");
+            return;
+          }
+          responseText = "multi-question-submission";
+          extraPayload.question_answers = questionAnswers;
+          extraPayload.question_total = questionSet.length;
+        }
+      }
+      if (!responseText.trim()) {
+        setError("Please provide an answer before submitting.");
+        return;
+      }
       await submitStudentItem(item.id, {
-        response_text: answerByItem[item.id] ?? "",
+        response_text: responseText,
         duration_seconds: 60,
         score_percent: item.item_type === "signing_lab_assessment" ? 100 : undefined,
-        extra_payload: { helper: "student-module-player" }
+        extra_payload: extraPayload
       });
       setMessage("Answer saved. Continue to the next item.");
       setSelectedItemId(null);
@@ -402,22 +492,90 @@ export default function StudentModulePlayerPage() {
       item.instructions ||
       "Answer this activity.";
     const choices = Array.isArray(item.config.choices) ? (item.config.choices as string[]) : [];
+    const attachments = getItemAttachments(item);
+    const promptMedia = getPromptMedia(item);
+    const mcqQuestionSet =
+      item.item_type === "multiple_choice_assessment" ? getMcqQuestionSet(item) : [];
+    const isMultiQuestionMcq =
+      item.item_type === "multiple_choice_assessment" && mcqQuestionSet.length > 1;
+    const multiAnswers = mcqAnswersByItem[item.id] ?? {};
+    const hasQuestionPrompt =
+      item.item_type === "multiple_choice_assessment" &&
+      mcqQuestionSet.some((entry) => Boolean(getMcqQuestionPromptAsset(attachments, entry.question_key)));
+    const singleQuestionPrompt =
+      item.item_type === "multiple_choice_assessment"
+        ? getMcqQuestionPromptAsset(attachments, mcqQuestionSet[0]?.question_key ?? "q1") || promptMedia
+        : null;
 
     return (
       <form className="space-y-4" onSubmit={(event) => void onSubmitItem(event, item)}>
-        <p className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm leading-7 text-slate-700">{question}</p>
-        {item.item_type === "multiple_choice_assessment" && choices.length > 0 ? (
-          <div className="grid gap-2">
-            {choices.map((choice) => (
-              <button
-                className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold ${answerByItem[item.id] === choice ? "border-brandBlue bg-brandBlueLight text-brandBlue" : "border-brandBorder bg-white text-slate-700"}`}
-                key={choice}
-                onClick={() => setAnswerByItem((current) => ({ ...current, [item.id]: choice }))}
-                type="button"
-              >
-                {choice}
-              </button>
-            ))}
+        <p className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm leading-7 text-slate-700">
+          {isMultiQuestionMcq
+            ? item.instructions || "Answer all questions to complete this assessment."
+            : question}
+        </p>
+        {item.item_type === "multiple_choice_assessment" && isMultiQuestionMcq ? (
+          <div className="space-y-3">
+            {promptMedia && !hasQuestionPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(promptMedia)}
+              </div>
+            ) : null}
+            {mcqQuestionSet.map((entry, questionIndex) => {
+              const questionPrompt = getMcqQuestionPromptAsset(attachments, entry.question_key);
+              return (
+                <div className="rounded-xl border border-brandBorder bg-white px-3 py-3" key={entry.question_key}>
+                  <p className="mb-2 text-sm font-semibold text-slate-800">
+                    {questionIndex + 1}. {entry.question}
+                  </p>
+                  {questionPrompt ? (
+                    <div className="mb-3 rounded-lg border border-brandBorder bg-brandOffWhite p-2">
+                      {renderReadableAsset(questionPrompt)}
+                    </div>
+                  ) : null}
+                  <div className="grid gap-2">
+                    {entry.choices.map((choice) => (
+                      <button
+                        className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold ${multiAnswers[entry.question_key] === choice ? "border-brandBlue bg-brandBlueLight text-brandBlue" : "border-brandBorder bg-white text-slate-700"}`}
+                        key={`${entry.question_key}-${choice}`}
+                        onClick={() =>
+                          setMcqAnswersByItem((current) => ({
+                            ...current,
+                            [item.id]: {
+                              ...(current[item.id] ?? {}),
+                              [entry.question_key]: choice
+                            }
+                          }))
+                        }
+                        type="button"
+                      >
+                        {choice}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : item.item_type === "multiple_choice_assessment" && choices.length > 0 ? (
+          <div className="space-y-3">
+            {singleQuestionPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(singleQuestionPrompt)}
+              </div>
+            ) : null}
+            <div className="grid gap-2">
+              {choices.map((choice) => (
+                <button
+                  className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold ${answerByItem[item.id] === choice ? "border-brandBlue bg-brandBlueLight text-brandBlue" : "border-brandBorder bg-white text-slate-700"}`}
+                  key={choice}
+                  onClick={() => setAnswerByItem((current) => ({ ...current, [item.id]: choice }))}
+                  type="button"
+                >
+                  {choice}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <input
