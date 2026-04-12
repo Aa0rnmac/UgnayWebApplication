@@ -24,6 +24,7 @@ $backendRequirements = Join-Path $backendDir "requirements.txt"
 
 $frontendTemplate = Join-Path $frontendDir ".env.local.example"
 $frontendEnv = Join-Path $frontendDir ".env.local"
+$frontendLockfile = Join-Path $frontendDir "package-lock.json"
 
 function Write-Step {
     param([string]$Message)
@@ -147,8 +148,11 @@ if ($setupFrontend) {
 
     if (-not $SkipInstalls) {
         Write-Step "Installing frontend dependencies"
+        if (-not (Test-Path -LiteralPath $frontendLockfile)) {
+            throw "Missing frontend lockfile: $frontendLockfile. Commit or regenerate package-lock.json before running setup."
+        }
         $npmCmd = Resolve-NpmCommand
-        Invoke-CommandChecked -Command $npmCmd -Arguments @("install") -WorkingDirectory $frontendDir
+        Invoke-CommandChecked -Command $npmCmd -Arguments @("ci") -WorkingDirectory $frontendDir
     }
 }
 

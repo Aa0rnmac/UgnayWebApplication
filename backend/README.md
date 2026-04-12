@@ -51,6 +51,13 @@ Machine bootstrap from the repo root:
 
 This creates `backend/.env` from `backend/.env.example`, creates `backend/.venv` if needed, installs backend requirements, and also prepares the frontend unless you pass `-BackendOnly`.
 
+Preflight checklist + smoke from repo root (recommended before starting servers):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\preflight-ci-smoke.ps1
+```
+
+Note: backend is Python-based, so this command uses `pip install -r requirements.txt` for backend while running `npm ci` only for frontend.
+
 For VS Code debug:
 - The launch profile runs `backend/.venv/Scripts/python.exe` directly, so activating the venv is optional.
 - VS Code now starts `uvicorn` directly and uses the prelaunch tasks to stop any old listener on port `8000` and run `alembic upgrade head` first.

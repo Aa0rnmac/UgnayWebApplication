@@ -22,7 +22,30 @@ What it does:
 - creates `frontend/.env.local` from `frontend/.env.local.example` if missing
 - creates `backend/.venv` if missing
 - installs `backend/requirements.txt`
-- runs `npm install` in `frontend/`
+- runs `npm ci` in `frontend/`
+
+## Preflight Checklist + Smoke (Recommended)
+Before launching dev servers, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\preflight-ci-smoke.ps1
+```
+
+Shortcut:
+- `.\preflight-ci-smoke.cmd`
+
+What it verifies:
+- frontend prerequisites + `npm ci`
+- backend prerequisites + `pip install -r requirements.txt` (backend is Python, so no `npm ci`)
+- frontend smoke build (`npm run build`)
+- backend migration + runtime smoke (`/api/health`)
+
+Useful flags:
+- `-DryRun` (show plan only)
+- `-SkipFrontendCi`
+- `-SkipBackendInstall`
+- `-SkipFrontendSmoke`
+- `-SkipBackendSmoke`
 
 ## Backend quick start
 1. Open terminal in `backend`.
@@ -40,7 +63,7 @@ What it does:
 2. Create `.env.local` from `.env.local.example` for local overrides.
    - Runtime precedence is: `frontend/.env.shared` then `frontend/.env.local` (local override).
 3. Install dependencies and run:
-   - `npm install`
+   - `npm ci`
    - `npm run dev`
    - If the Next.js cache is acting up, use `npm run dev:clean`
 

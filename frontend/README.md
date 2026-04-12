@@ -17,13 +17,18 @@
 
 ## Run
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 If the Next.js cache gets into a bad state, use:
 ```bash
 npm run dev:clean
+```
+
+Repo-level preflight + smoke (runs frontend + backend checks in one command):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\preflight-ci-smoke.ps1
 ```
 
 ## Pages
