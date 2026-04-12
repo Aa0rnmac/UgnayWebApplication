@@ -1026,8 +1026,6 @@ REQUIRED_TABLES = {
     "modules",
     "password_reset_otps",
     "registrations",
-    "student_certificates",
-    "teacher_handling_sessions",
     "section_module_item_progress",
     "section_module_items",
     "section_module_progress",
