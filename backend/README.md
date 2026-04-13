@@ -7,17 +7,18 @@
 
 ## Environment
 1. Copy `.env.example` to `.env`.
-2. Confirm the production-first database values:
-   - `DATABASE_URL=postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub`
-   - `AUTO_BOOTSTRAP_SCHEMA=false` for PostgreSQL
-3. Use SQLite only for explicitly local bootstrap/testing:
-   - `DATABASE_URL=sqlite:///./fsl_learning_hub.db`
-   - `AUTO_BOOTSTRAP_SCHEMA=true`
-4. Set dataset/artifact roots (optional):
+2. Keep PostgreSQL-only for local debug and runtime parity.
+3. Use a repo-specific database name in `DATABASE_URL` to avoid migration collisions while switching repos:
+   - Example for this repo:
+     - `DATABASE_URL=postgresql+psycopg://fsl_app:admin123@localhost:5432/fsl_learning_hub_ugnaywebapplication`
+   - Generic template for other repos:
+     - `backend/.env.repo-template.example`
+4. Keep `AUTO_BOOTSTRAP_SCHEMA=false` for PostgreSQL.
+5. Set dataset/artifact roots (optional):
    - `DATASETS_ROOT=datasets` (default, resolved from project root)
    - `ARTIFACTS_ROOT=artifacts` (default, resolved from `backend/`)
    - You can also use an absolute path, for example `DATASETS_ROOT=C:\Users\Marissa\Datasets\FSL`.
-5. Configure SMTP for forgot-password OTP and student approval credential email:
+6. Configure SMTP for forgot-password OTP and student approval credential email:
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
    - TLS/SSL flags: `SMTP_USE_TLS`, `SMTP_USE_SSL`
    - Gmail starter setup:
@@ -29,7 +30,7 @@
      - `SMTP_PASSWORD=<Google App Password>`
      - `SMTP_FROM_EMAIL=<same Gmail address or verified alias>`
    - Gmail requires 2-Step Verification and an App Password before SMTP login will work.
-6. Configure teacher invite signing:
+7. Configure teacher invite signing:
    - `TEACHER_INVITE_SIGNING_SECRET` (required for QR verification and onboarding tokens)
    - `TEACHER_INVITE_DEFAULT_EXPIRY_DAYS`
    - `TEACHER_INVITE_DEFAULT_MAX_USES`
@@ -48,12 +49,19 @@ This creates `backend/.env` from `backend/.env.example`, creates `backend/.venv`
 
 For VS Code debug:
 - The launch profile runs `backend/.venv/Scripts/python.exe` directly, so activating the venv is optional.
-- VS Code now starts `uvicorn` directly and uses the prelaunch tasks to stop any old listener on port `8000` and run `alembic upgrade head` first.
+- VS Code starts `uvicorn` directly and uses prelaunch tasks to stop old port `8000`, ensure the repo-specific PostgreSQL DB exists, and run migrations.
 - If PowerShell blocks `Activate.ps1`, you can still use VS Code debug or run Python directly from `.venv/Scripts/python.exe`.
 - Use a process-scoped bypass only when you specifically want manual activation:
 ```bash
 powershell -ExecutionPolicy Bypass -NoProfile -File .\.venv\Scripts\Activate.ps1
 ```
+
+## Dev DB Init
+```bash
+powershell -ExecutionPolicy Bypass -File ..\scripts\dev-db-init.ps1
+```
+
+This helper validates `DATABASE_URL`, creates the PostgreSQL database when missing, and runs `alembic upgrade head`.
 
 ## Migrate
 ```bash
@@ -66,8 +74,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 On startup:
-- SQLite local mode can bootstrap tables automatically.
-- PostgreSQL mode expects migrations to be applied first.
+- PostgreSQL mode expects migrations to be applied first (handled automatically by `dev-db-init` in debug tasks).
 - The backend seeds 12 module slots, with Modules 1-8 published and Modules 9-12 kept as draft placeholders until curriculum assets are finalized.
 
 ## API

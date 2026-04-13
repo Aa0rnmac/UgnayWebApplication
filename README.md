@@ -48,7 +48,7 @@ What it does:
 
 Notes:
 - The backend launch profile now runs `uvicorn` directly under VS Code debug.
-- Before backend startup, the prelaunch flow stops any old listener on port `8000` and runs `alembic upgrade head`.
+- Before backend startup, the prelaunch flow stops any old listener on port `8000`, ensures the repo-specific PostgreSQL DB exists, and runs migrations.
 - `Activate.ps1` is optional. If PowerShell blocks script activation on your machine, the VS Code launch still works because it calls `backend/.venv/Scripts/python.exe` directly.
 - The supported backend run path is the checked-in launch profile plus its prelaunch tasks.
 
@@ -60,9 +60,22 @@ Available launch profiles:
 - `Run Full Stack` (starts both)
 
 ## Local database (default)
-- `backend/.env` currently points to `sqlite:///./fsl_learning_hub.db`
-- The local SQLite file lives in `backend/fsl_learning_hub.db`
-- You can still switch `DATABASE_URL` to PostgreSQL later if needed
+- `backend/.env` uses PostgreSQL only.
+- Use a repo-specific DB name to avoid collisions when switching repos.
+- Default for this repo: `fsl_learning_hub_ugnaywebapplication`
+- Startup helper (create DB if missing + migrate): `powershell -ExecutionPolicy Bypass -File .\scripts\dev-db-init.ps1`
+- Template for other repos: `backend/.env.repo-template.example`
+
+## Debug Troubleshooting
+- Error: `Can't locate revision identified by '2026....'`
+  - Cause: your `DATABASE_URL` points to a shared PostgreSQL DB used by a different repo/branch.
+  - Fix:
+    - Set a repo-specific DB name in `backend/.env` (example: `fsl_learning_hub_ugnaywebapplication`).
+    - Run `powershell -ExecutionPolicy Bypass -File .\scripts\dev-db-init.ps1` to create/migrate.
+
+- Error: `Cannot find module ... node_modules\\next\\dist\\bin\\next`
+  - Cause: incomplete or stale frontend install after switching repos/branches.
+  - Fix: run `npm ci` inside `frontend/` once, then start debug again.
 
 ## Local ML storage
 - `backend/.env` now points datasets to `D:\MEGA\datasets`

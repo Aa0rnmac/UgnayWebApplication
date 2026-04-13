@@ -11,6 +11,7 @@ $backendDir = Join-Path $repoRoot "backend"
 $frontendDir = Join-Path $repoRoot "frontend"
 $backendPython = Join-Path $backendDir ".venv\Scripts\python.exe"
 $backendAlembicConfig = Join-Path $backendDir "alembic.ini"
+$backendDevDbInitScript = Join-Path $backendDir "scripts\dev_db_init.py"
 $backendEnv = Join-Path $backendDir ".env"
 $frontendEnv = Join-Path $frontendDir ".env.local"
 $frontendNodeModules = Join-Path $frontendDir "node_modules"
@@ -214,6 +215,7 @@ if ($backendWillStart) {
     Require-Path -Label "Missing backend env" -Path $backendEnv
     Require-Path -Label "Missing backend virtual environment" -Path $backendPython
     Require-Path -Label "Missing Alembic config" -Path $backendAlembicConfig
+    Require-Path -Label "Missing backend DB init script" -Path $backendDevDbInitScript
 
     if (Test-Path -LiteralPath $backendPython) {
         $backendLaunchConfig = Get-BackendLaunchConfig -PythonPath $backendPython -VenvDir $backendVenvDir -BackendDir $backendDir
@@ -270,9 +272,9 @@ if ($backendLaunchConfig -and $backendLaunchConfig.UsesFallback) {
 }
 
 $backendSteps += 'Write-Host ''Backend startup uses DATABASE_URL from backend\.env.'' -ForegroundColor Yellow'
-$backendSteps += 'Write-Host ''Applying backend database migrations (alembic upgrade head)...'' -ForegroundColor Yellow'
-$backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' -m alembic upgrade head'
-$backendSteps += 'if ($LASTEXITCODE -ne 0) { throw ''Backend migration failed. Fix the Alembic/database error above, then retry.'' }'
+$backendSteps += 'Write-Host ''Ensuring PostgreSQL dev database exists and applying migrations...'' -ForegroundColor Yellow'
+$backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' scripts/dev_db_init.py'
+$backendSteps += 'if ($LASTEXITCODE -ne 0) { throw ''Backend dev DB init failed. Fix the PostgreSQL/migration error above, then retry.'' }'
 $backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000'
 
 $frontendSteps = @(
