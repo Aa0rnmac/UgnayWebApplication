@@ -122,7 +122,7 @@ export default function StudentModulesPage() {
             <p className="mb-1 text-sm text-slate-700">This certificate is awarded to</p>
             <p className="mb-1 text-xl font-bold text-brandBlue">{certificateRecipientName}</p>
             <p className="mb-1 text-sm text-slate-700">for successfully completing</p>
-            <p className="mb-1 text-base font-semibold text-slate-900">FSL Basic Coarse</p>
+            <p className="mb-1 text-base font-semibold text-slate-900">FSL Basic Course</p>
             <p className="mb-0 text-sm text-slate-700">offered by Hand and Heart</p>
           </div>
 

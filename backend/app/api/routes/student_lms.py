@@ -1,6 +1,9 @@
 import logging
+import base64
 from datetime import datetime
+from functools import lru_cache
 from html import escape
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -34,6 +37,25 @@ from app.services.audit_log_service import log_user_activity
 
 router = APIRouter(prefix="/student", tags=["student-lms"])
 logger = logging.getLogger(__name__)
+CERTIFICATE_TEMPLATE_IMAGE_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "assets"
+    / "certificates"
+    / "fsl-basic-course-template.png"
+)
+
+
+@lru_cache(maxsize=1)
+def _certificate_template_data_uri() -> str | None:
+    if not CERTIFICATE_TEMPLATE_IMAGE_PATH.exists():
+        logger.warning("Certificate template image not found: %s", CERTIFICATE_TEMPLATE_IMAGE_PATH)
+        return None
+    try:
+        encoded = base64.b64encode(CERTIFICATE_TEMPLATE_IMAGE_PATH.read_bytes()).decode("ascii")
+    except OSError:
+        logger.exception("Unable to read certificate template image: %s", CERTIFICATE_TEMPLATE_IMAGE_PATH)
+        return None
+    return f"data:image/png;base64,{encoded}"
 
 
 def _parse_required_count(value: Any) -> int | None:
@@ -403,12 +425,79 @@ def download_student_certificate(
     completion_date = _format_certificate_date(assignment.course_completed_at)
     safe_display_name = escape(display_name)
     safe_completion_date = escape(completion_date)
-    html = f"""
+    template_background = _certificate_template_data_uri()
+    if template_background:
+        html = f"""
 <!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>UGNAY Certificate</title>
+    <title>FSL Basic Course Certificate</title>
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        padding: 24px;
+        background: #e9e9e9;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+      }}
+      .certificate {{
+        position: relative;
+        width: 1123px;
+        max-width: 100%;
+        aspect-ratio: 1123 / 794;
+        margin: 0 auto;
+        overflow: hidden;
+        background: #f5f5f5 url("{template_background}") center / 100% 100% no-repeat;
+      }}
+      .name {{
+        position: absolute;
+        left: 50%;
+        top: 36.7%;
+        transform: translateX(-50%);
+        width: 72%;
+        text-align: center;
+        font-size: clamp(34px, 5vw, 78px);
+        line-height: 1.08;
+        letter-spacing: 0.02em;
+        font-weight: 800;
+        color: #2f3137;
+        background: rgba(247, 247, 247, 0.93);
+        padding: 5px 14px;
+        border-radius: 8px;
+      }}
+      .date {{
+        position: absolute;
+        left: 16.55%;
+        bottom: 8.2%;
+        transform: translateX(-50%);
+        min-width: 240px;
+        text-align: center;
+        font-size: clamp(16px, 2vw, 32px);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: #355389;
+        background: rgba(247, 247, 247, 0.9);
+        padding: 2px 10px;
+        border-radius: 6px;
+      }}
+    </style>
+  </head>
+  <body>
+    <div class="certificate">
+      <div class="name">{safe_display_name}</div>
+      <div class="date">{safe_completion_date}</div>
+    </div>
+  </body>
+</html>
+""".strip()
+    else:
+        html = f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FSL Basic Course Certificate</title>
     <style>
       body {{ font-family: Georgia, serif; padding: 40px; background: #f5f4f1; color: #1c1c2e; }}
       .card {{ max-width: 900px; margin: 0 auto; padding: 56px; border: 8px solid #2e44a8; background: white; }}
@@ -424,7 +513,7 @@ def download_student_certificate(
       <p>This certificate is awarded to</p>
       <p class="accent">{safe_display_name}</p>
       <p>for successfully completing</p>
-      <p class="accent">FSL Basic Coarse</p>
+      <p class="accent">FSL Basic Course</p>
       <p>offered by Hand and Heart</p>
       <p class="meta">Date completed: {safe_completion_date}</p>
     </div>
