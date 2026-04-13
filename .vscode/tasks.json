@@ -58,7 +58,8 @@
       "type": "process",
       "command": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
       "args": [
-        "scripts/dev_db_init.py"
+        "scripts/dev_db_init.py",
+        "--allow-shared-db"
       ],
       "options": {
         "cwd": "${workspaceFolder}/backend"

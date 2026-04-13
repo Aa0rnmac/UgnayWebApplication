@@ -273,7 +273,7 @@ if ($backendLaunchConfig -and $backendLaunchConfig.UsesFallback) {
 
 $backendSteps += 'Write-Host ''Backend startup uses DATABASE_URL from backend\.env.'' -ForegroundColor Yellow'
 $backendSteps += 'Write-Host ''Ensuring PostgreSQL dev database exists and applying migrations...'' -ForegroundColor Yellow'
-$backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' scripts/dev_db_init.py'
+$backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' scripts/dev_db_init.py --allow-shared-db'
 $backendSteps += 'if ($LASTEXITCODE -ne 0) { throw ''Backend dev DB init failed. Fix the PostgreSQL/migration error above, then retry.'' }'
 $backendSteps += '& ' + (Quote-PowerShell $backendRuntimePython) + ' -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000'
 
