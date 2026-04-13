@@ -50,6 +50,7 @@ from app.services.teacher_invites import (
     parse_qr_payload,
     verify_onboarding_token,
 )
+from app.services.audit_log_service import log_user_activity
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -318,6 +319,14 @@ def reset_password_with_verified_otp(
     user.must_change_password = False
     db.add(otp_record)
     db.add(user)
+    log_user_activity(
+        db,
+        actor=user,
+        action_type="account_password_changed",
+        target_type="user",
+        target_id=user.id,
+        details={"change_source": "forgot_password_reset"},
+    )
     db.commit()
     db.refresh(user)
 
@@ -363,6 +372,14 @@ def verify_password_reset_otp(
     user.must_change_password = False
     db.add(otp_record)
     db.add(user)
+    log_user_activity(
+        db,
+        actor=user,
+        action_type="account_password_changed",
+        target_type="user",
+        target_id=user.id,
+        details={"change_source": "forgot_password_verify"},
+    )
     db.commit()
     db.refresh(user)
 
@@ -411,6 +428,17 @@ def update_my_profile(
     if payload.birth_date is not None:
         current_user.birth_date = payload.birth_date
 
+    if not (current_user.first_name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="First name is required.",
+        )
+    if not (current_user.last_name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Last name is required.",
+        )
+
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
@@ -435,6 +463,14 @@ def change_password(
     current_user.password_hash = hash_password(payload.new_password)
     current_user.must_change_password = False
     db.add(current_user)
+    log_user_activity(
+        db,
+        actor=current_user,
+        action_type="account_password_changed",
+        target_type="user",
+        target_id=current_user.id,
+        details={"change_source": "self_service_change_password"},
+    )
     db.commit()
     return {"message": "Password updated successfully."}
 

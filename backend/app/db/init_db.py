@@ -1941,4 +1941,6 @@ def init_db() -> None:
         seed_admin_user(db)
         backfill_enrollments(db)
         backfill_legacy_activity_attempts(db)
-        sync_alpha_section_assessment_one_items(db)
+        # Disabled to preserve teacher-authored module/assessment edits.
+        # This seeded sync overwrites alpha assessment content and question sets.
+        # sync_alpha_section_assessment_one_items(db)

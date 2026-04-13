@@ -13,9 +13,8 @@ const STUDENT_NAV_ITEMS = [
 
 const TEACHER_NAV_ITEMS = [
   { href: "/teacher", label: "Dashboard", short: "D" },
-  { href: "/teacher/sections", label: "Sections", short: "S" },
+  { href: "/teacher/modules", label: "Modules", short: "M" },
   { href: "/teacher/reports", label: "Reports", short: "R" },
-  { href: "/teacher/lab", label: "Lab", short: "L" }
 ] as const;
 
 const ADMIN_NAV_ITEMS = [
@@ -79,7 +78,7 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
         } ${mobileOpen ? "translate-x-0 w-72" : "w-72"}`}
       >
         <div className="flex h-full flex-col border-r border-brandBorder bg-gradient-to-b from-white via-brandMutedSurface/55 to-white backdrop-blur">
-          <div className="flex items-center gap-3 border-b border-brandBorder p-4">
+          <div className="relative flex items-start gap-3 border-b border-brandBorder p-4 pr-20">
             <Image
               alt="FSL Learning Hub logo"
               className="h-10 w-10 rounded-full border border-brandBorder object-cover shadow-sm"
@@ -88,7 +87,7 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
               width={40}
             />
             {!collapsed ? (
-              <div className="min-w-0 md:block">
+              <div className="min-w-0 pr-4 md:block">
                 <h1 className="text-base leading-tight font-black uppercase tracking-[0.12em] text-brandBlue whitespace-normal break-words">
                   UGNAY LEARNING HUB
                 </h1>
@@ -98,7 +97,7 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
             ) : null}
 
             <button
-              className="ml-auto hidden rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:-translate-y-0.5 hover:bg-brandBlueLight md:block"
+              className="absolute right-3 top-6 hidden rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:-translate-y-0.5 hover:bg-brandBlueLight md:inline-flex"
               onClick={() => setCollapsed((value) => !value)}
               type="button"
             >
@@ -106,7 +105,7 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
             </button>
 
             <button
-              className="ml-auto rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:bg-brandBlueLight md:hidden"
+              className="absolute right-3 top-6 inline-flex rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:bg-brandBlueLight md:hidden"
               onClick={() => setMobileOpen(false)}
               type="button"
             >
@@ -119,6 +118,11 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
               const active =
                 item.href === "/teacher"
                   ? pathname === item.href
+                  : item.href === "/teacher/modules"
+                    ? pathname === item.href ||
+                      pathname.startsWith("/teacher/modules/") ||
+                      pathname === "/teacher/sections" ||
+                      pathname.startsWith("/teacher/sections/")
                   : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link

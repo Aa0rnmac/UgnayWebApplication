@@ -1,12 +1,11 @@
 import logging
-import base64
-from datetime import datetime
-from functools import lru_cache
+from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_student
@@ -33,29 +32,18 @@ from app.services.lms_service import (
     sync_module_progress,
 )
 from app.services.audit_log_service import log_user_activity
+from app.services.admin_certificate_template_service import (
+    build_template_data_uri,
+    get_admin_certificate_template,
+)
 
 
 router = APIRouter(prefix="/student", tags=["student-lms"])
 logger = logging.getLogger(__name__)
-CERTIFICATE_TEMPLATE_IMAGE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "assets"
-    / "certificates"
-    / "fsl-basic-course-template.png"
-)
-
-
-@lru_cache(maxsize=1)
-def _certificate_template_data_uri() -> str | None:
-    if not CERTIFICATE_TEMPLATE_IMAGE_PATH.exists():
-        logger.warning("Certificate template image not found: %s", CERTIFICATE_TEMPLATE_IMAGE_PATH)
-        return None
-    try:
-        encoded = base64.b64encode(CERTIFICATE_TEMPLATE_IMAGE_PATH.read_bytes()).decode("ascii")
-    except OSError:
-        logger.exception("Unable to read certificate template image: %s", CERTIFICATE_TEMPLATE_IMAGE_PATH)
-        return None
-    return f"data:image/png;base64,{encoded}"
+STUDENT_SUBMISSIONS_DIR = (
+    Path(__file__).resolve().parents[3] / "uploads" / "student-submissions"
+).resolve()
+STUDENT_SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _parse_required_count(value: Any) -> int | None:
@@ -86,6 +74,44 @@ def _parse_bool_flag(value: Any) -> bool | None:
 def _format_certificate_date(value: datetime | None) -> str:
     resolved = value or utc_now()
     return f"{resolved.strftime('%B')} {resolved.day}, {resolved.year}"
+
+
+def _resource_kind_for_file(
+    extension: str,
+    content_type: str | None,
+) -> str:
+    normalized_content_type = (content_type or "").strip().lower()
+    if normalized_content_type.startswith("image/"):
+        return "image"
+    if normalized_content_type.startswith("video/"):
+        return "video"
+    if extension in {".zip", ".rar", ".7z", ".scorm"} or normalized_content_type in {
+        "application/zip",
+        "application/x-zip-compressed",
+    }:
+        return "interactive"
+    return "document"
+
+
+def _save_submission_file(
+    *,
+    student_id: int,
+    item_id: int,
+    upload_file: UploadFile,
+) -> dict[str, Any]:
+    extension = Path(upload_file.filename or "").suffix.lower() or ".bin"
+    saved_name = f"student-{student_id}-item-{item_id}-{uuid4().hex}{extension}"
+    saved_path = STUDENT_SUBMISSIONS_DIR / saved_name
+    with saved_path.open("wb") as file_handle:
+        file_handle.write(upload_file.file.read())
+    relative_file_path = f"uploads/student-submissions/{saved_name}"
+    return {
+        "resource_kind": _resource_kind_for_file(extension, upload_file.content_type),
+        "resource_file_name": upload_file.filename or saved_name,
+        "resource_file_path": relative_file_path,
+        "resource_mime_type": upload_file.content_type,
+        "resource_url": f"/{relative_file_path}",
+    }
 
 
 def _enforce_signing_multi_entry_requirement(
@@ -134,6 +160,22 @@ def _enforce_signing_multi_entry_requirement(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Answer at least {resolved_required_count} camera entries before submitting.",
         )
+
+
+def _assessment_total_units(item: SectionModuleItem) -> int:
+    config = dict(item.config or {})
+    raw_questions = config.get("questions")
+    if isinstance(raw_questions, list):
+        valid_questions = [entry for entry in raw_questions if isinstance(entry, dict)]
+        if valid_questions:
+            return max(1, len(valid_questions))
+    if item.item_type.endswith("_assessment"):
+        return 1
+    return 0
+
+
+def _safe_payload_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _safe_log_user_activity(
@@ -286,14 +328,140 @@ def submit_learning_item(
     db: Session = Depends(get_db),
     current_student: User = Depends(get_current_student),
 ) -> StudentProgressUpdateOut:
+    try:
+        item, module, _ = _find_student_item(db, current_student, item_id)
+        if item.item_type == "upload_assessment":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Use file upload submission for this assessment.",
+            )
+        _enforce_signing_multi_entry_requirement(item, payload)
+        is_correct, resolved_score = evaluate_item_submission(
+            item,
+            payload.response_text,
+            payload.score_percent,
+            payload.extra_payload,
+        )
+        progress = (
+            db.query(SectionModuleItemProgress)
+            .filter(
+                SectionModuleItemProgress.student_id == current_student.id,
+                SectionModuleItemProgress.section_module_item_id == item.id,
+            )
+            .first()
+        )
+        if progress is None:
+            progress = SectionModuleItemProgress(
+                student_id=current_student.id,
+                section_module_id=module.id,
+                section_module_item_id=item.id,
+                submitted_payload={},
+            )
+
+        progress.status = "completed"
+        progress.response_text = payload.response_text.strip()
+        progress.is_correct = is_correct
+        progress.score_percent = resolved_score
+        attempt_number = (progress.attempt_count or 0) + 1
+        progress.attempt_count = attempt_number
+        progress.duration_seconds = max(0, progress.duration_seconds or 0) + max(0, payload.duration_seconds)
+        completed_at = utc_now()
+        progress.completed_at = completed_at
+        total_units = _assessment_total_units(item)
+        if total_units > 0 and resolved_score is not None:
+            resolved_correct = int(round((resolved_score / 100) * total_units))
+            correct_count = max(0, min(total_units, resolved_correct))
+            wrong_count = max(0, total_units - correct_count)
+        elif total_units > 0 and is_correct is True:
+            correct_count = total_units
+            wrong_count = 0
+        elif total_units > 0 and is_correct is False:
+            correct_count = 0
+            wrong_count = total_units
+        else:
+            correct_count = 0
+            wrong_count = 0
+        previous_payload = _safe_payload_dict(progress.submitted_payload)
+        previous_history = previous_payload.get("history")
+        history_entries = previous_history if isinstance(previous_history, list) else []
+        attempt_entry = {
+            "attempt": attempt_number,
+            "status": "completed",
+            "score_percent": resolved_score,
+            "is_correct": is_correct,
+            "correct_count": correct_count,
+            "wrong_count": wrong_count,
+            "duration_seconds": max(0, payload.duration_seconds),
+            "completed_at": completed_at.isoformat(),
+        }
+        normalized_payload = _safe_payload_dict(payload.extra_payload)
+        normalized_payload["history"] = [*history_entries, attempt_entry][-50:]
+        progress.submitted_payload = normalized_payload
+        db.add(progress)
+        _safe_log_user_activity(
+            db,
+            actor=current_student,
+            action_type="student_item_submitted",
+            target_type="section_module_item",
+            target_id=item.id,
+            details={
+                "module_id": module.id,
+                "item_type": item.item_type,
+                "attempt_count": progress.attempt_count,
+                "is_correct": progress.is_correct,
+                "score_percent": progress.score_percent,
+                "duration_seconds": payload.duration_seconds,
+            },
+        )
+        module_progress = sync_module_progress(db, student_id=current_student.id, module=module)
+        refresh_student_completion_schedule(db, student_id=current_student.id)
+        auto_archive_due_students(db)
+        db.commit()
+        return StudentProgressUpdateOut(
+            module_id=module.id,
+            item_id=item.id,
+            module_status=module_progress.status,
+            module_progress_percent=module_progress.progress_percent,
+            item_status=progress.status,
+            is_correct=progress.is_correct,
+            score_percent=progress.score_percent,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("submit_learning_item failed for item_id=%s student_id=%s", item_id, current_student.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to submit this assessment right now.",
+        ) from exc
+
+
+@router.post("/module-items/{item_id}/upload-submission", response_model=StudentProgressUpdateOut)
+def upload_submission_item(
+    item_id: int,
+    files: list[UploadFile] = File(...),
+    note: str | None = Form(default=None),
+    duration_seconds: int = Form(default=0),
+    db: Session = Depends(get_db),
+    current_student: User = Depends(get_current_student),
+) -> StudentProgressUpdateOut:
     item, module, _ = _find_student_item(db, current_student, item_id)
-    _enforce_signing_multi_entry_requirement(item, payload)
-    is_correct, resolved_score = evaluate_item_submission(
-        item,
-        payload.response_text,
-        payload.score_percent,
-        payload.extra_payload,
-    )
+    if item.item_type != "upload_assessment":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This item does not accept file submissions.",
+        )
+    uploaded_files = [entry for entry in files if entry.filename]
+    if not uploaded_files:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Upload at least one file before submitting.",
+        )
+    serialized_files = [
+        _save_submission_file(student_id=current_student.id, item_id=item.id, upload_file=file_entry)
+        for file_entry in uploaded_files
+    ]
     progress = (
         db.query(SectionModuleItemProgress)
         .filter(
@@ -309,29 +477,51 @@ def submit_learning_item(
             section_module_item_id=item.id,
             submitted_payload={},
         )
-
+    existing_payload = _safe_payload_dict(progress.submitted_payload)
+    history = existing_payload.get("history")
+    history_entries: list[dict[str, Any]] = history if isinstance(history, list) else []
+    attempt_number = (progress.attempt_count or 0) + 1
+    submitted_at = utc_now()
+    history_entries.append(
+        {
+            "attempt": attempt_number,
+            "status": "completed",
+            "score_percent": None,
+            "correct_count": 0,
+            "wrong_count": 0,
+            "duration_seconds": max(0, duration_seconds),
+            "completed_at": submitted_at.isoformat(),
+            "submitted_at": submitted_at.isoformat(),
+            "note": (note or "").strip() or None,
+            "files": serialized_files,
+        }
+    )
+    normalized_payload = {
+        "note": (note or "").strip() or None,
+        "files": serialized_files,
+        "history": history_entries[-20:],
+    }
     progress.status = "completed"
-    progress.response_text = payload.response_text.strip()
-    progress.is_correct = is_correct
-    progress.score_percent = resolved_score
-    progress.attempt_count += 1
-    progress.duration_seconds += payload.duration_seconds
-    progress.submitted_payload = dict(payload.extra_payload or {})
+    progress.response_text = (note or "").strip() or f"Uploaded {len(serialized_files)} file(s)."
+    progress.is_correct = None
+    progress.score_percent = None
+    progress.attempt_count = attempt_number
+    progress.duration_seconds = max(0, progress.duration_seconds or 0) + max(0, duration_seconds)
+    progress.submitted_payload = normalized_payload
     progress.completed_at = utc_now()
     db.add(progress)
     _safe_log_user_activity(
         db,
         actor=current_student,
-        action_type="student_item_submitted",
+        action_type="student_upload_assessment_submitted",
         target_type="section_module_item",
         target_id=item.id,
         details={
             "module_id": module.id,
             "item_type": item.item_type,
             "attempt_count": progress.attempt_count,
-            "is_correct": progress.is_correct,
-            "score_percent": progress.score_percent,
-            "duration_seconds": payload.duration_seconds,
+            "file_count": len(serialized_files),
+            "duration_seconds": duration_seconds,
         },
     )
     module_progress = sync_module_progress(db, student_id=current_student.id, module=module)
@@ -374,7 +564,7 @@ def get_student_certificate_status(
         return CertificateStudentDownloadOut(
             eligible=False,
             section_name=assignment.section.name,
-            message="Finish all published modules first before downloading your certificate.",
+            message="Finish the first 12 published modules before downloading your certificate.",
             completion_date=_format_certificate_date(completion_date) if completion_date else None,
         )
     auto_archive_due_students(db)
@@ -406,8 +596,10 @@ def download_student_certificate(
     if not section_completion_ready(db, current_student.id, assignment.section_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Finish all published modules first before downloading your certificate.",
+            detail="Finish the first 12 published modules before downloading your certificate.",
         )
+    assignment.auto_archive_due_at = utc_now() + timedelta(hours=24)
+    db.add(assignment)
     _safe_log_user_activity(
         db,
         actor=current_student,
@@ -425,7 +617,18 @@ def download_student_certificate(
     completion_date = _format_certificate_date(assignment.course_completed_at)
     safe_display_name = escape(display_name)
     safe_completion_date = escape(completion_date)
-    template_background = _certificate_template_data_uri()
+    template_config = get_admin_certificate_template() or {}
+    template_background = build_template_data_uri(
+        str(template_config.get("template_file_path")).strip()
+        if template_config.get("template_file_path")
+        else None
+    )
+    signatory_name = (
+        str(template_config.get("signatory_name")).strip()
+        if template_config.get("signatory_name")
+        else "Admin Name"
+    )
+    safe_signatory_name = escape(signatory_name)
     if template_background:
         html = f"""
 <!doctype html>
@@ -481,12 +684,40 @@ def download_student_certificate(
         padding: 2px 10px;
         border-radius: 6px;
       }}
+      .signature-block {{
+        position: absolute;
+        right: 11.7%;
+        bottom: 7.9%;
+        width: 280px;
+        text-align: center;
+      }}
+      .signature-name {{
+        font-size: clamp(15px, 1.8vw, 28px);
+        font-weight: 800;
+        color: #2f3137;
+        line-height: 1.15;
+      }}
+      .signature-title {{
+        font-size: clamp(12px, 1.2vw, 20px);
+        color: #4b5563;
+        margin-top: 2px;
+      }}
+      .signature-org {{
+        font-size: clamp(12px, 1.1vw, 18px);
+        color: #4b5563;
+        margin-top: 1px;
+      }}
     </style>
   </head>
   <body>
     <div class="certificate">
       <div class="name">{safe_display_name}</div>
       <div class="date">{safe_completion_date}</div>
+      <div class="signature-block">
+        <div class="signature-name">{safe_signatory_name}</div>
+        <div class="signature-title">Head Instructor</div>
+        <div class="signature-org">Hand and Heart</div>
+      </div>
     </div>
   </body>
 </html>
@@ -499,23 +730,84 @@ def download_student_certificate(
     <meta charset="utf-8" />
     <title>FSL Basic Course Certificate</title>
     <style>
-      body {{ font-family: Georgia, serif; padding: 40px; background: #f5f4f1; color: #1c1c2e; }}
-      .card {{ max-width: 900px; margin: 0 auto; padding: 56px; border: 8px solid #2e44a8; background: white; }}
-      h1 {{ font-size: 42px; margin-bottom: 16px; }}
-      .accent {{ color: #2a8c3f; font-weight: bold; }}
-      .meta {{ margin-top: 32px; font-size: 14px; color: #555; }}
+      body {{
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        padding: 40px;
+        background: #f5f4f1;
+        color: #1c1c2e;
+      }}
+      .card {{
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 64px 56px;
+        border: 8px solid #2e44a8;
+        background: white;
+      }}
+      .line {{
+        text-align: center;
+        color: #355389;
+      }}
+      .line-award {{
+        font-size: 44px;
+        margin: 24px 0 10px;
+        font-weight: 300;
+      }}
+      .line-name {{
+        font-size: 64px;
+        font-weight: 800;
+        color: #2f3137;
+        margin: 0 0 16px;
+      }}
+      .line-complete {{
+        font-size: 34px;
+        margin: 12px 0 6px;
+        font-weight: 300;
+      }}
+      .line-course {{
+        font-size: 72px;
+        margin: 0;
+        font-weight: 800;
+      }}
+      .line-offered {{
+        font-size: 34px;
+        margin: 6px 0 26px;
+        font-weight: 300;
+      }}
+      .date {{
+        text-align: left;
+        color: #355389;
+        margin-top: 18px;
+        font-weight: 700;
+      }}
+      .signature {{
+        margin-top: 10px;
+        text-align: right;
+        color: #2f3137;
+      }}
+      .signature .name {{
+        font-size: 26px;
+        font-weight: 800;
+      }}
+      .signature .title,
+      .signature .org {{
+        font-size: 16px;
+        color: #4b5563;
+      }}
     </style>
   </head>
   <body>
     <div class="card">
-      <p>UGNAY Learning Hub</p>
-      <h1>Certificate of Completion</h1>
-      <p>This certificate is awarded to</p>
-      <p class="accent">{safe_display_name}</p>
-      <p>for successfully completing</p>
-      <p class="accent">FSL Basic Course</p>
-      <p>offered by Hand and Heart</p>
-      <p class="meta">Date completed: {safe_completion_date}</p>
+      <p class="line line-award">This certificate awarded to</p>
+      <p class="line line-name">{safe_display_name}</p>
+      <p class="line line-complete">for successfully completing</p>
+      <p class="line line-course">FSL Basic Course</p>
+      <p class="line line-offered">offered by Hand and Heart</p>
+      <p class="date">{safe_completion_date}</p>
+      <div class="signature">
+        <div class="name">{safe_signatory_name}</div>
+        <div class="title">Head Instructor</div>
+        <div class="org">Hand and Heart</div>
+      </div>
     </div>
   </body>
 </html>

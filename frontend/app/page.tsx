@@ -104,8 +104,7 @@ export default function LoginPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">UGNAY LMS</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">Log In</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Use the account given by your school or LMS admin. Registration and QR onboarding are no
-          longer part of the system.
+          Use the account given by your school or LMS admin.
         </p>
       </div>
 

@@ -23,9 +23,9 @@ const WORKFLOW_STEPS = [
       "Open any student profile to review batch placement, module progress, and item-by-item activity answers.",
   },
   {
-    label: "Coach practical work live",
+    label: "Review module submissions",
     detail:
-      "Use the lab to rehearse signs and verify whether each practical activity lane is stable enough for classroom use.",
+      "Open module submissions to score upload assessments, add feedback, and track learner output quality.",
   },
 ] as const;
 
@@ -70,17 +70,6 @@ export function TeacherHome() {
           href: "/teacher/progress",
           ctaLabel: "Open Progress View",
         },
-        {
-          eyebrow: "Practical recognition",
-          title: `${snapshot.readyLabModes}/${snapshot.totalLabModes} Lab Modes Ready`,
-          description:
-            snapshot.labAttentionModes > 0
-              ? `${snapshot.labAttentionModes} live lab lane still needs teacher caution.`
-              : "All live lab lanes are ready for guided practical coaching.",
-          badge: "LAB",
-          href: "/teacher/lab",
-          ctaLabel: "Open Lab Workspace",
-        },
       ]
     : [];
 
@@ -106,7 +95,7 @@ export function TeacherHome() {
       </div>
 
       {snapshot ? (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {cards.map((card, index) => (
             <TeacherWorkspaceCard key={card.title} themeIndex={index} {...card} />
           ))}

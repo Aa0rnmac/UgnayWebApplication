@@ -148,7 +148,8 @@ export type LmsModuleItemType =
   | "external_link_resource"
   | "multiple_choice_assessment"
   | "identification_assessment"
-  | "signing_lab_assessment";
+  | "signing_lab_assessment"
+  | "upload_assessment";
 
 export type ModuleAssetKind = "video" | "image" | "document" | "interactive";
 
@@ -179,6 +180,8 @@ export type TeacherSectionModule = {
   title: string;
   description: string;
   order_index: number;
+  created_by_teacher_id?: number | null;
+  instructor_name?: string | null;
   is_published: boolean;
   items: LmsModuleItem[];
 };
@@ -211,6 +214,8 @@ export type StudentCourseModule = {
   title: string;
   description: string;
   order_index: number;
+  created_by_teacher_id?: number | null;
+  instructor_name?: string | null;
   is_locked: boolean;
   status: string;
   progress_percent: number;
@@ -255,6 +260,17 @@ export type TeacherStudentItemReport = {
   attempt_count: number;
   duration_seconds: number;
   completed_at?: string | null;
+  attempt_details?: TeacherStudentAttemptDetail[];
+};
+
+export type TeacherStudentAttemptDetail = {
+  attempt_number: number;
+  status: string;
+  score_percent?: number | null;
+  correct_count: number;
+  wrong_count: number;
+  duration_seconds: number;
+  completed_at?: string | null;
 };
 
 export type TeacherStudentProgressReport = {
@@ -263,6 +279,45 @@ export type TeacherStudentProgressReport = {
   current_finished_module?: string | null;
   verdict: string;
   module_reports: TeacherStudentModuleReport[];
+};
+
+export type TeacherRubricCriterion = {
+  id: string;
+  criterion: string;
+  weight_percent: number;
+};
+
+export type TeacherRubricScore = {
+  rubric_id: string;
+  criterion: string;
+  weight_percent: number;
+  achieved_percent: number;
+  contributed_percent: number;
+};
+
+export type TeacherModuleSubmission = {
+  progress_id?: number | null;
+  module_id: number;
+  module_title: string;
+  item_id: number;
+  item_title: string;
+  item_order_index: number;
+  student_id: number;
+  student_name: string;
+  student_email?: string | null;
+  status: string;
+  submitted_at?: string | null;
+  attempt_count: number;
+  duration_seconds: number;
+  score_percent?: number | null;
+  max_points: number;
+  score_points?: number | null;
+  feedback?: string | null;
+  rubric_text?: string | null;
+  rubric_items?: TeacherRubricCriterion[];
+  rubric_scores?: TeacherRubricScore[];
+  rubric_score_percent?: number | null;
+  files: ModuleAsset[];
 };
 
 export type CertificateTemplateSummary = {
@@ -281,6 +336,16 @@ export type StudentCertificateDownloadStatus = {
   section_name?: string | null;
   message: string;
   completion_date?: string | null;
+};
+
+export type AdminCertificateTemplate = {
+  template_file_name?: string | null;
+  template_file_path?: string | null;
+  template_file_url?: string | null;
+  signatory_name?: string | null;
+  signatory_title?: string;
+  organization_name?: string;
+  updated_at?: string | null;
 };
 
 // Backward-compatible alias for older pages still using the previous name.
@@ -1339,6 +1404,66 @@ export function assignSectionMembers(
   );
 }
 
+export function getAdminCertificateTemplate(token?: string) {
+  return request<AdminCertificateTemplate>(
+    "/admin/certificate-template",
+    undefined,
+    token
+  );
+}
+
+export function upsertAdminCertificateTemplate(
+  payload: {
+    signatory_name?: string;
+    certificate_file?: File | null;
+  },
+  token?: string
+) {
+  const data = new FormData();
+  if (payload.signatory_name !== undefined) {
+    data.append("signatory_name", payload.signatory_name);
+  }
+  if (payload.certificate_file) {
+    data.append("certificate_file", payload.certificate_file);
+  }
+  return request<AdminCertificateTemplate>(
+    "/admin/certificate-template",
+    {
+      method: "POST",
+      body: data,
+    },
+    token
+  );
+}
+
+export function getAdminCertificateTemplatePreview(token?: string) {
+  return requestBlob("/admin/certificate-template/preview", undefined, token);
+}
+
+// Backward-compatible aliases for older admin pages.
+export function getAdminSectionCertificateTemplate(_sectionId: number, token?: string) {
+  return getAdminCertificateTemplate(token);
+}
+
+export function upsertAdminSectionCertificateTemplate(
+  _sectionId: number,
+  payload: {
+    signature_name?: string;
+    signature_title?: string;
+    signature_label?: string;
+    certificate_file?: File | null;
+  },
+  token?: string
+) {
+  return upsertAdminCertificateTemplate(
+    {
+      signatory_name: payload.signature_name,
+      certificate_file: payload.certificate_file,
+    },
+    token
+  );
+}
+
 export function getPendingCertificateTemplates(token?: string): Promise<CertificateTemplateSummary[]> {
   return request<CertificateTemplateSummary[]>("/admin/certificates/pending", undefined, token);
 }
@@ -1537,6 +1662,32 @@ export function deleteTeacherModuleItem(itemId: number, token?: string): Promise
   return request<TeacherSectionModule>(`/teacher/module-items/${itemId}`, { method: "DELETE" }, token);
 }
 
+export function getTeacherModuleSubmissions(
+  moduleId: number,
+  token?: string
+): Promise<TeacherModuleSubmission[]> {
+  return request<TeacherModuleSubmission[]>(`/teacher/modules/${moduleId}/submissions`, undefined, token);
+}
+
+export function gradeTeacherModuleSubmission(
+  progressId: number,
+  payload: {
+    score_points?: number;
+    feedback?: string | null;
+    rubric_scores?: Array<{ rubric_id: string; achieved_percent: number }>;
+  },
+  token?: string
+): Promise<TeacherModuleSubmission> {
+  return request<TeacherModuleSubmission>(
+    `/teacher/submission-progress/${progressId}/grade`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
 export function uploadTeacherCertificateTemplate(sectionId: number, file: File, token?: string) {
   const data = new FormData();
   data.append("certificate_file", file);
@@ -1587,6 +1738,33 @@ export function submitStudentItem(
     {
       method: "POST",
       body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function uploadStudentItemSubmission(
+  itemId: number,
+  payload: {
+    files: File[];
+    note?: string;
+    duration_seconds?: number;
+  },
+  token?: string
+) {
+  const data = new FormData();
+  for (const file of payload.files) {
+    data.append("files", file);
+  }
+  if (payload.note && payload.note.trim()) {
+    data.append("note", payload.note.trim());
+  }
+  data.append("duration_seconds", String(payload.duration_seconds ?? 60));
+  return request<StudentProgressUpdate>(
+    `/student/module-items/${itemId}/upload-submission`,
+    {
+      method: "POST",
+      body: data,
     },
     token
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import {
@@ -8,7 +8,6 @@ import {
   getTeacherSections,
   getTeacherStudentProgressReport,
   type TeacherSectionSummary,
-  type TeacherStudentItemReport,
   type TeacherStudentProgressReport,
   type TeacherStudentReportRow
 } from "@/lib/api";
@@ -19,19 +18,24 @@ type StudentTableRow = {
   student_email: string | null;
   section_id: number;
   section_name: string;
-  total_assessments: number;
-  pending_reports: number;
-  generated_reports: number;
-  average_score_percent: number;
   latest_activity_at: string | null;
 };
 
-function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return "-";
-  }
-  return `${value.toFixed(1)}%`;
-}
+type AssessmentAttemptRow = {
+  module_id: number;
+  module_title: string;
+  item_id: number;
+  item_title: string;
+  item_type: string;
+  order_index: number;
+  attempt_number: number;
+  status: string;
+  score_percent: number | null;
+  correct_count: number;
+  wrong_count: number;
+  duration_seconds: number;
+  completed_at: string | null;
+};
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) {
@@ -44,13 +48,6 @@ function formatDateTime(value: string | null | undefined): string {
   } catch {
     return value;
   }
-}
-
-function formatPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return "0%";
-  }
-  return `${value.toFixed(1)}%`;
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -81,157 +78,11 @@ function formatModuleDuration(status: string, totalSeconds: number): string {
   return status === "completed" ? formatDuration(totalSeconds) : "0s";
 }
 
-function toPdfSafeText(value: string): string {
-  return value.replace(/[^\x20-\x7E]/g, "?");
-}
-
-function escapePdfText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-}
-
-function pdfByteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
-}
-
-function wrapPdfLine(value: string, maxChars = 96): string[] {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized) {
-    return [""];
+function formatScore(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "-";
   }
-
-  const words = normalized.split(" ");
-  const lines: string[] = [];
-  let current = "";
-
-  for (const word of words) {
-    if (!current) {
-      if (word.length <= maxChars) {
-        current = word;
-      } else {
-        for (let index = 0; index < word.length; index += maxChars) {
-          lines.push(word.slice(index, index + maxChars));
-        }
-      }
-      continue;
-    }
-    const candidate = `${current} ${word}`;
-    if (candidate.length <= maxChars) {
-      current = candidate;
-      continue;
-    }
-    lines.push(current);
-    if (word.length <= maxChars) {
-      current = word;
-    } else {
-      for (let index = 0; index < word.length; index += maxChars) {
-        const chunk = word.slice(index, index + maxChars);
-        if (chunk.length === maxChars || index + maxChars < word.length) {
-          lines.push(chunk);
-        } else {
-          current = chunk;
-        }
-      }
-      if (current === lines[lines.length - 1]) {
-        current = "";
-      }
-    }
-  }
-
-  if (current) {
-    lines.push(current);
-  }
-  return lines.length > 0 ? lines : [normalized];
-}
-
-function buildPdfBlobFromLines(lines: string[]): Blob {
-  const maxLinesPerPage = 48;
-  const pages: string[][] = [];
-  for (let index = 0; index < lines.length; index += maxLinesPerPage) {
-    pages.push(lines.slice(index, index + maxLinesPerPage));
-  }
-  if (pages.length === 0) {
-    pages.push(["No report data available."]);
-  }
-
-  const objects = new Map<number, string>();
-  const pageEntries: Array<{ pageObj: number; contentObj: number }> = [];
-  let nextObject = 3;
-
-  for (const pageLines of pages) {
-    const contentObjectId = nextObject++;
-    const pageObjectId = nextObject++;
-
-    const commands: string[] = ["BT", "/F1 10 Tf", "14 TL", "40 770 Td"];
-    pageLines.forEach((line, lineIndex) => {
-      const safeLine = escapePdfText(toPdfSafeText(line));
-      if (lineIndex === 0) {
-        commands.push(`(${safeLine}) Tj`);
-      } else {
-        commands.push(`T* (${safeLine}) Tj`);
-      }
-    });
-    commands.push("ET");
-
-    const stream = commands.join("\n");
-    objects.set(
-      contentObjectId,
-      `<< /Length ${pdfByteLength(stream)} >>\nstream\n${stream}\nendstream`
-    );
-    pageEntries.push({ pageObj: pageObjectId, contentObj: contentObjectId });
-  }
-
-  const fontObjectId = nextObject++;
-  objects.set(fontObjectId, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-
-  pageEntries.forEach((entry) => {
-    objects.set(
-      entry.pageObj,
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${entry.contentObj} 0 R >>`
-    );
-  });
-
-  const kids = pageEntries.map((entry) => `${entry.pageObj} 0 R`).join(" ");
-  objects.set(2, `<< /Type /Pages /Count ${pageEntries.length} /Kids [${kids}] >>`);
-  objects.set(1, "<< /Type /Catalog /Pages 2 0 R >>");
-
-  const maxObject = nextObject - 1;
-  const header = "%PDF-1.4\n%\u00E2\u00E3\u00CF\u00D3\n";
-  const parts: string[] = [header];
-  const offsets: number[] = new Array(maxObject + 1).fill(0);
-  let cursor = pdfByteLength(header);
-
-  for (let objectId = 1; objectId <= maxObject; objectId += 1) {
-    const body = objects.get(objectId) ?? "";
-    const objectText = `${objectId} 0 obj\n${body}\nendobj\n`;
-    offsets[objectId] = cursor;
-    parts.push(objectText);
-    cursor += pdfByteLength(objectText);
-  }
-
-  const xrefOffset = cursor;
-  let xref = `xref\n0 ${maxObject + 1}\n`;
-  xref += "0000000000 65535 f \n";
-  for (let objectId = 1; objectId <= maxObject; objectId += 1) {
-    xref += `${String(offsets[objectId]).padStart(10, "0")} 00000 n \n`;
-  }
-  const trailer = `trailer\n<< /Size ${maxObject + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  parts.push(xref, trailer);
-
-  return new Blob(parts, { type: "application/pdf" });
-}
-
-function buildAssessmentRows(
-  report: TeacherStudentProgressReport
-): Array<TeacherStudentItemReport & { module_id: number; module_title: string }> {
-  return report.module_reports.flatMap((module) =>
-    (module.item_reports ?? [])
-      .filter((item) => item.item_type.endsWith("_assessment"))
-      .map((item) => ({
-        ...item,
-        module_id: module.module_id,
-        module_title: module.module_title
-      }))
-  );
+  return `${value.toFixed(1)}%`;
 }
 
 function studentDisplayName(
@@ -241,56 +92,64 @@ function studentDisplayName(
   return fullName || student.username;
 }
 
-function buildStudentReportLines(
-  report: TeacherStudentProgressReport,
-  student: StudentTableRow
-): string[] {
-  const lines: string[] = [];
-  const pushWrapped = (value: string) => {
-    wrapPdfLine(value).forEach((line) => lines.push(line));
-  };
-
-  const generatedAt = new Date().toLocaleString("en-PH");
-  lines.push("UGNAY LMS - STUDENT PROGRESS REPORT");
-  lines.push(`Generated: ${generatedAt}`);
-  lines.push("");
-  pushWrapped(`Student: ${student.student_name}`);
-  pushWrapped(`Email: ${student.student_email ?? "-"}`);
-  pushWrapped(`Section: ${report.section?.name ?? student.section_name}`);
-  pushWrapped(`Current Finished Module: ${report.current_finished_module ?? "No finished module yet"}`);
-  pushWrapped(`Verdict / Focus: ${report.verdict}`);
-  lines.push("");
-  lines.push("GENERAL MODULE PROGRESS");
+function buildAssessmentAttemptRows(report: TeacherStudentProgressReport): AssessmentAttemptRow[] {
+  const rows: AssessmentAttemptRow[] = [];
 
   for (const module of report.module_reports) {
-    pushWrapped(`Module: ${module.module_title}`);
-    pushWrapped(
-      `Status: ${displayStatus(module.status)} | Progress: ${module.progress_percent}% | Correct: ${module.correct_count} | Mistakes: ${module.wrong_count} | Attempts: ${module.attempt_count} | Duration: ${formatModuleDuration(module.status, module.total_duration_seconds)}`
-    );
-    lines.push("");
+    for (const item of module.item_reports ?? []) {
+      if (!item.item_type.endsWith("_assessment")) {
+        continue;
+      }
+
+      const attemptDetails = item.attempt_details ?? [];
+      if (attemptDetails.length > 0) {
+        for (const attempt of attemptDetails) {
+          rows.push({
+            module_id: module.module_id,
+            module_title: module.module_title,
+            item_id: item.item_id,
+            item_title: item.item_title,
+            item_type: item.item_type,
+            order_index: item.order_index,
+            attempt_number: Math.max(1, attempt.attempt_number || 1),
+            status: attempt.status || item.status,
+            score_percent: attempt.score_percent ?? null,
+            correct_count: Math.max(0, attempt.correct_count ?? 0),
+            wrong_count: Math.max(0, attempt.wrong_count ?? 0),
+            duration_seconds: Math.max(0, attempt.duration_seconds ?? 0),
+            completed_at: attempt.completed_at ?? null
+          });
+        }
+        continue;
+      }
+
+      if ((item.attempt_count ?? 0) <= 0 && !item.completed_at) {
+        continue;
+      }
+      rows.push({
+        module_id: module.module_id,
+        module_title: module.module_title,
+        item_id: item.item_id,
+        item_title: item.item_title,
+        item_type: item.item_type,
+        order_index: item.order_index,
+        attempt_number: Math.max(item.attempt_count || 1, 1),
+        status: item.status,
+        score_percent: item.score_percent ?? null,
+        correct_count: item.is_correct === true ? 1 : 0,
+        wrong_count: item.is_correct === false ? 1 : 0,
+        duration_seconds: Math.max(0, item.duration_seconds ?? 0),
+        completed_at: item.completed_at ?? null
+      });
+    }
   }
 
-  lines.push("ASSESSMENT DETAILS");
-  const assessmentRows = buildAssessmentRows(report);
-  if (assessmentRows.length === 0) {
-    lines.push("No assessment details yet.");
-    return lines;
-  }
-
-  for (const item of assessmentRows) {
-    pushWrapped(`Module: ${item.module_title}`);
-    pushWrapped(`Assessment: ${item.order_index}. ${item.item_title}`);
-    pushWrapped(
-      `Type: ${displayType(item.item_type)} | Status: ${displayStatus(item.status)} | Score: ${formatScore(item.score_percent)} | Attempts: ${item.attempt_count} | Duration: ${formatDuration(item.duration_seconds)} | Completed At: ${formatDateTime(item.completed_at)}`
-    );
-    lines.push("");
-  }
-
-  return lines;
+  return rows;
 }
 
 export default function TeacherReportsPage() {
   const params = useSearchParams();
+  const detailsSectionRef = useRef<HTMLDivElement | null>(null);
   const [sections, setSections] = useState<TeacherSectionSummary[]>([]);
   const [allStudents, setAllStudents] = useState<StudentTableRow[]>([]);
   const [selectedSectionId, setSelectedSectionId] = useState(params.get("studentSection") ?? "all");
@@ -331,10 +190,6 @@ export default function TeacherReportsPage() {
               student_email: student.email ?? null,
               section_id: sectionInfo.id,
               section_name: sectionInfo.name,
-              total_assessments: reportRow?.total_assessments ?? 0,
-              pending_reports: reportRow?.pending_reports ?? 0,
-              generated_reports: reportRow?.generated_reports ?? 0,
-              average_score_percent: reportRow?.average_score_percent ?? 0,
               latest_activity_at: reportRow?.latest_activity_at ?? null
             });
           }
@@ -378,7 +233,7 @@ export default function TeacherReportsPage() {
     if (!detailReport) {
       return [];
     }
-    const allRows = buildAssessmentRows(detailReport);
+    const allRows = buildAssessmentAttemptRows(detailReport);
     if (selectedDetailModuleId === "all") {
       return allRows;
     }
@@ -401,6 +256,13 @@ export default function TeacherReportsPage() {
     }
   }
 
+  function onViewModuleDetails(moduleId: number) {
+    setSelectedDetailModuleId(moduleId);
+    window.requestAnimationFrame(() => {
+      detailsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
   function closeDetails() {
     setSelectedStudent(null);
     setDetailReport(null);
@@ -409,34 +271,13 @@ export default function TeacherReportsPage() {
     setIsDetailLoading(false);
   }
 
-  function downloadStudentReportPdf() {
-    if (!selectedStudent || !detailReport) {
-      return;
-    }
-    const lines = buildStudentReportLines(detailReport, selectedStudent);
-    const blob = buildPdfBlobFromLines(lines);
-    const url = URL.createObjectURL(blob);
-    const safeName =
-      selectedStudent.student_name
-        .replace(/[^a-zA-Z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "")
-        .toLowerCase() || `student_${selectedStudent.student_id}`;
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${safeName}_full_report.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }
-
   return (
     <section className="space-y-4">
       <div className="panel">
-        <p className="text-xs fw-semibold text-uppercase tracking-[0.2em] text-brandBlue">Teacher LMS</p>
+        <p className="text-xs fw-semibold text-uppercase tracking-[0.2em] text-brandBlue">Teacher Reports</p>
         <h2 className="mt-2 text-3xl fw-bold title-gradient">Student Reports</h2>
         <p className="mt-2 text-sm text-slate-700">
-          View all students, filter by section, search by name, and open full progress details.
+          View all students, filter by section, search by name, and open student progress details.
         </p>
       </div>
 
@@ -488,23 +329,20 @@ export default function TeacherReportsPage() {
                 <th>Student</th>
                 <th>Email</th>
                 <th>Section</th>
-                <th>Total Assessments</th>
-                <th>Average Score</th>
-                <th>Latest Activity</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td className="text-muted" colSpan={7}>
+                  <td className="text-muted" colSpan={4}>
                     Loading students...
                   </td>
                 </tr>
               ) : null}
               {!isLoading && filteredStudents.length === 0 ? (
                 <tr>
-                  <td className="text-muted" colSpan={7}>
+                  <td className="text-muted" colSpan={4}>
                     No students found for this filter/search.
                   </td>
                 </tr>
@@ -515,16 +353,13 @@ export default function TeacherReportsPage() {
                       <td className="fw-semibold">{row.student_name}</td>
                       <td>{row.student_email || "-"}</td>
                       <td>{row.section_name}</td>
-                      <td>{row.total_assessments}</td>
-                      <td>{formatPercent(row.average_score_percent)}</td>
-                      <td>{formatDateTime(row.latest_activity_at)}</td>
                       <td>
                         <button
                           className="btn btn-sm btn-outline-primary"
                           onClick={() => void onViewDetails(row)}
                           type="button"
                         >
-                          View Details
+                          View Progress
                         </button>
                       </td>
                     </tr>
@@ -592,9 +427,6 @@ export default function TeacherReportsPage() {
                               <th>Module</th>
                               <th>Status</th>
                               <th>Progress</th>
-                              <th>Correct</th>
-                              <th>Mistakes</th>
-                              <th>Attempts</th>
                               <th>Duration</th>
                               <th>Action</th>
                             </tr>
@@ -605,17 +437,14 @@ export default function TeacherReportsPage() {
                                 <td className="fw-semibold">{module.module_title}</td>
                                 <td className="text-capitalize">{displayStatus(module.status)}</td>
                                 <td>{module.progress_percent}%</td>
-                                <td>{module.correct_count}</td>
-                                <td>{module.wrong_count}</td>
-                                <td>{module.attempt_count}</td>
                                 <td>{formatModuleDuration(module.status, module.total_duration_seconds)}</td>
                                 <td>
                                   <button
                                     className={`btn btn-sm ${selectedDetailModuleId === module.module_id ? "btn-primary" : "btn-outline-primary"}`}
-                                    onClick={() => setSelectedDetailModuleId(module.module_id)}
+                                    onClick={() => onViewModuleDetails(module.module_id)}
                                     type="button"
                                   >
-                                    View in Detailed
+                                    View Details
                                   </button>
                                 </td>
                               </tr>
@@ -625,7 +454,7 @@ export default function TeacherReportsPage() {
                       </div>
                     </div>
 
-                    <div>
+                    <div ref={detailsSectionRef}>
                       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                         <h6 className="fw-bold mb-0">Assessment Details</h6>
                         <div className="d-flex align-items-center gap-2">
@@ -652,31 +481,33 @@ export default function TeacherReportsPage() {
                               <th>Module</th>
                               <th>Assessment</th>
                               <th>Type</th>
+                              <th>Attempt</th>
                               <th>Status</th>
                               <th>Score</th>
-                              <th>Attempts</th>
-                              <th>Assessment Duration</th>
+                              <th>Correct</th>
+                              <th>Mistakes</th>
+                              <th>Duration</th>
                               <th>Completed At</th>
                             </tr>
                           </thead>
                           <tbody>
                             {assessmentRows.length === 0 ? (
                               <tr>
-                                <td className="text-muted" colSpan={8}>
+                                <td className="text-muted" colSpan={10}>
                                   No assessment details yet.
                                 </td>
                               </tr>
                             ) : (
                               assessmentRows.map((item) => (
-                                <tr key={item.item_id}>
+                                <tr key={`${item.item_id}-${item.attempt_number}-${item.completed_at ?? "none"}`}>
                                   <td className="fw-semibold">{item.module_title}</td>
-                                  <td>
-                                    {item.order_index}. {item.item_title}
-                                  </td>
+                                  <td>{item.item_title}</td>
                                   <td>{displayType(item.item_type)}</td>
+                                  <td>{item.attempt_number}</td>
                                   <td className="text-capitalize">{displayStatus(item.status)}</td>
-                                  <td>{item.score_percent === null || item.score_percent === undefined ? "-" : `${item.score_percent.toFixed(1)}%`}</td>
-                                  <td>{item.attempt_count}</td>
+                                  <td>{formatScore(item.score_percent)}</td>
+                                  <td>{item.correct_count}</td>
+                                  <td>{item.wrong_count}</td>
                                   <td>{formatDuration(item.duration_seconds)}</td>
                                   <td>{formatDateTime(item.completed_at)}</td>
                                 </tr>
@@ -690,14 +521,6 @@ export default function TeacherReportsPage() {
                 ) : null}
               </div>
               <div className="modal-footer">
-                <button
-                  className="btn btn-primary"
-                  disabled={!detailReport || isDetailLoading}
-                  onClick={downloadStudentReportPdf}
-                  type="button"
-                >
-                  Download PDF
-                </button>
                 <button className="btn btn-secondary" onClick={closeDetails} type="button">
                   Close
                 </button>

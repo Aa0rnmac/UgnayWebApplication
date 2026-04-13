@@ -1,18 +1,22 @@
 "use client";
 
-import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { useAuth } from "@/components/auth-context";
 
 import {
   createTeacherModuleItem,
   createTeacherSectionModule,
   deleteTeacherModuleItem,
+  getTeacherModuleSubmissions,
   getTeacherSection,
   getTeacherSectionModules,
   getTeacherSections,
+  gradeTeacherModuleSubmission,
   type NumbersCategory,
   type RecognitionMode,
   resolveUploadsBase,
+  type TeacherModuleSubmission,
   updateTeacherModuleItem,
   updateTeacherModule,
   uploadTeacherModuleItemAsset,
@@ -25,10 +29,11 @@ import {
 } from "@/lib/api";
 
 const ITEM_TYPE_OPTIONS = [
-  { value: "readable", label: "Resources (text + files)" },
+  { value: "readable", label: "Resources" },
   { value: "multiple_choice_assessment", label: "Multiple Choice" },
   { value: "identification_assessment", label: "Identification" },
-  { value: "signing_lab_assessment", label: "Camera Interface" }
+  { value: "signing_lab_assessment", label: "Camera Interface" },
+  { value: "upload_assessment", label: "Upload Assessment" }
 ] as const;
 
 type BuilderItemType = (typeof ITEM_TYPE_OPTIONS)[number]["value"];
@@ -138,6 +143,12 @@ type SigningLabEntryDraft = {
   id: string;
   prompt: string;
   expectedAnswer: string;
+};
+
+type UploadRubricDraft = {
+  id: string;
+  criterion: string;
+  weightPercent: number;
 };
 
 function createMcqQuestionId() {
@@ -293,6 +304,17 @@ function createSigningLabEntryDraft(partial?: Partial<SigningLabEntryDraft>): Si
   };
 }
 
+function createUploadRubricDraft(partial?: Partial<UploadRubricDraft>): UploadRubricDraft {
+  return {
+    id: partial?.id ?? createMcqQuestionId(),
+    criterion: partial?.criterion ?? "",
+    weightPercent:
+      typeof partial?.weightPercent === "number" && Number.isFinite(partial.weightPercent)
+        ? Math.min(Math.max(partial.weightPercent, 0), 100)
+        : 25,
+  };
+}
+
 function parseSigningLabEntryDrafts(item: LmsModuleItem): SigningLabEntryDraft[] {
   const rawQuestionSet = item.config.questions;
   if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
@@ -322,6 +344,64 @@ function parseSigningLabEntryDrafts(item: LmsModuleItem): SigningLabEntryDraft[]
   const legacyPrompt = typeof item.config.question === "string" ? item.config.question : "";
   const legacyExpected = typeof item.config.expected_answer === "string" ? item.config.expected_answer : "";
   return [createSigningLabEntryDraft({ id: "q1", prompt: legacyPrompt, expectedAnswer: legacyExpected })];
+}
+
+function parseUploadRubricDrafts(item: LmsModuleItem): UploadRubricDraft[] {
+  const rawRubrics = item.config.rubric_items;
+  if (Array.isArray(rawRubrics) && rawRubrics.length > 0) {
+    const parsed = rawRubrics
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const criterion =
+          typeof row.criterion === "string"
+            ? row.criterion
+            : typeof row.question === "string"
+              ? row.question
+              : "";
+        const rawWeight =
+          typeof row.weight_percent === "number"
+            ? row.weight_percent
+            : typeof row.weightPercent === "number"
+              ? row.weightPercent
+              : typeof row.weight_percent === "string"
+                ? Number.parseFloat(row.weight_percent)
+                : Number.NaN;
+        const normalizedWeight = Number.isFinite(rawWeight)
+          ? Math.min(Math.max(rawWeight, 0), 100)
+          : 0;
+        if (!criterion.trim()) {
+          return null;
+        }
+        return createUploadRubricDraft({
+          id: typeof row.id === "string" && row.id.trim() ? row.id.trim() : `rubric-${index + 1}`,
+          criterion,
+          weightPercent: normalizedWeight,
+        });
+      })
+      .filter((entry): entry is UploadRubricDraft => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const rubricText = typeof item.config.rubric_text === "string" ? item.config.rubric_text : "";
+  if (!rubricText.trim()) {
+    return [createUploadRubricDraft({ id: "rubric-1", criterion: "", weightPercent: 25 })];
+  }
+  return rubricText
+    .split(/\n+/g)
+    .map((line, index) => line.trim())
+    .filter(Boolean)
+    .map((line, index, all) =>
+      createUploadRubricDraft({
+        id: `rubric-${index + 1}`,
+        criterion: line,
+        weightPercent: Number((100 / Math.max(1, all.length)).toFixed(2)),
+      })
+    );
 }
 
 function parseRequiredCount(value: unknown): number | null {
@@ -551,9 +631,71 @@ function resolveAssetUrl(asset: ModuleAsset): string {
   return `${resolveUploadsBase()}/${path}`;
 }
 
+type SubmissionRubricCriterion = {
+  id: string;
+  criterion: string;
+  weight_percent: number;
+};
+
+function normalizeSubmissionRubricCriteria(
+  submission: TeacherModuleSubmission
+): SubmissionRubricCriterion[] {
+  if (Array.isArray(submission.rubric_items) && submission.rubric_items.length > 0) {
+    return submission.rubric_items
+      .map((entry, index) => {
+        const criterion = String(entry.criterion ?? "").trim();
+        if (!criterion) {
+          return null;
+        }
+        const weight = Number.parseFloat(String(entry.weight_percent ?? 0));
+        const normalizedWeight = Number.isFinite(weight) ? Math.min(Math.max(weight, 0), 100) : 0;
+        const resolvedId =
+          String(entry.id ?? "").trim() || `rubric-${index + 1}`;
+        return {
+          id: resolvedId,
+          criterion,
+          weight_percent: Number(normalizedWeight.toFixed(2)),
+        };
+      })
+      .filter((entry): entry is SubmissionRubricCriterion => Boolean(entry));
+  }
+
+  const rubricText = (submission.rubric_text ?? "").trim();
+  if (!rubricText) {
+    return [];
+  }
+  const lines = rubricText
+    .split(/\n+/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    return [];
+  }
+  const defaultWeight = Number((100 / lines.length).toFixed(2));
+  return lines.map((line, index) => {
+    const weightedMatch = line.match(/^(.*?)(?:\s*\(([\d.]+)%\))$/);
+    const criterion = weightedMatch?.[1]?.trim() || line;
+    const parsedWeight = weightedMatch?.[2] ? Number.parseFloat(weightedMatch[2]) : Number.NaN;
+    const weightPercent = Number.isFinite(parsedWeight)
+      ? Math.min(Math.max(parsedWeight, 0), 100)
+      : defaultWeight;
+    return {
+      id: `rubric-${index + 1}`,
+      criterion,
+      weight_percent: Number(weightPercent.toFixed(2)),
+    };
+  });
+}
+
 export default function TeacherSectionsPage() {
+  const { id: currentTeacherId } = useAuth();
   const params = useSearchParams();
+  const routeParams = useParams<{ moduleId?: string | string[] }>();
   const sectionQuery = params.get("section");
+  const routeModuleId = Array.isArray(routeParams?.moduleId)
+    ? routeParams.moduleId[0]
+    : routeParams?.moduleId;
+  const moduleQuery = params.get("module") ?? routeModuleId ?? "";
 
   const [sections, setSections] = useState<TeacherSectionSummary[]>([]);
   const [selectedSectionId, setSelectedSectionId] = useState(sectionQuery ?? "");
@@ -569,7 +711,11 @@ export default function TeacherSectionsPage() {
 
   const [newModuleTitle, setNewModuleTitle] = useState("");
   const [newModuleDescription, setNewModuleDescription] = useState("");
-  const [selectedModuleId, setSelectedModuleId] = useState<string>("");
+  const [selectedModuleId, setSelectedModuleId] = useState<string>(moduleQuery ?? "");
+  const [showCreateModuleModal, setShowCreateModuleModal] = useState(false);
+  const [isCreatingModule, setIsCreatingModule] = useState(false);
+  const modulesPanelRef = useRef<HTMLDivElement | null>(null);
+  const editorPanelRef = useRef<HTMLDivElement | null>(null);
 
   const [itemTitle, setItemTitle] = useState("");
   const [itemType, setItemType] = useState<BuilderItemType>("readable");
@@ -595,10 +741,34 @@ export default function TeacherSectionsPage() {
   ]);
   const [signingLabRequireAll, setSigningLabRequireAll] = useState(true);
   const [signingLabRequiredCount, setSigningLabRequiredCount] = useState(1);
+  const [uploadRubrics, setUploadRubrics] = useState<UploadRubricDraft[]>([
+    createUploadRubricDraft({ id: "rubric-1", weightPercent: 25 }),
+  ]);
+  const [uploadMaxPoints, setUploadMaxPoints] = useState(100);
+  const [activeSubmissionModuleId, setActiveSubmissionModuleId] = useState<number | null>(null);
+  const [moduleSubmissions, setModuleSubmissions] = useState<TeacherModuleSubmission[]>([]);
+  const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
+  const [gradingProgressId, setGradingProgressId] = useState<number | null>(null);
+  const [feedbackDraftByProgressId, setFeedbackDraftByProgressId] = useState<Record<number, string>>({});
+  const [activeRubricSubmission, setActiveRubricSubmission] = useState<TeacherModuleSubmission | null>(null);
+  const [activeRubricCriteria, setActiveRubricCriteria] = useState<SubmissionRubricCriterion[]>([]);
+  const [rubricAchievedByCriterionId, setRubricAchievedByCriterionId] = useState<Record<string, number>>({});
 
   const selectedModule = useMemo(
     () => modules.find((module) => String(module.id) === selectedModuleId) ?? null,
     [modules, selectedModuleId]
+  );
+  const canManageModule = (module: TeacherSectionModule | null): boolean =>
+    Boolean(module && (module.created_by_teacher_id == null || module.created_by_teacher_id === currentTeacherId));
+  const canEditSelectedModule = canManageModule(selectedModule);
+  const selectedModuleInstructorName =
+    selectedModule?.instructor_name?.trim() || "Unknown Instructor";
+  const activeSubmissionModule = useMemo(
+    () =>
+      activeSubmissionModuleId !== null
+        ? modules.find((module) => module.id === activeSubmissionModuleId) ?? null
+        : null,
+    [activeSubmissionModuleId, modules]
   );
   const editingItem = useMemo(
     () => selectedModule?.items.find((item) => item.id === editingItemId) ?? null,
@@ -609,6 +779,40 @@ export default function TeacherSectionsPage() {
     () => selectedModule?.items.find((item) => item.id === previewItemId) ?? null,
     [selectedModule, previewItemId]
   );
+  const activeRubricTotals = useMemo(() => {
+    if (!activeRubricSubmission) {
+      return null;
+    }
+    const criterionRows = activeRubricCriteria.map((criterion) => {
+      const achievedRaw = rubricAchievedByCriterionId[criterion.id] ?? 0;
+      const achievedPercent = Math.min(Math.max(achievedRaw, 0), 100);
+      const contributedPercent = (criterion.weight_percent * achievedPercent) / 100;
+      return {
+        ...criterion,
+        achievedPercent: Number(achievedPercent.toFixed(2)),
+        contributedPercent: Number(contributedPercent.toFixed(2)),
+      };
+    });
+    const totalPercent = Number(
+      Math.min(
+        Math.max(
+          criterionRows.reduce((sum, row) => sum + row.contributedPercent, 0),
+          0
+        ),
+        100
+      ).toFixed(2)
+    );
+    const maxPoints = Number.isFinite(activeRubricSubmission.max_points)
+      ? activeRubricSubmission.max_points
+      : 100;
+    const scorePoints = Number(((totalPercent / 100) * maxPoints).toFixed(2));
+    return {
+      criterionRows,
+      totalPercent,
+      scorePoints,
+      maxPoints,
+    };
+  }, [activeRubricSubmission, activeRubricCriteria, rubricAchievedByCriterionId]);
   const existingReadableAttachmentCount = useMemo(() => {
     if (!editingItem || editingItem.item_type !== "readable") {
       return 0;
@@ -698,7 +902,7 @@ export default function TeacherSectionsPage() {
     });
   }
 
-  async function refreshSection(sectionId: string) {
+  async function refreshSection(sectionId: string, preferredModuleId?: string | null) {
     if (!sectionId) {
       setSelectedSection(null);
       setModules([]);
@@ -712,6 +916,7 @@ export default function TeacherSectionsPage() {
     ]);
     setSelectedSection(sectionData);
     setModules(moduleData);
+    const normalizedPreferredModuleId = (preferredModuleId || "").trim();
     if (editingItemId !== null) {
       const stillExists = moduleData.some((module) => module.items.some((item) => item.id === editingItemId));
       if (!stillExists) {
@@ -728,9 +933,17 @@ export default function TeacherSectionsPage() {
       setSelectedModuleId("");
       return;
     }
-    if (!moduleData.some((module) => String(module.id) === selectedModuleId)) {
-      setSelectedModuleId(String(moduleData[0].id));
+    if (
+      normalizedPreferredModuleId &&
+      moduleData.some((module) => String(module.id) === normalizedPreferredModuleId)
+    ) {
+      setSelectedModuleId(normalizedPreferredModuleId);
+      return;
     }
+    if (selectedModuleId && moduleData.some((module) => String(module.id) === selectedModuleId)) {
+      return;
+    }
+    setSelectedModuleId("");
   }
 
   useEffect(() => {
@@ -740,11 +953,21 @@ export default function TeacherSectionsPage() {
         const initial = sectionQuery || (data[0] ? String(data[0].section.id) : "");
         setSelectedSectionId(initial);
         if (initial) {
-          void refreshSection(initial);
+          void refreshSection(initial, moduleQuery);
         }
       })
       .catch((requestError: Error) => setError(requestError.message));
-  }, [sectionQuery]);
+  }, [moduleQuery, sectionQuery]);
+
+  useEffect(() => {
+    if (!selectedModuleId || !selectedModule) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      editorPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [selectedModule, selectedModuleId]);
 
   function clearItemBuilder() {
     setItemTitle("");
@@ -763,10 +986,16 @@ export default function TeacherSectionsPage() {
     setSigningLabEntries([createSigningLabEntryDraft({ id: "q1" })]);
     setSigningLabRequireAll(true);
     setSigningLabRequiredCount(1);
+    setUploadRubrics([createUploadRubricDraft({ id: "rubric-1", weightPercent: 25 })]);
+    setUploadMaxPoints(100);
     setEditingItemId(null);
   }
 
   function beginEditItem(item: LmsModuleItem) {
+    if (!canEditSelectedModule) {
+      setError("View only. Only the teacher who created this module can edit it.");
+      return;
+    }
     setEditingItemId(item.id);
     setItemType(normalizeBuilderItemType(item.item_type));
     setItemTitle(item.title);
@@ -827,6 +1056,30 @@ export default function TeacherSectionsPage() {
       setSigningLabRequiredCount(resolvedRequiredCount);
       setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
       setIdentificationQuestions([createIdentificationQuestionDraft({ id: "q1" })]);
+      return;
+    }
+
+    if (item.item_type === "upload_assessment") {
+      const rawMaxPoints = item.config.max_points;
+      const parsedMaxPoints =
+        typeof rawMaxPoints === "number"
+          ? rawMaxPoints
+          : typeof rawMaxPoints === "string"
+            ? Number.parseFloat(rawMaxPoints)
+            : Number.NaN;
+      setUploadRubrics(parseUploadRubricDrafts(item));
+      setUploadMaxPoints(
+        Number.isFinite(parsedMaxPoints) && parsedMaxPoints > 0
+          ? Math.min(Math.max(parsedMaxPoints, 1), 100)
+          : 100
+      );
+      setItemQuestion("");
+      setItemAnswer("");
+      setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
+      setIdentificationQuestions([createIdentificationQuestionDraft({ id: "q1" })]);
+      setSigningLabEntries([createSigningLabEntryDraft({ id: "q1" })]);
+      setSigningLabRequireAll(true);
+      setSigningLabRequiredCount(1);
       return;
     }
 
@@ -1052,6 +1305,54 @@ export default function TeacherSectionsPage() {
           ? {
               ...entry,
               expectedAnswer: value,
+            }
+          : entry
+      )
+    );
+  }
+
+  function addUploadRubric(afterIndex?: number) {
+    setUploadRubrics((current) => {
+      const next = [...current];
+      const insertAt =
+        typeof afterIndex === "number"
+          ? Math.min(Math.max(afterIndex + 1, 0), next.length)
+          : next.length;
+      next.splice(insertAt, 0, createUploadRubricDraft());
+      return next;
+    });
+  }
+
+  function removeUploadRubric(rubricIndex: number) {
+    setUploadRubrics((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+      return current.filter((_, index) => index !== rubricIndex);
+    });
+  }
+
+  function updateUploadRubricCriterion(rubricIndex: number, value: string) {
+    setUploadRubrics((current) =>
+      current.map((entry, index) =>
+        index === rubricIndex
+          ? {
+              ...entry,
+              criterion: value,
+            }
+          : entry
+      )
+    );
+  }
+
+  function updateUploadRubricWeight(rubricIndex: number, value: number) {
+    const normalized = Math.min(Math.max(value, 0), 100);
+    setUploadRubrics((current) =>
+      current.map((entry, index) =>
+        index === rubricIndex
+          ? {
+              ...entry,
+              weightPercent: normalized,
             }
           : entry
       )
@@ -1393,6 +1694,7 @@ export default function TeacherSectionsPage() {
     }
     setError(null);
     setMessage(null);
+    setIsCreatingModule(true);
     try {
       await createTeacherSectionModule(Number(selectedSectionId), {
         title: newModuleTitle,
@@ -1400,10 +1702,13 @@ export default function TeacherSectionsPage() {
       });
       setNewModuleTitle("");
       setNewModuleDescription("");
+      setShowCreateModuleModal(false);
       setMessage("Module added.");
-      await refreshSection(selectedSectionId);
+      await refreshSection(selectedSectionId, null);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to create module.");
+    } finally {
+      setIsCreatingModule(false);
     }
   }
 
@@ -1411,6 +1716,10 @@ export default function TeacherSectionsPage() {
     event.preventDefault();
     if (!selectedModuleId) {
       setError("Choose a module first.");
+      return;
+    }
+    if (!selectedModule || !canManageModule(selectedModule)) {
+      setError("View only. Only the teacher who created this module can edit it.");
       return;
     }
 
@@ -1422,6 +1731,19 @@ export default function TeacherSectionsPage() {
       let config: Record<string, unknown> = {};
       let mcqQuestionsForUpload: Array<{ question_key: string; promptFile: File | null }> = [];
       let identificationQuestionsForUpload: Array<{ question_key: string; promptFile: File | null }> = [];
+      const existingAssessmentAttachments =
+        isEditingItem &&
+        editingItem &&
+        (itemType === "multiple_choice_assessment" || itemType === "identification_assessment")
+          ? getItemAttachments(editingItem).map((asset) => ({
+              resource_kind: asset.resource_kind,
+              resource_file_name: asset.resource_file_name,
+              resource_file_path: asset.resource_file_path,
+              resource_mime_type: asset.resource_mime_type ?? null,
+              resource_url: asset.resource_url ?? null,
+              label: asset.label ?? null,
+            }))
+          : [];
 
       if (itemType === "multiple_choice_assessment") {
         if (mcqQuestions.length === 0) {
@@ -1460,6 +1782,7 @@ export default function TeacherSectionsPage() {
           choices: firstQuestion.choices,
           correct_answer: firstQuestion.correct_answer,
           questions: normalizedQuestions.map(({ promptFile: _promptFile, ...questionConfig }) => questionConfig),
+          attachments: existingAssessmentAttachments,
           prompt_media:
             isEditingItem && editingItem
               ? (editingItem.config.prompt_media as unknown) ?? null
@@ -1503,6 +1826,7 @@ export default function TeacherSectionsPage() {
           correct_answer: firstQuestion.correct_answer,
           accepted_answers: firstQuestion.accepted_answers,
           questions: normalizedQuestions.map(({ promptFile: _promptFile, ...questionConfig }) => questionConfig),
+          attachments: existingAssessmentAttachments,
           prompt_media:
             isEditingItem && editingItem
               ? (editingItem.config.prompt_media as unknown) ?? null
@@ -1552,6 +1876,44 @@ export default function TeacherSectionsPage() {
           questions: normalizedEntries,
           require_all: signingLabRequireAll,
           required_count: resolvedRequiredCount,
+        };
+      } else if (itemType === "upload_assessment") {
+        const normalizedRubrics = uploadRubrics
+          .map((entry) => ({
+            criterion: entry.criterion.trim(),
+            weight_percent: Number(Math.min(Math.max(entry.weightPercent, 0), 100).toFixed(2)),
+          }))
+          .filter((entry) => entry.criterion);
+        if (normalizedRubrics.length === 0) {
+          setError("Add at least one rubric criterion.");
+          return;
+        }
+        const totalWeight = normalizedRubrics.reduce(
+          (total, entry) => total + entry.weight_percent,
+          0
+        );
+        if (totalWeight > 100) {
+          setError("Rubric total weight cannot exceed 100%.");
+          return;
+        }
+        const resolvedMaxPoints = Math.min(Math.max(uploadMaxPoints || 100, 1), 100);
+        config = {
+          rubric_items: normalizedRubrics,
+          rubric_text: normalizedRubrics
+            .map((entry) => `${entry.criterion} (${entry.weight_percent}%)`)
+            .join("\n"),
+          rubric_total_weight_percent: Number(totalWeight.toFixed(2)),
+          max_points: Number(resolvedMaxPoints.toFixed(2)),
+          allowed_file_types: [
+            "video/*",
+            "image/*",
+            ".pdf",
+            ".ppt",
+            ".pptx",
+            ".doc",
+            ".docx",
+            ".txt",
+          ],
         };
       } else {
         const existingAttachmentCount =
@@ -1629,9 +1991,13 @@ export default function TeacherSectionsPage() {
         }
       }
 
-      setModules((current) =>
-        current.map((module) => (module.id === updatedModule.id ? updatedModule : module))
-      );
+      if (selectedSectionId) {
+        await refreshSection(selectedSectionId, String(updatedModule.id));
+      } else {
+        setModules((current) =>
+          current.map((module) => (module.id === updatedModule.id ? updatedModule : module))
+        );
+      }
       clearItemBuilder();
       setMessage(isEditingItem ? "Module item updated." : "Module item created.");
     } catch (requestError) {
@@ -1642,6 +2008,10 @@ export default function TeacherSectionsPage() {
   }
 
   async function onDeleteItem(item: LmsModuleItem) {
+    if (!selectedModule || !canManageModule(selectedModule)) {
+      setError("View only. Only the teacher who created this module can edit it.");
+      return;
+    }
     const confirmed = window.confirm(`Delete "${item.title}"? This cannot be undone.`);
     if (!confirmed) {
       return;
@@ -1666,6 +2036,10 @@ export default function TeacherSectionsPage() {
   }
 
   async function onPublishToggle(module: TeacherSectionModule) {
+    if (!canManageModule(module)) {
+      setError("View only. Only the teacher who created this module can edit it.");
+      return;
+    }
     setError(null);
     setMessage(null);
     try {
@@ -1677,13 +2051,194 @@ export default function TeacherSectionsPage() {
     }
   }
 
+  function openEditItemsView(moduleId: number) {
+    if (selectedModuleId === String(moduleId)) {
+      editorPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    setSelectedModuleId(String(moduleId));
+    clearItemBuilder();
+  }
+
+  function closeEditItemsView() {
+    setSelectedModuleId("");
+    clearItemBuilder();
+    closePreview();
+    window.setTimeout(() => {
+      modulesPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 40);
+  }
+
+  async function openSubmissionsView(module: TeacherSectionModule) {
+    setActiveSubmissionModuleId(module.id);
+    setModuleSubmissions([]);
+    setIsLoadingSubmissions(true);
+    setError(null);
+    try {
+      const rows = await getTeacherModuleSubmissions(module.id);
+      setModuleSubmissions(rows);
+      const nextFeedbackDrafts: Record<number, string> = {};
+      rows.forEach((row) => {
+        if (row.progress_id) {
+          nextFeedbackDrafts[row.progress_id] = row.feedback ?? "";
+        }
+      });
+      setFeedbackDraftByProgressId(nextFeedbackDrafts);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load submissions.");
+    } finally {
+      setIsLoadingSubmissions(false);
+    }
+  }
+
+  function closeSubmissionsView() {
+    setActiveSubmissionModuleId(null);
+    setModuleSubmissions([]);
+    setIsLoadingSubmissions(false);
+    setGradingProgressId(null);
+    setFeedbackDraftByProgressId({});
+    setActiveRubricSubmission(null);
+    setActiveRubricCriteria([]);
+    setRubricAchievedByCriterionId({});
+  }
+
+  function openRubricScorer(entry: TeacherModuleSubmission) {
+    if (!entry.progress_id) {
+      return;
+    }
+    const rubricCriteria = normalizeSubmissionRubricCriteria(entry);
+    if (rubricCriteria.length === 0) {
+      setError("No rubric criteria found for this upload assessment.");
+      return;
+    }
+    const existingScores = new Map<string, number>();
+    if (Array.isArray(entry.rubric_scores)) {
+      entry.rubric_scores.forEach((row) => {
+        const key = String(row.rubric_id ?? "").trim();
+        if (!key) {
+          return;
+        }
+        const value = Number.parseFloat(String(row.achieved_percent ?? 0));
+        existingScores.set(key, Number.isFinite(value) ? Math.min(Math.max(value, 0), 100) : 0);
+      });
+    }
+    const nextAchievedById: Record<string, number> = {};
+    rubricCriteria.forEach((criterion) => {
+      nextAchievedById[criterion.id] = existingScores.get(criterion.id) ?? 0;
+    });
+    setRubricAchievedByCriterionId(nextAchievedById);
+    setActiveRubricCriteria(rubricCriteria);
+    setActiveRubricSubmission(entry);
+    setError(null);
+  }
+
+  function closeRubricScorer() {
+    setActiveRubricSubmission(null);
+    setActiveRubricCriteria([]);
+    setRubricAchievedByCriterionId({});
+  }
+
+  async function onSaveRubricScore() {
+    if (!activeRubricSubmission?.progress_id || !activeRubricTotals) {
+      return;
+    }
+    const progressId = activeRubricSubmission.progress_id;
+    setError(null);
+    setGradingProgressId(progressId);
+    try {
+      const updated = await gradeTeacherModuleSubmission(progressId, {
+        score_points: activeRubricTotals.scorePoints,
+        feedback: feedbackDraftByProgressId[progressId] ?? "",
+        rubric_scores: activeRubricTotals.criterionRows.map((row) => ({
+          rubric_id: row.id,
+          achieved_percent: row.achievedPercent,
+        })),
+      });
+      setModuleSubmissions((current) =>
+        current.map((row) => (row.progress_id === updated.progress_id ? updated : row))
+      );
+      setMessage(`Rubric score saved for ${activeRubricSubmission.student_name}.`);
+      closeRubricScorer();
+      if (updated.progress_id) {
+        setFeedbackDraftByProgressId((current) => ({
+          ...current,
+          [updated.progress_id as number]: updated.feedback ?? "",
+        }));
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save rubric score.");
+    } finally {
+      setGradingProgressId(null);
+    }
+  }
+
+  async function onSaveSubmissionRow(row: TeacherModuleSubmission) {
+    if (!row.progress_id) {
+      return;
+    }
+    const progressId = row.progress_id;
+    const hasRubric = normalizeSubmissionRubricCriteria(row).length > 0;
+    const feedbackValue = feedbackDraftByProgressId[progressId] ?? "";
+    const payload: {
+      score_points?: number;
+      feedback?: string | null;
+      rubric_scores?: Array<{ rubric_id: string; achieved_percent: number }>;
+    } = {
+      feedback: feedbackValue,
+    };
+
+    if (hasRubric) {
+      const existingRubricScores = Array.isArray(row.rubric_scores) ? row.rubric_scores : [];
+      if (existingRubricScores.length === 0) {
+        setError("Open Rubric Scorer first, then click Save.");
+        return;
+      }
+      payload.rubric_scores = existingRubricScores.map((entry) => ({
+        rubric_id: String(entry.rubric_id ?? "").trim(),
+        achieved_percent: Math.min(Math.max(Number(entry.achieved_percent ?? 0), 0), 100),
+      }));
+    } else {
+      const resolvedScorePoints =
+        typeof row.score_points === "number" && Number.isFinite(row.score_points)
+          ? row.score_points
+          : typeof row.score_percent === "number" && Number.isFinite(row.score_percent)
+            ? Number(((row.score_percent / 100) * row.max_points).toFixed(2))
+            : null;
+      if (resolvedScorePoints === null) {
+        setError("Set score first before saving.");
+        return;
+      }
+      payload.score_points = resolvedScorePoints;
+    }
+
+    setError(null);
+    setGradingProgressId(progressId);
+    try {
+      const updated = await gradeTeacherModuleSubmission(progressId, payload);
+      setModuleSubmissions((current) =>
+        current.map((entry) => (entry.progress_id === updated.progress_id ? updated : entry))
+      );
+      if (updated.progress_id) {
+        setFeedbackDraftByProgressId((current) => ({
+          ...current,
+          [updated.progress_id as number]: updated.feedback ?? "",
+        }));
+      }
+      setMessage(`Saved for ${row.student_name}.`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save submission.");
+    } finally {
+      setGradingProgressId(null);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <div className="panel">
-        <p className="text-xs fw-semibold text-uppercase tracking-[0.2em] text-brandBlue">Teacher LMS</p>
+        <p className="text-xs fw-semibold text-uppercase tracking-[0.2em] text-brandBlue">Teacher Modules</p>
         <h2 className="mt-2 text-3xl fw-bold title-gradient">Module Builder</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Create resource lessons with mixed files in one drop area, then add assessments.
+          Build modules, edit module items, and publish lessons.
         </p>
       </div>
 
@@ -1704,7 +2259,9 @@ export default function TeacherSectionsPage() {
           className="form-select"
           onChange={(event) => {
             setSelectedSectionId(event.target.value);
-            void refreshSection(event.target.value);
+            setSelectedModuleId("");
+            clearItemBuilder();
+            void refreshSection(event.target.value, null);
           }}
           value={selectedSectionId}
         >
@@ -1719,83 +2276,93 @@ export default function TeacherSectionsPage() {
 
       {selectedSection ? (
         <>
-          <div className="row g-4">
-            <div className="col-xl-5">
-              <div className="panel h-100">
-                <h3 className="h5 fw-bold mb-3">Create Module</h3>
-                <form className="vstack gap-3" onSubmit={onCreateModule}>
-                  <div>
-                    <label className="form-label fw-semibold">Module Title</label>
-                    <input
-                      className="form-control"
-                      onChange={(event) => setNewModuleTitle(event.target.value)}
-                      required
-                      value={newModuleTitle}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label fw-semibold">Description</label>
-                    <textarea
-                      className="form-control"
-                      onChange={(event) => setNewModuleDescription(event.target.value)}
-                      rows={4}
-                      value={newModuleDescription}
-                    />
-                  </div>
-                  <button className="btn btn-primary align-self-start" type="submit">
-                    Add Module
-                  </button>
-                </form>
-              </div>
+          <div className="panel h-100" ref={modulesPanelRef}>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <h3 className="h5 fw-bold mb-0">Modules</h3>
+              <button
+                className="btn btn-success btn-sm text-white fw-semibold"
+                onClick={() => setShowCreateModuleModal(true)}
+                type="button"
+              >
+                Add Module
+              </button>
             </div>
-
-            <div className="col-xl-7">
-              <div className="panel h-100">
-                <h3 className="h5 fw-bold mb-3">Modules</h3>
-                <div className="vstack gap-3">
-                  {modules.map((module) => (
-                    <article className="card border-brandBorder shadow-sm" key={module.id}>
-                      <div className="card-body">
-                        <div className="d-flex flex-wrap justify-content-between gap-3">
-                          <div>
-                            <p className="mb-1 text-uppercase text-xs tracking-[0.16em] text-slate-500">
-                              Module {module.order_index}
-                            </p>
-                            <h4 className="h6 fw-bold mb-1">{module.title}</h4>
-                            <p className="mb-0 text-sm text-slate-700">{module.description}</p>
-                          </div>
-                          <div className="d-flex gap-2">
-                            <button
-                              className={`btn btn-sm ${module.is_published ? "btn-outline-danger" : "btn-primary"}`}
-                              onClick={() => void onPublishToggle(module)}
-                              type="button"
-                            >
-                              {module.is_published ? "Unpublish" : "Publish"}
-                            </button>
-                            <button
-                              className={`btn btn-sm ${
-                                selectedModuleId === String(module.id) ? "btn-info text-white" : "btn-outline-secondary"
-                              }`}
-                              onClick={() => setSelectedModuleId(String(module.id))}
-                              type="button"
-                            >
-                              Edit Items
-                            </button>
-                          </div>
-                        </div>
+            <div className="vstack gap-3">
+              {modules.map((module) => (
+                <article className="card border-brandBorder shadow-sm" key={module.id}>
+                  <div className="card-body">
+                    <div className="d-flex flex-wrap justify-content-between gap-3">
+                      <div>
+                        <p className="mb-1 text-uppercase text-xs tracking-[0.16em] text-slate-500">
+                          Module {module.order_index}
+                        </p>
+                        <h4 className="h6 fw-bold mb-1">{module.title}</h4>
+                        <p className="mb-0 text-sm text-slate-700">{module.description}</p>
+                        <p className="mt-2 mb-0 text-xs text-slate-600">
+                          Instructor:{" "}
+                          <span className="fw-semibold">
+                            {module.instructor_name?.trim() || "Unknown Instructor"}
+                          </span>
+                        </p>
                       </div>
-                    </article>
-                  ))}
-                  {modules.length === 0 ? (
-                    <p className="mb-0 text-sm text-slate-600">No modules yet. Add your first module.</p>
-                  ) : null}
-                </div>
-              </div>
+                      <div className="d-flex gap-2">
+                        <button
+                          className="btn btn-sm btn-outline-primary fw-semibold"
+                          onClick={() => void openSubmissionsView(module)}
+                          type="button"
+                        >
+                          Check Submissions
+                        </button>
+                        <button
+                          className={`btn btn-sm fw-semibold ${module.is_published ? "btn-danger text-white" : "btn-success text-white"}`}
+                          disabled={!canManageModule(module)}
+                          onClick={() => void onPublishToggle(module)}
+                          type="button"
+                        >
+                          {module.is_published ? "Unpublish" : "Publish"}
+                        </button>
+                        <button
+                          className={`btn btn-sm fw-semibold ${
+                            canManageModule(module) ? "btn-info text-white" : "btn-outline-secondary"
+                          }`}
+                          onClick={() => openEditItemsView(module.id)}
+                          type="button"
+                        >
+                          {canManageModule(module) ? "Edit Items" : "View Items"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {modules.length === 0 ? (
+                <p className="mb-0 text-sm text-slate-600">No modules yet. Add your first module.</p>
+              ) : null}
             </div>
           </div>
 
           {selectedModule ? (
-            <div className="row g-4">
+            <div className="row g-4" ref={editorPanelRef}>
+              <div className="col-12">
+                <div className="d-flex flex-wrap align-items-start justify-content-between gap-2">
+                  <button
+                    className="btn btn-warning btn-sm fw-semibold"
+                    onClick={closeEditItemsView}
+                    type="button"
+                  >
+                    Back to Modules
+                  </button>
+                  <p className="mb-0 text-sm text-slate-700">
+                    Instructor: <span className="fw-semibold">{selectedModuleInstructorName}</span>
+                  </p>
+                </div>
+                {!canEditSelectedModule ? (
+                  <div className="alert alert-info mt-3 mb-0">
+                    View only. Only the teacher who created this module can edit items or publish changes.
+                  </div>
+                ) : null}
+              </div>
+              {canEditSelectedModule ? (
               <div className="col-xl-5">
                 <div className="panel h-100">
                   <h3 className="h5 fw-bold mb-3">
@@ -2356,6 +2923,114 @@ export default function TeacherSectionsPage() {
                       </>
                     ) : null}
 
+                    {itemType === "upload_assessment" ? (
+                      <div className="rounded-3 border border-brandBorder bg-brandOffWhite p-3">
+                        <p className="mb-2 fw-semibold">Student Upload Assessment</p>
+                        <div className="vstack gap-3 mb-3">
+                          {uploadRubrics.map((rubric, rubricIndex) => (
+                            <div className="card border-brandBorder" key={rubric.id}>
+                              <div className="card-body vstack gap-2">
+                                <div className="d-flex justify-content-between align-items-center">
+                                  <p className="mb-0 fw-semibold">Rubric {rubricIndex + 1}</p>
+                                  <div className="d-flex gap-2">
+                                    {rubricIndex === uploadRubrics.length - 1 ? (
+                                      <button
+                                        className="btn btn-outline-primary btn-sm"
+                                        onClick={() => addUploadRubric(rubricIndex)}
+                                        type="button"
+                                      >
+                                        Add Rubric
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      className="btn btn-outline-danger btn-sm"
+                                      disabled={uploadRubrics.length <= 1}
+                                      onClick={() => removeUploadRubric(rubricIndex)}
+                                      type="button"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="form-label fw-semibold mb-1">Criteria</label>
+                                  <input
+                                    className="form-control"
+                                    onChange={(event) =>
+                                      updateUploadRubricCriterion(rubricIndex, event.target.value)
+                                    }
+                                    placeholder="Example: Correct handshape for A-Z"
+                                    value={rubric.criterion}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="form-label fw-semibold mb-1">
+                                    Weight (%)
+                                  </label>
+                                  <div className="d-flex align-items-center gap-2">
+                                    <input
+                                      className="form-range flex-grow-1"
+                                      max={100}
+                                      min={0}
+                                      onChange={(event) =>
+                                        updateUploadRubricWeight(
+                                          rubricIndex,
+                                          Number.parseFloat(event.target.value) || 0
+                                        )
+                                      }
+                                      step={1}
+                                      type="range"
+                                      value={rubric.weightPercent}
+                                    />
+                                    <input
+                                      className="form-control form-control-sm"
+                                      max={100}
+                                      min={0}
+                                      onChange={(event) =>
+                                        updateUploadRubricWeight(
+                                          rubricIndex,
+                                          Number.parseFloat(event.target.value) || 0
+                                        )
+                                      }
+                                      step={1}
+                                      style={{ width: "80px" }}
+                                      type="number"
+                                      value={rubric.weightPercent}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div>
+                          <label className="form-label fw-semibold mb-1">Overall Score (%)</label>
+                          <div className="d-flex align-items-center gap-2">
+                            <input
+                              className="form-range flex-grow-1"
+                              max={100}
+                              min={1}
+                              onChange={(event) => {
+                                const parsed = Number.parseFloat(event.target.value);
+                                if (Number.isFinite(parsed) && parsed > 0) {
+                                  setUploadMaxPoints(Math.min(Math.max(parsed, 1), 100));
+                                  return;
+                                }
+                                setUploadMaxPoints(100);
+                              }}
+                              step={1}
+                              type="range"
+                              value={uploadMaxPoints}
+                            />
+                            <span className="badge text-bg-light border">{uploadMaxPoints}%</span>
+                          </div>
+                          <div className="form-text">
+                            Students can upload videos/files. Teacher checks and scores using your rubric.
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="d-flex flex-wrap gap-2">
                       <button className="btn btn-primary" disabled={isSavingItem} type="submit">
                         {isSavingItem ? "Saving..." : isEditingItem ? "Update Item" : "Add Item"}
@@ -2373,8 +3048,9 @@ export default function TeacherSectionsPage() {
                   </form>
                 </div>
               </div>
+              ) : null}
 
-              <div className="col-xl-7">
+              <div className={canEditSelectedModule ? "col-xl-7" : "col-12"}>
                 <div className="panel h-100">
                   <h3 className="h5 fw-bold mb-3">Module Items</h3>
                   <div className="vstack gap-3">
@@ -2467,36 +3143,84 @@ export default function TeacherSectionsPage() {
                                 </p>
                               </div>
                             ) : null}
+                            {item.item_type === "upload_assessment" ? (
+                              <div className="mt-2 text-sm text-slate-700">
+                                <p className="mb-1">
+                                  Rubric items:{" "}
+                                  <span className="fw-semibold">
+                                    {(() => {
+                                      const rawItems = item.config.rubric_items;
+                                      return Array.isArray(rawItems) ? rawItems.length : 0;
+                                    })()}
+                                  </span>
+                                </p>
+                                <p className="mb-1">
+                                  Overall score:{" "}
+                                  <span className="fw-semibold">
+                                    {(() => {
+                                      const rawValue = item.config.max_points;
+                                      if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+                                        return rawValue;
+                                      }
+                                      if (typeof rawValue === "string") {
+                                        const parsed = Number.parseFloat(rawValue);
+                                        if (Number.isFinite(parsed)) {
+                                          return parsed;
+                                        }
+                                      }
+                                      return 100;
+                                    })()}
+                                  </span>
+                                  %
+                                </p>
+                                <p className="mb-0">
+                                  Rubric summary:{" "}
+                                  <span className="fw-semibold">
+                                    {typeof item.config.rubric_text === "string" && item.config.rubric_text.trim()
+                                      ? item.config.rubric_text
+                                      : "No rubric yet."}
+                                  </span>
+                                </p>
+                              </div>
+                            ) : null}
                             <div className="d-flex flex-wrap gap-2 mt-3">
                               <button
-                                className="btn btn-sm btn-outline-secondary"
+                                className="btn btn-sm btn-secondary text-white"
                                 onClick={() => openPreview(item)}
                                 type="button"
                               >
                                 Preview
                               </button>
-                              <button
-                                className="btn btn-sm btn-outline-primary"
-                                onClick={() => beginEditItem(item)}
-                                type="button"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="btn btn-sm btn-outline-danger"
-                                disabled={deletingItemId === item.id}
-                                onClick={() => void onDeleteItem(item)}
-                                type="button"
-                              >
-                                {deletingItemId === item.id ? "Deleting..." : "Delete"}
-                              </button>
+                              {canEditSelectedModule ? (
+                                <>
+                                  <button
+                                    className="btn btn-sm btn-primary text-white"
+                                    onClick={() => beginEditItem(item)}
+                                    type="button"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    className="btn btn-sm btn-danger text-white"
+                                    disabled={deletingItemId === item.id}
+                                    onClick={() => void onDeleteItem(item)}
+                                    type="button"
+                                  >
+                                    {deletingItemId === item.id ? "Deleting..." : "Delete"}
+                                  </button>
+                                </>
+                              ) : null}
                             </div>
                           </div>
                         </article>
                       );
                     })}
                     {selectedModule.items.length === 0 ? (
-                      <p className="mb-0 text-sm text-slate-600">No items yet. Add your first item.</p>
+                      <p className="mb-0 text-sm text-slate-600">
+                        {canEditSelectedModule
+                          ? "No items yet. Add your first item."
+                          : "No items available in this module yet."}
+                      </p>
                     ) : null}
                   </div>
                 </div>
@@ -2504,10 +3228,351 @@ export default function TeacherSectionsPage() {
             </div>
           ) : (
             <div className="panel">
-              <p className="mb-0 text-sm text-slate-700">Choose a module first to start adding readable and assessments.</p>
+              <p className="mb-0 text-sm text-slate-700">
+                Click Edit Items or View Items on a module to open the module details.
+              </p>
             </div>
           )}
         </>
+      ) : null}
+
+      {showCreateModuleModal ? (
+        <div
+          aria-modal="true"
+          className="modal fade show d-block"
+          role="dialog"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.45)" }}
+        >
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Add Module</h5>
+                <button
+                  aria-label="Close"
+                  className="btn-close"
+                  disabled={isCreatingModule}
+                  onClick={() => setShowCreateModuleModal(false)}
+                  type="button"
+                />
+              </div>
+              <form onSubmit={onCreateModule}>
+                <div className="modal-body vstack gap-3">
+                  <div>
+                    <label className="form-label fw-semibold">Module Title</label>
+                    <input
+                      className="form-control"
+                      onChange={(event) => setNewModuleTitle(event.target.value)}
+                      required
+                      value={newModuleTitle}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label fw-semibold">Description</label>
+                    <textarea
+                      className="form-control"
+                      onChange={(event) => setNewModuleDescription(event.target.value)}
+                      rows={4}
+                      value={newModuleDescription}
+                    />
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button
+                    className="btn btn-outline-secondary"
+                    disabled={isCreatingModule}
+                    onClick={() => setShowCreateModuleModal(false)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" disabled={isCreatingModule} type="submit">
+                    {isCreatingModule ? "Saving..." : "Add Module"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeSubmissionModule ? (
+        <div
+          aria-modal="true"
+          className="modal fade show d-block"
+          role="dialog"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.45)" }}
+        >
+          <div className="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  Upload Submissions - {activeSubmissionModule.title}
+                </h5>
+                <button aria-label="Close" className="btn-close" onClick={closeSubmissionsView} type="button" />
+              </div>
+              <div className="modal-body">
+                {isLoadingSubmissions ? (
+                  <p className="mb-0 text-sm text-slate-700">Loading submissions...</p>
+                ) : moduleSubmissions.length === 0 ? (
+                  <p className="mb-0 text-sm text-slate-700">
+                    No upload assessment items found in this module yet.
+                  </p>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="table table-sm align-middle">
+                      <thead>
+                        <tr>
+                          <th>Topic</th>
+                          <th>Student</th>
+                          <th>Status</th>
+                          <th>Files</th>
+                          <th>Score</th>
+                          <th>Feedback</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {moduleSubmissions.map((row) => (
+                          <tr key={`${row.item_id}-${row.student_id}`}>
+                            <td>
+                              <p className="mb-0 fw-semibold">
+                                Topic {row.item_order_index}: {row.item_title}
+                              </p>
+                              <p className="mb-0 small text-muted">
+                                Max: {row.max_points} pts
+                              </p>
+                            </td>
+                            <td>
+                              <p className="mb-0 fw-semibold">{row.student_name}</p>
+                              <p className="mb-0 small text-muted">{row.student_email || "No email"}</p>
+                            </td>
+                            <td>
+                              <span
+                                className={`badge ${
+                                  row.status === "completed" ? "text-bg-success" : "text-bg-secondary"
+                                }`}
+                              >
+                                {row.status === "completed" ? "Submitted" : "Not Submitted"}
+                              </span>
+                              {row.submitted_at ? (
+                                <p className="mb-0 small text-muted mt-1">
+                                  {new Date(row.submitted_at).toLocaleString()}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td>
+                              {row.files.length > 0 ? (
+                                <div className="vstack gap-1">
+                                  {row.files.map((file, index) => (
+                                    <a
+                                      className="small text-primary text-decoration-underline"
+                                      href={resolveAssetUrl(file)}
+                                      key={`${row.item_id}-${row.student_id}-${index}`}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      {file.resource_file_name}
+                                    </a>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="small text-muted">No file yet</span>
+                              )}
+                            </td>
+                            <td style={{ minWidth: "120px" }}>
+                              {row.progress_id ? (
+                                <button
+                                  className="btn btn-sm btn-outline-primary w-100"
+                                  disabled={gradingProgressId === row.progress_id}
+                                  onClick={() => openRubricScorer(row)}
+                                  type="button"
+                                >
+                                  {row.score_percent !== null && row.score_percent !== undefined
+                                    ? `${Number(row.score_percent).toFixed(1)}%`
+                                    : "Rubric Scorer"}
+                                </button>
+                              ) : (
+                                <span className="small text-muted">-</span>
+                              )}
+                            </td>
+                            <td style={{ minWidth: "180px" }}>
+                              {row.progress_id ? (
+                                <textarea
+                                  className="form-control form-control-sm"
+                                  onChange={(event) =>
+                                    setFeedbackDraftByProgressId((current) => ({
+                                      ...current,
+                                      [row.progress_id as number]: event.target.value,
+                                    }))
+                                  }
+                                  rows={2}
+                                  value={feedbackDraftByProgressId[row.progress_id] ?? ""}
+                                />
+                              ) : (
+                                <span className="small text-muted">-</span>
+                              )}
+                            </td>
+                            <td>
+                              {row.progress_id ? (
+                                <button
+                                  className="btn btn-sm btn-primary"
+                                  disabled={gradingProgressId === row.progress_id}
+                                  onClick={() => void onSaveSubmissionRow(row)}
+                                  type="button"
+                                >
+                                  {gradingProgressId === row.progress_id ? "Saving..." : "Save"}
+                                </button>
+                              ) : (
+                                <span className="small text-muted">Waiting</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-outline-secondary" onClick={closeSubmissionsView} type="button">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeRubricSubmission && activeRubricTotals ? (
+        <div
+          aria-modal="true"
+          className="modal fade show d-block"
+          role="dialog"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.45)" }}
+        >
+          <div className="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  Rubric Scorer - {activeRubricSubmission.student_name}
+                </h5>
+                <button
+                  aria-label="Close"
+                  className="btn-close"
+                  disabled={gradingProgressId === activeRubricSubmission.progress_id}
+                  onClick={closeRubricScorer}
+                  type="button"
+                />
+              </div>
+              <div className="modal-body vstack gap-3">
+                <div className="rounded-3 border border-brandBorder bg-brandOffWhite p-3">
+                  <p className="mb-1 fw-semibold">{activeRubricSubmission.item_title}</p>
+                  <p className="mb-0 text-sm text-slate-700">
+                    Use each slider (0-100%) to score the criterion. Weighted total is computed automatically.
+                  </p>
+                </div>
+
+                <div className="vstack gap-3">
+                  {activeRubricTotals.criterionRows.map((criterion) => (
+                    <div className="rounded-3 border border-brandBorder p-3" key={criterion.id}>
+                      <div className="d-flex flex-wrap justify-content-between gap-2 align-items-center">
+                        <p className="mb-0 fw-semibold">{criterion.criterion}</p>
+                        <span className="badge text-bg-light border">
+                          Weight: {criterion.weight_percent.toFixed(2)}%
+                        </span>
+                      </div>
+                      <div className="d-flex align-items-center gap-2 mt-3">
+                        <input
+                          className="form-range flex-grow-1"
+                          max={100}
+                          min={0}
+                          onChange={(event) =>
+                            setRubricAchievedByCriterionId((current) => ({
+                              ...current,
+                              [criterion.id]: Number.parseFloat(event.target.value) || 0,
+                            }))
+                          }
+                          step={1}
+                          type="range"
+                          value={rubricAchievedByCriterionId[criterion.id] ?? 0}
+                        />
+                        <input
+                          className="form-control form-control-sm"
+                          max={100}
+                          min={0}
+                          onChange={(event) =>
+                            setRubricAchievedByCriterionId((current) => ({
+                              ...current,
+                              [criterion.id]: Number.parseFloat(event.target.value) || 0,
+                            }))
+                          }
+                          style={{ width: "90px" }}
+                          type="number"
+                          value={rubricAchievedByCriterionId[criterion.id] ?? 0}
+                        />
+                        <span className="badge text-bg-success-subtle border border-success-subtle text-success-emphasis">
+                          +{criterion.contributedPercent.toFixed(2)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="rounded-3 border border-brandBorder bg-white p-3">
+                  <div className="row g-2">
+                    <div className="col-sm-6">
+                      <p className="mb-1 text-uppercase text-muted small fw-semibold">Final Score Percent</p>
+                      <p className="mb-0 fw-bold fs-5 text-brandBlue">
+                        {activeRubricTotals.totalPercent.toFixed(2)}%
+                      </p>
+                    </div>
+                    <div className="col-sm-6">
+                      <p className="mb-1 text-uppercase text-muted small fw-semibold">Score Points</p>
+                      <p className="mb-0 fw-bold fs-5 text-brandBlue">
+                        {activeRubricTotals.scorePoints.toFixed(2)} / {activeRubricTotals.maxPoints.toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {activeRubricSubmission.progress_id ? (
+                  <div>
+                    <label className="form-label fw-semibold">Feedback</label>
+                    <textarea
+                      className="form-control"
+                      onChange={(event) =>
+                        setFeedbackDraftByProgressId((current) => ({
+                          ...current,
+                          [activeRubricSubmission.progress_id as number]: event.target.value,
+                        }))
+                      }
+                      rows={3}
+                      value={feedbackDraftByProgressId[activeRubricSubmission.progress_id] ?? ""}
+                    />
+                  </div>
+                ) : null}
+              </div>
+              <div className="modal-footer">
+                <button
+                  className="btn btn-outline-secondary"
+                  disabled={gradingProgressId === activeRubricSubmission.progress_id}
+                  onClick={closeRubricScorer}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  disabled={gradingProgressId === activeRubricSubmission.progress_id}
+                  onClick={() => void onSaveRubricScore()}
+                  type="button"
+                >
+                  {gradingProgressId === activeRubricSubmission.progress_id ? "Saving..." : "Save Rubric Score"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {previewItem ? (

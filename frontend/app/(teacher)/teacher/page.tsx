@@ -16,10 +16,10 @@ export default function TeacherDashboardPage() {
   return (
     <section className="space-y-6">
       <div className="panel">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Teacher LMS</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Teacher Dashboard</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">Assigned Sections</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Build modules and monitor student progress across your assigned sections.
+          Quick Access Too Build modules, monitor student progress, and review reports.
         </p>
       </div>
 
@@ -71,8 +71,8 @@ export default function TeacherDashboardPage() {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Link className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white" href={`/teacher/sections?section=${entry.section.id}`}>
-                Open Section Builder
+              <Link className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white" href={`/teacher/modules?section=${entry.section.id}`}>
+                Open Modules
               </Link>
               <Link className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue" href={`/teacher/reports?studentSection=${entry.section.id}`}>
                 View Reports

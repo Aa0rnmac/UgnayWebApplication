@@ -1,9 +1,10 @@
 from datetime import timedelta
+from html import escape
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_admin
@@ -16,6 +17,7 @@ from app.models.session import UserSession
 from app.models.section import Section, SectionStudentAssignment, SectionTeacherAssignment
 from app.models.user import User
 from app.schemas.lms import (
+    AdminCertificateTemplateOut,
     AdminAuditEventOut,
     AdminDashboardOut,
     AdminUserOut,
@@ -32,6 +34,11 @@ from app.schemas.lms import (
     SectionOut,
     SectionUpdateRequest,
     SystemActivityEventOut,
+)
+from app.services.admin_certificate_template_service import (
+    build_template_data_uri,
+    get_admin_certificate_template,
+    upsert_admin_certificate_template,
 )
 from app.services.email_sender import (
     send_student_initial_credentials_email,
@@ -95,6 +102,46 @@ def _send_initial_credentials(email: str, username: str, temporary_password: str
         return "sent"
     except RuntimeError:
         return "skipped"
+
+
+def _serialize_admin_certificate_template(config: dict | None) -> AdminCertificateTemplateOut:
+    template_file_path = None
+    template_file_name = None
+    signatory_name = None
+    updated_at = None
+    if isinstance(config, dict):
+        template_file_path = (
+            str(config.get("template_file_path")).strip()
+            if config.get("template_file_path") is not None
+            else None
+        )
+        template_file_name = (
+            str(config.get("template_file_name")).strip()
+            if config.get("template_file_name") is not None
+            else None
+        )
+        signatory_name = (
+            str(config.get("signatory_name")).strip()
+            if config.get("signatory_name") is not None
+            else None
+        )
+        updated_at = (
+            str(config.get("updated_at")).strip()
+            if config.get("updated_at") is not None
+            else None
+        )
+    template_file_url = (
+        f"/{template_file_path.lstrip('/')}" if template_file_path else None
+    )
+    return AdminCertificateTemplateOut(
+        template_file_name=template_file_name,
+        template_file_path=template_file_path,
+        template_file_url=template_file_url,
+        signatory_name=signatory_name,
+        signatory_title="Head Instructor",
+        organization_name="Hand and Heart",
+        updated_at=updated_at,
+    )
 
 
 @router.get("/dashboard", response_model=AdminDashboardOut)
@@ -555,6 +602,231 @@ def update_section_assignments(
     if not refreshed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found.")
     return section_out(refreshed)
+
+
+@router.get("/certificate-template", response_model=AdminCertificateTemplateOut)
+def get_certificate_template(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> AdminCertificateTemplateOut:
+    _ = (db, current_admin)
+    config = get_admin_certificate_template()
+    return _serialize_admin_certificate_template(config)
+
+
+@router.post("/certificate-template", response_model=AdminCertificateTemplateOut)
+def upsert_certificate_template(
+    signatory_name: str | None = Form(default=None),
+    certificate_file: UploadFile | None = File(default=None),
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> AdminCertificateTemplateOut:
+    resolved_path: str | None = None
+    resolved_name: str | None = None
+    if certificate_file is not None:
+        suffix = Path(certificate_file.filename or "").suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Certificate template must be PNG, JPG, JPEG, or WEBP.",
+            )
+        stored_name = f"admin-global-{uuid4().hex}{suffix}"
+        destination = CERTIFICATE_TEMPLATES_DIR / stored_name
+        destination.write_bytes(certificate_file.file.read())
+        resolved_path = f"uploads/certificate-templates/{stored_name}"
+        resolved_name = certificate_file.filename or stored_name
+
+    saved = upsert_admin_certificate_template(
+        template_file_name=resolved_name,
+        template_file_path=resolved_path,
+        signatory_name=(signatory_name.strip() if signatory_name is not None else None),
+    )
+    _log_admin_action(
+        db,
+        admin_id=current_admin.id,
+        action_type="certificate_template_updated",
+        target_type="certificate_template",
+        target_id=None,
+        details={
+            "template_file_path": saved.get("template_file_path"),
+            "signatory_name": saved.get("signatory_name"),
+        },
+    )
+    db.commit()
+    return _serialize_admin_certificate_template(saved)
+
+
+@router.get("/certificate-template/preview")
+def preview_certificate_template(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> Response:
+    _ = (db, current_admin)
+    config = get_admin_certificate_template()
+    template_background = build_template_data_uri(
+        str(config.get("template_file_path")).strip()
+        if config.get("template_file_path")
+        else None
+    )
+    preview_name = escape("[name]")
+    preview_date = escape("DATE")
+    signatory_name = (
+        str(config.get("signatory_name")).strip()
+        if config.get("signatory_name")
+        else "[name]"
+    )
+    safe_signatory_name = escape(signatory_name)
+    if not template_background:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Certificate template image not found.",
+        )
+    html = f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Certificate Preview</title>
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        padding: 24px;
+        background: #e9e9e9;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+      }}
+      .certificate {{
+        position: relative;
+        width: 1123px;
+        max-width: 100%;
+        aspect-ratio: 1123 / 794;
+        margin: 0 auto;
+        overflow: hidden;
+        background: #f5f5f5 url("{template_background}") center / 100% 100% no-repeat;
+      }}
+      .name {{
+        position: absolute;
+        left: 50%;
+        top: 36.7%;
+        transform: translateX(-50%);
+        width: 72%;
+        text-align: center;
+        font-size: clamp(34px, 5vw, 78px);
+        line-height: 1.08;
+        letter-spacing: 0.02em;
+        font-weight: 800;
+        color: #2f3137;
+        background: rgba(247, 247, 247, 0.93);
+        padding: 5px 14px;
+        border-radius: 8px;
+      }}
+      .line-award {{
+        position: absolute;
+        left: 50%;
+        top: 26.8%;
+        transform: translateX(-50%);
+        text-align: center;
+        font-size: clamp(20px, 2.8vw, 52px);
+        color: #355389;
+        background: rgba(247, 247, 247, 0.9);
+        padding: 2px 10px;
+        border-radius: 8px;
+      }}
+      .line-complete {{
+        position: absolute;
+        left: 50%;
+        top: 49.2%;
+        transform: translateX(-50%);
+        text-align: center;
+        font-size: clamp(20px, 2.8vw, 52px);
+        color: #355389;
+        background: rgba(247, 247, 247, 0.9);
+        padding: 2px 10px;
+        border-radius: 8px;
+      }}
+      .line-course {{
+        position: absolute;
+        left: 50%;
+        top: 58.8%;
+        transform: translateX(-50%);
+        text-align: center;
+        font-size: clamp(26px, 4vw, 74px);
+        font-weight: 800;
+        color: #355389;
+        background: rgba(247, 247, 247, 0.9);
+        padding: 2px 10px;
+        border-radius: 8px;
+      }}
+      .line-offered {{
+        position: absolute;
+        left: 50%;
+        top: 69%;
+        transform: translateX(-50%);
+        text-align: center;
+        font-size: clamp(18px, 2.5vw, 44px);
+        color: #355389;
+        background: rgba(247, 247, 247, 0.9);
+        padding: 2px 10px;
+        border-radius: 8px;
+      }}
+      .date {{
+        position: absolute;
+        left: 16.55%;
+        bottom: 8.2%;
+        transform: translateX(-50%);
+        min-width: 240px;
+        text-align: center;
+        font-size: clamp(16px, 2vw, 32px);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: #355389;
+        background: rgba(247, 247, 247, 0.9);
+        padding: 2px 10px;
+        border-radius: 6px;
+      }}
+      .signature-block {{
+        position: absolute;
+        right: 11.7%;
+        bottom: 7.9%;
+        width: 280px;
+        text-align: center;
+      }}
+      .signature-name {{
+        font-size: clamp(15px, 1.8vw, 28px);
+        font-weight: 800;
+        color: #2f3137;
+        line-height: 1.15;
+      }}
+      .signature-title {{
+        font-size: clamp(12px, 1.2vw, 20px);
+        color: #4b5563;
+        margin-top: 2px;
+      }}
+      .signature-org {{
+        font-size: clamp(12px, 1.1vw, 18px);
+        color: #4b5563;
+        margin-top: 1px;
+      }}
+    </style>
+  </head>
+  <body>
+    <div class="certificate">
+      <div class="line-award">This certificate awarded to</div>
+      <div class="name">{preview_name}</div>
+      <div class="line-complete">for successfully completing</div>
+      <div class="line-course">FSL Basic Course</div>
+      <div class="line-offered">offered by Hand and Heart</div>
+      <div class="date">{preview_date}</div>
+      <div class="signature-block">
+        <div class="signature-name">{safe_signatory_name}</div>
+        <div class="signature-title">Head Instructor</div>
+        <div class="signature-org">Hand and Heart</div>
+      </div>
+    </div>
+  </body>
+</html>
+""".strip()
+    return Response(content=html, media_type="text/html")
 
 
 @router.get("/certificates/pending", response_model=list[CertificateTemplateOut])

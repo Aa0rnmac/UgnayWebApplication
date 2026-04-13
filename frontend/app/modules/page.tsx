@@ -18,6 +18,7 @@ export default function StudentModulesPage() {
   const [certificateRecipientName, setCertificateRecipientName] = useState("Account Holder");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [showArchiveNotice, setShowArchiveNotice] = useState(false);
 
   useEffect(() => {
     Promise.all([getStudentCourse(), getStudentCertificateDownloadStatus()])
@@ -57,7 +58,8 @@ export default function StudentModulesPage() {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-      setMessage("Certificate downloaded.");
+      setMessage("Certificate downloaded. Your account will be archived in 24 hours.");
+      setShowArchiveNotice(true);
       const latestStatus = await getStudentCertificateDownloadStatus();
       setCertificateStatus(latestStatus);
     } catch (requestError) {
@@ -85,6 +87,12 @@ export default function StudentModulesPage() {
                 <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Module {module.order_index}</p>
                 <h3 className="mt-2 text-xl font-bold text-slate-900">{module.title}</h3>
                 <p className="mt-2 text-sm text-slate-700">{module.description}</p>
+                <p className="mt-2 mb-0 text-xs text-slate-600">
+                  Instructor:{" "}
+                  <span className="font-semibold">
+                    {module.instructor_name?.trim() || "Unknown Instructor"}
+                  </span>
+                </p>
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${module.is_locked ? "bg-brandRedLight text-brandRed" : "bg-brandBlueLight text-brandBlue"}`}>
                 {module.is_locked ? "Locked" : module.status.replaceAll("_", " ")}
@@ -106,7 +114,7 @@ export default function StudentModulesPage() {
               <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Course Completion</p>
               <h3 className="mt-2 text-2xl font-bold text-slate-900">E-Certificate</h3>
               <p className="mt-2 text-sm text-slate-700">
-                Your certificate is unlocked after all published modules are completed.
+                Your certificate is unlocked after the first 12 published modules are completed.
               </p>
             </div>
             <span
@@ -130,7 +138,7 @@ export default function StudentModulesPage() {
             <p className="mb-0 text-sm text-slate-600">
               {certificateStatus?.completion_date
                 ? `Completion Date: ${certificateStatus.completion_date}`
-                : certificateStatus?.message || "Finish all modules to unlock your certificate."}
+                : certificateStatus?.message || "Finish the first 12 published modules to unlock your certificate."}
             </p>
             <button
               className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -143,6 +151,25 @@ export default function StudentModulesPage() {
           </div>
         </article>
       </div>
+      {showArchiveNotice ? (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-900/45 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-brandBorder bg-white p-5 shadow-2xl">
+            <h4 className="mb-2 text-lg font-bold text-slate-900">Notice</h4>
+            <p className="mb-4 text-sm text-slate-700">
+              Your certificate was downloaded. This student account will be archived in 24 hours.
+            </p>
+            <div className="flex justify-end">
+              <button
+                className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white"
+                onClick={() => setShowArchiveNotice(false)}
+                type="button"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

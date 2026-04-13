@@ -1,11 +1,14 @@
+from datetime import datetime
 from pathlib import Path
-from typing import Literal
+import re
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_teacher
+from app.core.datetime_utils import utc_now
 from app.db.session import get_db
 from app.models.certificate import CertificateTemplate
 from app.models.lms_progress import SectionModuleItemProgress
@@ -21,6 +24,9 @@ from app.schemas.lms import (
     TeacherSectionModuleOut,
     TeacherSectionModuleUpdateRequest,
     TeacherSectionSummaryOut,
+    TeacherStudentAttemptDetailOut,
+    TeacherModuleSubmissionOut,
+    TeacherSubmissionGradeRequest,
     TeacherStudentItemReportOut,
     TeacherStudentModuleReportOut,
     TeacherStudentReportOut,
@@ -32,6 +38,7 @@ from app.services.lms_service import (
     latest_approved_template,
     section_out,
     sync_module_progress,
+    user_display_name,
     user_summary,
 )
 from app.services.audit_log_service import log_user_activity
@@ -59,6 +66,7 @@ def _require_teacher_section(
             joinedload(Section.teachers).joinedload(SectionTeacherAssignment.teacher),
             joinedload(Section.students).joinedload(SectionStudentAssignment.student),
             joinedload(Section.modules).joinedload(SectionModule.items),
+            joinedload(Section.modules).joinedload(SectionModule.created_by_teacher),
         )
         .filter(Section.id == section_id)
         .first()
@@ -68,6 +76,19 @@ def _require_teacher_section(
     return section
 
 
+def _require_module_owner(db: Session, current_teacher: User, module: SectionModule) -> None:
+    if module.created_by_teacher_id is None:
+        module.created_by_teacher_id = current_teacher.id
+        db.add(module)
+        db.flush()
+        return
+    if module.created_by_teacher_id != current_teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the teacher who created this module can edit it.",
+        )
+
+
 def _module_out(module: SectionModule) -> TeacherSectionModuleOut:
     return TeacherSectionModuleOut(
         id=module.id,
@@ -75,6 +96,8 @@ def _module_out(module: SectionModule) -> TeacherSectionModuleOut:
         title=module.title,
         description=module.description,
         order_index=module.order_index,
+        created_by_teacher_id=module.created_by_teacher_id,
+        instructor_name=user_display_name(module.created_by_teacher),
         is_published=module.is_published,
         items=[
             {
@@ -101,6 +124,315 @@ def _resource_kind_for_item_type(item_type: str) -> str:
     if item_type == "interactive_resource":
         return "interactive"
     return "external_link"
+
+
+def _parse_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if number >= 0 else None
+    if isinstance(value, str):
+        try:
+            number = float(value.strip())
+        except ValueError:
+            return None
+        return number if number >= 0 else None
+    return None
+
+
+def _parse_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lstrip("-").isdigit():
+            return int(stripped)
+    return None
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    raw_value = value.strip()
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _extract_attempt_details(
+    progress_entry: SectionModuleItemProgress | None,
+) -> list[TeacherStudentAttemptDetailOut]:
+    if progress_entry is None:
+        return []
+
+    payload = dict(progress_entry.submitted_payload or {})
+    raw_history = payload.get("history")
+    parsed_details: list[TeacherStudentAttemptDetailOut] = []
+
+    if isinstance(raw_history, list):
+        for index, entry in enumerate(raw_history, start=1):
+            if not isinstance(entry, dict):
+                continue
+            attempt_number = _parse_int(entry.get("attempt")) or index
+            raw_status = entry.get("status")
+            default_status = "completed" if entry.get("submitted_at") else progress_entry.status
+            status_value = (
+                str(raw_status).strip()
+                if isinstance(raw_status, str) and str(raw_status).strip()
+                else default_status
+            )
+            score = _parse_float(entry.get("score_percent"))
+            correct_count = _parse_int(entry.get("correct_count")) or 0
+            wrong_count = _parse_int(entry.get("wrong_count")) or 0
+            duration_seconds = max(0, _parse_int(entry.get("duration_seconds")) or 0)
+            completed_at = _parse_datetime(entry.get("completed_at")) or _parse_datetime(
+                entry.get("submitted_at")
+            )
+            parsed_details.append(
+                TeacherStudentAttemptDetailOut(
+                    attempt_number=max(1, attempt_number),
+                    status=status_value or "completed",
+                    score_percent=score,
+                    correct_count=max(0, correct_count),
+                    wrong_count=max(0, wrong_count),
+                    duration_seconds=duration_seconds,
+                    completed_at=completed_at,
+                )
+            )
+
+    if parsed_details:
+        parsed_details.sort(key=lambda entry: entry.attempt_number)
+        return parsed_details
+
+    fallback_attempt_number = max(progress_entry.attempt_count or 0, 1)
+    fallback_correct = 1 if progress_entry.is_correct is True else 0
+    fallback_wrong = 1 if progress_entry.is_correct is False else 0
+    fallback_status = progress_entry.status or "completed"
+    return [
+        TeacherStudentAttemptDetailOut(
+            attempt_number=fallback_attempt_number,
+            status=fallback_status,
+            score_percent=progress_entry.score_percent,
+            correct_count=fallback_correct,
+            wrong_count=fallback_wrong,
+            duration_seconds=max(0, progress_entry.duration_seconds or 0),
+            completed_at=progress_entry.completed_at,
+        )
+    ]
+
+
+def _module_max_points(module_item: SectionModuleItem) -> float:
+    config = dict(module_item.config or {})
+    value = _parse_float(config.get("max_points"))
+    if value is None or value <= 0:
+        return 100.0
+    return min(value, 1000.0)
+
+
+def _normalize_rubric_id(value: Any, fallback: str) -> str:
+    if isinstance(value, str):
+        trimmed = value.strip().lower()
+        if trimmed:
+            normalized = "".join(char for char in trimmed if char.isalnum() or char in {"-", "_"})
+            if normalized:
+                return normalized[:120]
+    return fallback
+
+
+def _parse_rubric_items(module_item: SectionModuleItem) -> list[dict[str, Any]]:
+    config = dict(module_item.config or {})
+    raw_rubric_items = config.get("rubric_items")
+    parsed_items: list[dict[str, Any]] = []
+    if isinstance(raw_rubric_items, list):
+        for index, entry in enumerate(raw_rubric_items, start=1):
+            if not isinstance(entry, dict):
+                continue
+            criterion_raw = entry.get("criterion")
+            criterion = criterion_raw.strip() if isinstance(criterion_raw, str) else ""
+            if not criterion:
+                continue
+            weight_value = _parse_float(entry.get("weight_percent"))
+            if weight_value is None:
+                weight_value = _parse_float(entry.get("weightPercent"))
+            weight_percent = max(0.0, min(float(weight_value or 0.0), 100.0))
+            fallback_id = f"rubric-{index}"
+            rubric_id = _normalize_rubric_id(entry.get("id"), fallback_id)
+            parsed_items.append(
+                {
+                    "id": rubric_id,
+                    "criterion": criterion,
+                    "weight_percent": round(weight_percent, 2),
+                }
+            )
+    if parsed_items:
+        return parsed_items
+
+    rubric_text_raw = config.get("rubric_text")
+    rubric_text = rubric_text_raw.strip() if isinstance(rubric_text_raw, str) else ""
+    if not rubric_text:
+        return []
+    lines = [line.strip() for line in rubric_text.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    weighted_lines: list[tuple[str, float | None]] = []
+    for line in lines:
+        match = re.match(r"^(?P<criterion>.+?)\s*\((?P<weight>\d+(?:\.\d+)?)%\)\s*$", line)
+        if match:
+            criterion = match.group("criterion").strip()
+            weight = float(match.group("weight"))
+            weighted_lines.append((criterion, weight))
+        else:
+            weighted_lines.append((line, None))
+
+    fallback_weight = round(100 / len(weighted_lines), 2)
+    for index, (criterion, weight) in enumerate(weighted_lines, start=1):
+        parsed_items.append(
+            {
+                "id": f"rubric-{index}",
+                "criterion": criterion,
+                "weight_percent": round(max(0.0, min(float(weight or fallback_weight), 100.0)), 2),
+            }
+        )
+    return parsed_items
+
+
+def _student_display_name(student: User) -> str:
+    full_name = " ".join(
+        part.strip()
+        for part in [student.first_name or "", student.last_name or ""]
+        if part and part.strip()
+    ).strip()
+    return full_name or student.username
+
+
+def _normalize_asset_entry(entry: Any) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    kind = entry.get("resource_kind")
+    file_name = entry.get("resource_file_name")
+    file_path = entry.get("resource_file_path")
+    if kind not in {"video", "image", "document", "interactive"}:
+        return None
+    if not isinstance(file_name, str) or not isinstance(file_path, str):
+        return None
+    resource_url = entry.get("resource_url")
+    if isinstance(resource_url, str) and resource_url.strip():
+        normalized_url = resource_url.strip()
+    else:
+        normalized_url = f"/{file_path.lstrip('/')}"
+    return {
+        "resource_kind": kind,
+        "resource_file_name": file_name,
+        "resource_file_path": file_path,
+        "resource_mime_type": entry.get("resource_mime_type"),
+        "resource_url": normalized_url,
+        "label": entry.get("label"),
+    }
+
+
+def _build_submission_out(
+    *,
+    module: SectionModule,
+    item: SectionModuleItem,
+    student: User,
+    progress: SectionModuleItemProgress | None,
+) -> TeacherModuleSubmissionOut:
+    payload = dict(progress.submitted_payload or {}) if progress else {}
+    raw_files = payload.get("files")
+    files = []
+    if isinstance(raw_files, list):
+        files = [
+            normalized
+            for normalized in (_normalize_asset_entry(entry) for entry in raw_files)
+            if normalized is not None
+        ]
+    max_points = _module_max_points(item)
+    score_points = _parse_float(payload.get("teacher_score_points"))
+    feedback_raw = payload.get("teacher_feedback")
+    feedback = feedback_raw.strip() if isinstance(feedback_raw, str) and feedback_raw.strip() else None
+    rubric_raw = (item.config or {}).get("rubric_text")
+    rubric_text = rubric_raw.strip() if isinstance(rubric_raw, str) and rubric_raw.strip() else None
+    rubric_items = _parse_rubric_items(item)
+    raw_rubric_scores = payload.get("teacher_rubric_scores")
+    rubric_scores: list[dict[str, Any]] = []
+    if isinstance(raw_rubric_scores, list):
+        rubric_lookup = {
+            str(entry["id"]).strip().lower(): entry
+            for entry in rubric_items
+            if isinstance(entry.get("id"), str) and str(entry["id"]).strip()
+        }
+        for index, entry in enumerate(raw_rubric_scores, start=1):
+            if not isinstance(entry, dict):
+                continue
+            fallback_id = f"rubric-{index}"
+            rubric_id = _normalize_rubric_id(entry.get("rubric_id"), fallback_id)
+            matched_rubric = rubric_lookup.get(rubric_id.lower())
+            criterion_raw = entry.get("criterion")
+            criterion = criterion_raw.strip() if isinstance(criterion_raw, str) else ""
+            if not criterion and matched_rubric:
+                criterion = str(matched_rubric.get("criterion") or "").strip()
+            if not criterion:
+                continue
+            weight_percent = _parse_float(entry.get("weight_percent"))
+            if weight_percent is None and matched_rubric:
+                weight_percent = _parse_float(matched_rubric.get("weight_percent"))
+            achieved_percent = _parse_float(entry.get("achieved_percent"))
+            if achieved_percent is None:
+                achieved_percent = 0.0
+            achieved_percent = max(0.0, min(float(achieved_percent), 100.0))
+            contributed_percent = _parse_float(entry.get("contributed_percent"))
+            if contributed_percent is None:
+                contributed_percent = (float(weight_percent or 0.0) * achieved_percent) / 100.0
+            rubric_scores.append(
+                {
+                    "rubric_id": rubric_id,
+                    "criterion": criterion,
+                    "weight_percent": round(max(0.0, min(float(weight_percent or 0.0), 100.0)), 2),
+                    "achieved_percent": round(achieved_percent, 2),
+                    "contributed_percent": round(max(0.0, float(contributed_percent)), 2),
+                }
+            )
+    rubric_score_percent = _parse_float(payload.get("teacher_rubric_score_percent"))
+    if rubric_score_percent is None and rubric_scores:
+        rubric_score_percent = sum(float(entry.get("contributed_percent") or 0.0) for entry in rubric_scores)
+    if rubric_score_percent is not None:
+        rubric_score_percent = round(max(0.0, min(float(rubric_score_percent), 100.0)), 2)
+
+    return TeacherModuleSubmissionOut(
+        progress_id=progress.id if progress else None,
+        module_id=module.id,
+        module_title=module.title,
+        item_id=item.id,
+        item_title=item.title,
+        item_order_index=item.order_index,
+        student_id=student.id,
+        student_name=_student_display_name(student),
+        student_email=student.email,
+        status=progress.status if progress else "not_submitted",
+        submitted_at=progress.completed_at if progress else None,
+        attempt_count=progress.attempt_count if progress else 0,
+        duration_seconds=progress.duration_seconds if progress else 0,
+        score_percent=progress.score_percent if progress else None,
+        max_points=max_points,
+        score_points=score_points,
+        feedback=feedback,
+        rubric_text=rubric_text,
+        rubric_items=rubric_items,
+        rubric_scores=rubric_scores,
+        rubric_score_percent=rubric_score_percent,
+        files=files,
+    )
 
 
 def _resource_kind_for_file(
@@ -246,13 +578,17 @@ def update_teacher_module(
 ) -> TeacherSectionModuleOut:
     module = (
         db.query(SectionModule)
-        .options(joinedload(SectionModule.items))
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
+        )
         .filter(SectionModule.id == module_id)
         .first()
     )
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
     _require_teacher_section(db, current_teacher, module.section_id)
+    _require_module_owner(db, current_teacher, module)
 
     if payload.title is not None:
         module.title = payload.title.strip()
@@ -303,13 +639,17 @@ def create_teacher_module_item(
 ) -> TeacherSectionModuleOut:
     module = (
         db.query(SectionModule)
-        .options(joinedload(SectionModule.items))
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
+        )
         .filter(SectionModule.id == module_id)
         .first()
     )
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
     _require_teacher_section(db, current_teacher, module.section_id)
+    _require_module_owner(db, current_teacher, module)
 
     item = SectionModuleItem(
         section_module_id=module.id,
@@ -357,13 +697,17 @@ def upload_teacher_module_item_resource(
 ) -> TeacherSectionModuleOut:
     module = (
         db.query(SectionModule)
-        .options(joinedload(SectionModule.items))
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
+        )
         .filter(SectionModule.id == module_id)
         .first()
     )
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
     _require_teacher_section(db, current_teacher, module.section_id)
+    _require_module_owner(db, current_teacher, module)
     if item_type not in RESOURCE_ITEM_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -402,7 +746,7 @@ def upload_teacher_module_item_resource(
             "module_id": module.id,
             "item_type": item.item_type,
             "title": item.title,
-            "resource_file_name": resource_file.filename or saved_name,
+            "resource_file_name": uploaded_asset.resource_file_name,
         },
     )
     db.commit()
@@ -421,13 +765,17 @@ def upload_teacher_module_item_asset(
 ) -> TeacherSectionModuleOut:
     item = (
         db.query(SectionModuleItem)
-        .options(joinedload(SectionModuleItem.module).joinedload(SectionModule.items))
+        .options(
+            joinedload(SectionModuleItem.module).joinedload(SectionModule.items),
+            joinedload(SectionModuleItem.module).joinedload(SectionModule.created_by_teacher),
+        )
         .filter(SectionModuleItem.id == item_id)
         .first()
     )
     if not item or not item.module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module item not found.")
     _require_teacher_section(db, current_teacher, item.module.section_id)
+    _require_module_owner(db, current_teacher, item.module)
 
     allowed_item_types = {"readable", "identification_assessment", "multiple_choice_assessment"}
     if item.item_type not in allowed_item_types:
@@ -487,13 +835,17 @@ def update_teacher_module_item(
 ) -> TeacherSectionModuleOut:
     item = (
         db.query(SectionModuleItem)
-        .options(joinedload(SectionModuleItem.module).joinedload(SectionModule.items))
+        .options(
+            joinedload(SectionModuleItem.module).joinedload(SectionModule.items),
+            joinedload(SectionModuleItem.module).joinedload(SectionModule.created_by_teacher),
+        )
         .filter(SectionModuleItem.id == item_id)
         .first()
     )
     if not item or not item.module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module item not found.")
     _require_teacher_section(db, current_teacher, item.module.section_id)
+    _require_module_owner(db, current_teacher, item.module)
 
     if payload.title is not None:
         item.title = payload.title.strip()
@@ -535,7 +887,10 @@ def delete_teacher_module_item(
 ) -> TeacherSectionModuleOut:
     item = (
         db.query(SectionModuleItem)
-        .options(joinedload(SectionModuleItem.module).joinedload(SectionModule.items))
+        .options(
+            joinedload(SectionModuleItem.module).joinedload(SectionModule.items),
+            joinedload(SectionModuleItem.module).joinedload(SectionModule.created_by_teacher),
+        )
         .filter(SectionModuleItem.id == item_id)
         .first()
     )
@@ -543,6 +898,7 @@ def delete_teacher_module_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module item not found.")
     module = item.module
     _require_teacher_section(db, current_teacher, module.section_id)
+    _require_module_owner(db, current_teacher, module)
     db.delete(item)
     db.flush()
     remaining_items = (
@@ -570,6 +926,188 @@ def delete_teacher_module_item(
     db.commit()
     db.refresh(module)
     return _module_out(module)
+
+
+@router.get("/modules/{module_id}/submissions", response_model=list[TeacherModuleSubmissionOut])
+def list_module_upload_submissions(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> list[TeacherModuleSubmissionOut]:
+    module = (
+        db.query(SectionModule)
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.section).joinedload(Section.students).joinedload(SectionStudentAssignment.student),
+        )
+        .filter(SectionModule.id == module_id)
+        .first()
+    )
+    if not module:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
+    _require_teacher_section(db, current_teacher, module.section_id)
+
+    upload_items = [
+        item
+        for item in sorted(module.items, key=lambda row: row.order_index)
+        if item.item_type == "upload_assessment"
+    ]
+    if not upload_items:
+        return []
+
+    item_ids = [item.id for item in upload_items]
+    student_assignments = sorted(
+        [assignment for assignment in module.section.students if assignment.student is not None],
+        key=lambda entry: (
+            _student_display_name(entry.student).lower(),
+            entry.student.id,
+        ),
+    )
+    if not student_assignments:
+        return []
+    student_ids = [assignment.student_id for assignment in student_assignments]
+    progress_rows = (
+        db.query(SectionModuleItemProgress)
+        .filter(
+            SectionModuleItemProgress.section_module_id == module.id,
+            SectionModuleItemProgress.section_module_item_id.in_(item_ids),
+            SectionModuleItemProgress.student_id.in_(student_ids),
+        )
+        .all()
+    )
+    progress_by_key = {
+        (row.section_module_item_id, row.student_id): row for row in progress_rows
+    }
+    submissions: list[TeacherModuleSubmissionOut] = []
+    for item in upload_items:
+        for assignment in student_assignments:
+            student = assignment.student
+            if not student:
+                continue
+            progress = progress_by_key.get((item.id, student.id))
+            submissions.append(
+                _build_submission_out(
+                    module=module,
+                    item=item,
+                    student=student,
+                    progress=progress,
+                )
+            )
+    return submissions
+
+
+@router.patch(
+    "/submission-progress/{progress_id}/grade",
+    response_model=TeacherModuleSubmissionOut,
+)
+def grade_module_upload_submission(
+    progress_id: int,
+    payload: TeacherSubmissionGradeRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> TeacherModuleSubmissionOut:
+    progress = (
+        db.query(SectionModuleItemProgress)
+        .options(
+            joinedload(SectionModuleItemProgress.student),
+            joinedload(SectionModuleItemProgress.module_item).joinedload(SectionModuleItem.module),
+        )
+        .filter(SectionModuleItemProgress.id == progress_id)
+        .first()
+    )
+    if not progress or not progress.module_item or not progress.module_item.module or not progress.student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found.")
+    item = progress.module_item
+    module = item.module
+    student = progress.student
+    _require_teacher_section(db, current_teacher, module.section_id)
+    if item.item_type != "upload_assessment":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only upload assessments can be graded manually.",
+        )
+    max_points = _module_max_points(item)
+    rubric_items = _parse_rubric_items(item)
+    score_points: float
+    score_percent: float
+    current_payload = dict(progress.submitted_payload or {})
+    if payload.rubric_scores:
+        if not rubric_items:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No rubric criteria configured for this upload assessment.",
+            )
+        input_by_rubric_id = {
+            _normalize_rubric_id(entry.rubric_id, f"rubric-{index + 1}"): entry
+            for index, entry in enumerate(payload.rubric_scores)
+        }
+        computed_rubric_scores: list[dict[str, Any]] = []
+        total_percent = 0.0
+        for index, rubric_item in enumerate(rubric_items, start=1):
+            rubric_id = _normalize_rubric_id(rubric_item.get("id"), f"rubric-{index}")
+            criterion = str(rubric_item.get("criterion") or "").strip()
+            weight_percent = max(0.0, min(float(_parse_float(rubric_item.get("weight_percent")) or 0.0), 100.0))
+            matched_input = input_by_rubric_id.get(rubric_id)
+            achieved_percent = (
+                max(0.0, min(float(matched_input.achieved_percent), 100.0))
+                if matched_input is not None
+                else 0.0
+            )
+            contributed_percent = round((weight_percent * achieved_percent) / 100.0, 2)
+            total_percent += contributed_percent
+            computed_rubric_scores.append(
+                {
+                    "rubric_id": rubric_id,
+                    "criterion": criterion,
+                    "weight_percent": round(weight_percent, 2),
+                    "achieved_percent": round(achieved_percent, 2),
+                    "contributed_percent": contributed_percent,
+                }
+            )
+
+        score_percent = round(max(0.0, min(total_percent, 100.0)), 2)
+        score_points = round((score_percent / 100.0) * max_points, 2) if max_points > 0 else 0.0
+        current_payload["teacher_rubric_scores"] = computed_rubric_scores
+        current_payload["teacher_rubric_score_percent"] = score_percent
+    else:
+        if payload.score_points is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Provide a score or use the rubric scorer before saving.",
+            )
+        score_points = max(0.0, min(float(payload.score_points), max_points))
+        score_percent = round((score_points / max_points) * 100, 2) if max_points > 0 else 0.0
+        current_payload.pop("teacher_rubric_scores", None)
+        current_payload.pop("teacher_rubric_score_percent", None)
+
+    current_payload["teacher_score_points"] = score_points
+    current_payload["teacher_feedback"] = (payload.feedback or "").strip() or None
+    current_payload["teacher_scored_by_teacher_id"] = current_teacher.id
+    current_payload["teacher_scored_at"] = utc_now().isoformat()
+    progress.status = "completed"
+    progress.score_percent = score_percent
+    progress.submitted_payload = current_payload
+    db.add(progress)
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_upload_submission_graded",
+        target_type="section_module_item_progress",
+        target_id=progress.id,
+        details={
+            "module_id": module.id,
+            "module_title": module.title,
+            "item_id": item.id,
+            "item_title": item.title,
+            "student_id": student.id,
+            "score_points": score_points,
+            "max_points": max_points,
+            "score_percent": score_percent,
+        },
+    )
+    db.commit()
+    db.refresh(progress)
+    return _build_submission_out(module=module, item=item, student=student, progress=progress)
 
 
 @router.post("/sections/{section_id}/certificate-template", response_model=CertificateTemplateOut)
@@ -617,6 +1155,7 @@ def get_teacher_student_report(
         "multiple_choice_assessment",
         "identification_assessment",
         "signing_lab_assessment",
+        "upload_assessment",
     }
 
     for module in sorted(student_assignment.section.modules, key=lambda row: row.order_index):
@@ -647,6 +1186,7 @@ def get_teacher_student_report(
                 attempt_count=(progress_entry.attempt_count if progress_entry else 0),
                 duration_seconds=(progress_entry.duration_seconds if progress_entry else 0),
                 completed_at=(progress_entry.completed_at if progress_entry else None),
+                attempt_details=_extract_attempt_details(progress_entry),
             )
             for item in published_items
             for progress_entry in [item_progress_by_item_id.get(item.id)]

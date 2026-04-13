@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import TeacherSectionsPage from "../../sections/page";
 
-export default function LegacyTeacherModuleDetailPage() {
-  redirect("/teacher/sections");
+export default function TeacherModuleDetailPage() {
+  return <TeacherSectionsPage />;
 }

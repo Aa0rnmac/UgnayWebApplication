@@ -67,8 +67,6 @@ export default function ProfilePage() {
     return `${uploadBase}/${user.profile_image_path}`;
   }, [user?.profile_image_path]);
 
-  const canEditNames = user?.role === "teacher";
-
   useEffect(() => {
     const token = window.localStorage.getItem("auth_token");
     if (!token) {
@@ -112,9 +110,20 @@ export default function ProfilePage() {
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const firstName = form.firstName.trim();
+    const middleName = form.middleName.trim();
+    const lastName = form.lastName.trim();
     const email = form.email.trim();
     const phone = normalizePhilippinePhone(form.phoneNumber);
 
+    if (!firstName) {
+      setError("First name is required.");
+      return;
+    }
+    if (!lastName) {
+      setError("Last name is required.");
+      return;
+    }
     if (email && !isValidEmail(email)) {
       setError(
         "Email must be valid (example: name@gmail.com, name@hotmail.com, name@yahoo.com)."
@@ -132,9 +141,9 @@ export default function ProfilePage() {
 
     try {
       const updated = await updateMyProfile({
-        first_name: form.firstName.trim() || null,
-        middle_name: form.middleName.trim() || null,
-        last_name: form.lastName.trim() || null,
+        first_name: firstName,
+        middle_name: middleName || null,
+        last_name: lastName,
         email: email || null,
         phone_number: phone || null,
         address: form.address.trim() || null,
@@ -294,13 +303,9 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 First Name
                 <input
-                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
-                    canEditNames
-                      ? "bg-white outline-none transition focus:border-brandBlue"
-                      : "bg-brandMutedSurface"
-                  }`}
+                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
                   onChange={(event) => updateField("firstName", event.target.value)}
-                  readOnly={!canEditNames}
+                  required
                   type="text"
                   value={form.firstName}
                 />
@@ -308,13 +313,8 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Middle Name
                 <input
-                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
-                    canEditNames
-                      ? "bg-white outline-none transition focus:border-brandBlue"
-                      : "bg-brandMutedSurface"
-                  }`}
+                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
                   onChange={(event) => updateField("middleName", event.target.value)}
-                  readOnly={!canEditNames}
                   type="text"
                   value={form.middleName}
                 />
@@ -322,13 +322,9 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Last Name
                 <input
-                  className={`w-full rounded-lg border border-brandBorder px-3 py-2 text-sm text-slate-900 ${
-                    canEditNames
-                      ? "bg-white outline-none transition focus:border-brandBlue"
-                      : "bg-brandMutedSurface"
-                  }`}
+                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
                   onChange={(event) => updateField("lastName", event.target.value)}
-                  readOnly={!canEditNames}
+                  required
                   type="text"
                   value={form.lastName}
                 />

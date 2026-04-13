@@ -16,10 +16,10 @@ export default function AdminDashboardPage() {
   return (
     <section className="space-y-6">
       <div className="panel">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Admin LMS</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Admin Dashboard</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">System Overview</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Create accounts, manage sections, and monitor system activity.
+          Quick Access Too Create accounts, manage sections, and monitor system activity.
         </p>
       </div>
 

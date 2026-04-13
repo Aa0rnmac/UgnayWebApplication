@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  getAdminLoginActivityReport,
   getAdminSystemActivityEvents,
-  type LoginActivityReport,
   type SystemActivityEvent
 } from "@/lib/api";
 
@@ -23,6 +21,9 @@ function resolveActorCompany(event: SystemActivityEvent): string {
 }
 
 function formatActionType(value: string): string {
+  if (value === "global_certificate_template_updated") {
+    return "certificate template updated";
+  }
   return value.replaceAll("_", " ");
 }
 
@@ -47,21 +48,18 @@ function toEndOfDayTimestamp(value: string): number | null {
 }
 
 export default function AdminReportsPage() {
-  const [loginReport, setLoginReport] = useState<LoginActivityReport | null>(null);
   const [activityEvents, setActivityEvents] = useState<SystemActivityEvent[]>([]);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [actionTypeFilter, setActionTypeFilter] = useState<string>("all");
+  const [search, setSearch] = useState<string>("");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getAdminLoginActivityReport(200), getAdminSystemActivityEvents(220, "all")])
-      .then(([loginData, activityData]) => {
-        setLoginReport(loginData);
-        setActivityEvents(activityData);
-      })
+    getAdminSystemActivityEvents(400, "all")
+      .then(setActivityEvents)
       .catch((requestError: Error) => setError(requestError.message));
   }, []);
 
@@ -90,24 +88,8 @@ export default function AdminReportsPage() {
   const dateFromTimestamp = useMemo(() => toStartOfDayTimestamp(dateFrom), [dateFrom]);
   const dateToTimestamp = useMemo(() => toEndOfDayTimestamp(dateTo), [dateTo]);
 
-  const filteredLoginEvents = useMemo(() => {
-    const rows = loginReport?.events ?? [];
-    return rows.filter((event) => {
-      if (roleFilter !== "all" && event.role !== roleFilter) {
-        return false;
-      }
-      const loginTimestamp = new Date(event.logged_in_at).getTime();
-      if (dateFromTimestamp !== null && loginTimestamp < dateFromTimestamp) {
-        return false;
-      }
-      if (dateToTimestamp !== null && loginTimestamp > dateToTimestamp) {
-        return false;
-      }
-      return true;
-    });
-  }, [dateFromTimestamp, dateToTimestamp, loginReport, roleFilter]);
-
   const filteredActivityEvents = useMemo(() => {
+    const searchTerm = search.trim().toLowerCase();
     return activityEvents.filter((event) => {
       const roleOk = roleFilter === "all" || event.actor_role === roleFilter;
       if (!roleOk) {
@@ -127,17 +109,39 @@ export default function AdminReportsPage() {
       if (dateToTimestamp !== null && eventTimestamp > dateToTimestamp) {
         return false;
       }
+      if (searchTerm) {
+        const haystack = [
+          event.actor_username,
+          event.actor_email ?? "",
+          event.actor_first_name ?? "",
+          event.actor_last_name ?? "",
+          resolveActorCompany(event),
+          formatActionType(event.action_type),
+          event.target_type ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(searchTerm)) {
+          return false;
+        }
+      }
       return true;
     });
-  }, [actionTypeFilter, activityEvents, companyFilter, dateFromTimestamp, dateToTimestamp, roleFilter]);
+  }, [actionTypeFilter, activityEvents, companyFilter, dateFromTimestamp, dateToTimestamp, roleFilter, search]);
+
+  const passwordChangeCount = useMemo(
+    () =>
+      filteredActivityEvents.filter((event) => event.action_type === "account_password_changed")
+        .length,
+    [filteredActivityEvents]
+  );
 
   return (
     <section className="space-y-6">
       <div className="panel">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Admin LMS</p>
-        <h2 className="mt-3 text-3xl font-bold title-gradient">Reports and Login Activity</h2>
+        <h2 className="text-3xl font-bold title-gradient">Audit Logs</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Monitor login sessions and system activity with date, role, company, and action filters.
+          Track system actions.
         </p>
       </div>
 
@@ -147,31 +151,35 @@ export default function AdminReportsPage() {
         </p>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <article className="panel panel-lively">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Logins (24h)</p>
-          <p className="mt-3 text-4xl font-black text-brandBlue">{loginReport?.total_logins_last_24h ?? 0}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Audit Entries</p>
+          <p className="mt-3 text-4xl font-black text-brandBlue">{filteredActivityEvents.length}</p>
         </article>
         <article className="panel panel-lively">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Active Sessions</p>
-          <p className="mt-3 text-4xl font-black text-brandGreen">{loginReport?.active_sessions ?? 0}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Password Changes</p>
+          <p className="mt-3 text-4xl font-black text-brandGreen">{passwordChangeCount}</p>
         </article>
         <article className="panel panel-lively">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Teacher Logins (24h)</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Teachers</p>
           <p className="mt-3 text-4xl font-black text-accentWarm">
-            {loginReport?.logins_last_24h_by_role?.teacher ?? 0}
-          </p>
-        </article>
-        <article className="panel panel-lively">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Student Logins (24h)</p>
-          <p className="mt-3 text-4xl font-black text-brandBlue">
-            {loginReport?.logins_last_24h_by_role?.student ?? 0}
+            {filteredActivityEvents.filter((event) => event.actor_role === "teacher").length}
           </p>
         </article>
       </div>
 
       <div className="panel">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <label className="text-sm font-semibold text-slate-800">
+            Search
+            <input
+              className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search user, email, action, company..."
+              type="text"
+              value={search}
+            />
+          </label>
           <label className="text-sm font-semibold text-slate-800">
             Date From
             <input
@@ -239,6 +247,7 @@ export default function AdminReportsPage() {
             <button
               className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-brandBlueLight"
               onClick={() => {
+                setSearch("");
                 setDateFrom("");
                 setDateTo("");
                 setRoleFilter("all");
@@ -255,55 +264,7 @@ export default function AdminReportsPage() {
 
       <div className="panel">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Recent Login Sessions</p>
-          <span className="rounded-full border border-brandBorder bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-            {filteredLoginEvents.length} entries
-          </span>
-        </div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-brandBorder text-left text-xs uppercase tracking-[0.2em] text-slate-500">
-                <th className="px-2 py-3">User</th>
-                <th className="px-2 py-3">Role</th>
-                <th className="px-2 py-3">Login Time</th>
-                <th className="px-2 py-3">Session</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredLoginEvents.map((event) => (
-                <tr className="border-b border-brandBorder/70" key={event.session_id}>
-                  <td className="px-2 py-3 font-semibold text-slate-900">{event.username}</td>
-                  <td className="px-2 py-3 capitalize text-slate-700">{event.role}</td>
-                  <td className="px-2 py-3 text-slate-700">{new Date(event.logged_in_at).toLocaleString()}</td>
-                  <td className="px-2 py-3">
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                        event.is_active
-                          ? "bg-brandGreenLight text-brandGreen"
-                          : "bg-brandMutedSurface text-slate-600"
-                      }`}
-                    >
-                      {event.is_active ? "Active" : "Expired"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {filteredLoginEvents.length === 0 ? (
-                <tr>
-                  <td className="px-2 py-4 text-sm text-slate-500" colSpan={4}>
-                    No login entries found for this filter.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">System Activity Trail</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">System Audit Trail</p>
           <span className="rounded-full border border-brandBorder bg-white px-3 py-1 text-xs font-semibold text-slate-700">
             {filteredActivityEvents.length} entries
           </span>
@@ -338,7 +299,7 @@ export default function AdminReportsPage() {
               {filteredActivityEvents.length === 0 ? (
                 <tr>
                   <td className="px-2 py-4 text-sm text-slate-500" colSpan={7}>
-                    No system activity entries found for this filter.
+                    No audit entries found for this filter.
                   </td>
                 </tr>
               ) : null}

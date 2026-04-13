@@ -13,6 +13,7 @@ ModuleItemType = Literal[
     "multiple_choice_assessment",
     "identification_assessment",
     "signing_lab_assessment",
+    "upload_assessment",
 ]
 
 
@@ -165,6 +166,10 @@ class ModuleItemChoiceConfig(BaseModel):
     questions: list[dict[str, Any]] = Field(default_factory=list)
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     prompt_media: dict[str, Any] | None = None
+    rubric_text: str | None = None
+    max_points: float | None = Field(default=None, ge=1, le=1000)
+    rubric_items: list[dict[str, Any]] = Field(default_factory=list)
+    rubric_total_weight_percent: float | None = Field(default=None, ge=0, le=100)
 
 
 class ModuleItemCreateRequest(BaseModel):
@@ -216,6 +221,8 @@ class TeacherSectionModuleOut(BaseModel):
     title: str
     description: str
     order_index: int
+    created_by_teacher_id: int | None = None
+    instructor_name: str
     is_published: bool
     items: list[SectionModuleItemOut] = Field(default_factory=list)
 
@@ -258,6 +265,8 @@ class StudentCourseModuleOut(BaseModel):
     title: str
     description: str
     order_index: int
+    created_by_teacher_id: int | None = None
+    instructor_name: str
     is_locked: bool
     status: str
     progress_percent: int
@@ -290,6 +299,16 @@ class StudentProgressUpdateOut(BaseModel):
     score_percent: float | None = None
 
 
+class TeacherStudentAttemptDetailOut(BaseModel):
+    attempt_number: int
+    status: str
+    score_percent: float | None = None
+    correct_count: int = 0
+    wrong_count: int = 0
+    duration_seconds: int = 0
+    completed_at: datetime | None = None
+
+
 class TeacherStudentItemReportOut(BaseModel):
     item_id: int
     item_title: str
@@ -301,6 +320,7 @@ class TeacherStudentItemReportOut(BaseModel):
     attempt_count: int
     duration_seconds: int
     completed_at: datetime | None = None
+    attempt_details: list[TeacherStudentAttemptDetailOut] = Field(default_factory=list)
 
 
 class TeacherStudentModuleReportOut(BaseModel):
@@ -343,6 +363,28 @@ class CertificateStudentDownloadOut(BaseModel):
     section_name: str | None = None
     message: str
     completion_date: str | None = None
+
+
+class AdminSectionCertificateTemplateOut(BaseModel):
+    section_id: int
+    section_name: str
+    template_file_name: str | None = None
+    template_file_path: str | None = None
+    template_file_url: str | None = None
+    signature_name: str | None = None
+    signature_title: str | None = None
+    signature_label: str | None = None
+    updated_at: str | None = None
+
+
+class AdminCertificateTemplateOut(BaseModel):
+    template_file_name: str | None = None
+    template_file_path: str | None = None
+    template_file_url: str | None = None
+    signatory_name: str | None = None
+    signatory_title: str = "Head Instructor"
+    organization_name: str = "Hand and Heart"
+    updated_at: str | None = None
 
 
 class LoginActivityEventOut(BaseModel):
@@ -396,3 +438,53 @@ class UploadedModuleAssetOut(BaseModel):
     resource_mime_type: str | None = None
     resource_url: str | None = None
     label: str | None = None
+
+
+class TeacherRubricCriterionOut(BaseModel):
+    id: str
+    criterion: str
+    weight_percent: float
+
+
+class TeacherRubricScoreOut(BaseModel):
+    rubric_id: str
+    criterion: str
+    weight_percent: float
+    achieved_percent: float
+    contributed_percent: float
+
+
+class TeacherModuleSubmissionOut(BaseModel):
+    progress_id: int | None = None
+    module_id: int
+    module_title: str
+    item_id: int
+    item_title: str
+    item_order_index: int
+    student_id: int
+    student_name: str
+    student_email: str | None = None
+    status: str
+    submitted_at: datetime | None = None
+    attempt_count: int
+    duration_seconds: int
+    score_percent: float | None = None
+    max_points: float
+    score_points: float | None = None
+    feedback: str | None = None
+    rubric_text: str | None = None
+    rubric_items: list[TeacherRubricCriterionOut] = Field(default_factory=list)
+    rubric_scores: list[TeacherRubricScoreOut] = Field(default_factory=list)
+    rubric_score_percent: float | None = None
+    files: list[UploadedModuleAssetOut] = Field(default_factory=list)
+
+
+class TeacherRubricScoreInput(BaseModel):
+    rubric_id: str = Field(min_length=1, max_length=120)
+    achieved_percent: float = Field(ge=0, le=100)
+
+
+class TeacherSubmissionGradeRequest(BaseModel):
+    score_points: float | None = Field(default=None, ge=0, le=1000)
+    feedback: str | None = Field(default=None, max_length=2000)
+    rubric_scores: list[TeacherRubricScoreInput] = Field(default_factory=list)

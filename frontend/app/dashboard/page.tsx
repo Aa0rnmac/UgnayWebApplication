@@ -21,10 +21,10 @@ export default function StudentDashboardPage() {
   return (
     <section className="space-y-6">
       <div className="panel">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Student LMS</p>
-        <h2 className="mt-3 text-3xl font-bold title-gradient">Learning Dashboard</h2>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Student Dashboard</p>
+        <h2 className="mt-3 text-3xl font-bold title-gradient">Learning Overview</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Follow the module order. Finish each reading or assessment before moving to the next item.
+          Follow the module order. Finish each item before moving to the next one.
         </p>
       </div>
 

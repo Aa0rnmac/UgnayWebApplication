@@ -1389,7 +1389,7 @@ function Module1AssessmentThree({
               {predictionConfidence !== null ? `${Math.round(predictionConfidence * 100)}%` : "N/A"}
             </p>
             <p className="mt-1 text-xs text-slate-600">
-              Top candidates:{" "}
+              Similar gestures:{" "}
               {predictionTopCandidates.length > 0 ? predictionTopCandidates.join(" | ") : "N/A"}
             </p>
             <p className="mt-2 rounded-md border border-brandYellow/35 bg-brandYellowLight px-2 py-1 text-xs font-semibold text-slate-800">

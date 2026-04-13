@@ -7,6 +7,8 @@
   --bg-end: #efeeeb;
   --lms-brand-blue: #2e44a8;
   --lms-brand-blue-hover: #263b92;
+  --lms-brand-blue-deep: #1e2f7f;
+  --lms-brand-cyan: #1fb3d8;
   --lms-brand-red: #cc2828;
   --lms-brand-red-soft: #fbeaea;
   --lms-brand-blue-soft: #e8ecf8;
@@ -38,18 +40,37 @@ body {
   padding: 0;
   font-family: var(--font-sans), "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   color: #1c1c2e;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(31, 179, 216, 0.06), transparent 25%),
+    radial-gradient(circle at 100% 0%, rgba(46, 68, 168, 0.08), transparent 30%),
+    linear-gradient(135deg, #f7f7f3, #efeeeb);
 }
 
 .lms-bootstrap-card {
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--surface-border);
   border-radius: 1rem;
-  background: var(--surface-tint);
-  box-shadow: 0 10px 24px rgba(28, 28, 46, 0.07);
+  background: linear-gradient(165deg, #ffffff 0%, #fcfcff 60%, #f7f8ff 100%);
+  box-shadow: 0 10px 24px rgba(28, 28, 46, 0.07), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  transition: transform 180ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.lms-bootstrap-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--lms-brand-blue) 0%, var(--lms-brand-cyan) 100%);
+  opacity: 0.35;
 }
 
 .lms-bootstrap-card:hover {
   border-color: rgba(46, 68, 168, 0.28);
-  box-shadow: 0 14px 30px rgba(28, 28, 46, 0.11);
+  box-shadow: 0 16px 32px rgba(28, 28, 46, 0.13), 0 1px 0 rgba(255, 255, 255, 0.95) inset;
+  transform: translateY(-2px);
 }
 
 .text-gradient-brand {
@@ -109,6 +130,19 @@ body {
   --bs-btn-active-color: #fff;
   --bs-btn-active-bg: var(--lms-brand-blue-hover);
   --bs-btn-active-border-color: var(--lms-brand-blue-hover);
+  background-image: linear-gradient(135deg, var(--lms-brand-blue) 0%, var(--lms-brand-blue-deep) 100%);
+  box-shadow: 0 6px 16px rgba(46, 68, 168, 0.22);
+  transition: transform 160ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+.btn-brand:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+  box-shadow: 0 10px 20px rgba(46, 68, 168, 0.28);
+}
+
+.btn-brand:active {
+  transform: translateY(0);
 }
 
 .btn-outline-brand {
@@ -121,6 +155,47 @@ body {
   --bs-btn-active-bg: var(--lms-brand-blue-soft);
   --bs-btn-active-border-color: rgba(46, 68, 168, 0.36);
   --bs-btn-focus-shadow-rgb: 46, 68, 168;
+  transition: transform 160ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.btn-outline-brand:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(46, 68, 168, 0.12);
+}
+
+.btn {
+  transition:
+    transform 150ms ease,
+    box-shadow 180ms ease,
+    filter 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease;
+}
+
+.btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.btn:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.table tbody tr {
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.table tbody tr:hover {
+  background-color: rgba(46, 68, 168, 0.04);
+}
+
+.nav-link,
+.list-group-item,
+.dropdown-item {
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.modal-content {
+  animation: modal-pop 180ms ease;
 }
 
 .bg-grid {
@@ -143,7 +218,13 @@ body {
 .panel {
   @apply rounded-2xl border p-5 shadow-soft backdrop-blur-md;
   border-color: var(--surface-border);
-  background: var(--surface-tint);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(250, 251, 255, 0.95) 100%);
+  transition: transform 180ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.panel:hover {
+  border-color: rgba(46, 68, 168, 0.22);
+  box-shadow: 0 14px 28px rgba(28, 28, 46, 0.1);
 }
 
 .panel-lively {
@@ -165,6 +246,20 @@ body {
 
 .label-accent {
   color: #6b6b7a;
+}
+
+.form-control,
+.form-select,
+textarea {
+  transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.form-control:focus,
+.form-select:focus,
+textarea:focus {
+  border-color: rgba(46, 68, 168, 0.42) !important;
+  box-shadow: 0 0 0 0.2rem rgba(46, 68, 168, 0.14) !important;
+  background-color: #fff;
 }
 
 /* System-wide text tint: keeps readability while adding color identity. */
@@ -327,6 +422,17 @@ body {
   }
 }
 
+@keyframes modal-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bg-grid,
   .card-hand {
@@ -339,6 +445,10 @@ body {
   }
 
   .page-transition-enter {
+    animation: none;
+  }
+
+  .modal-content {
     animation: none;
   }
 }

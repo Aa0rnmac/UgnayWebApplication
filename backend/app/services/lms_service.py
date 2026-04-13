@@ -41,6 +41,8 @@ RESOURCE_ITEM_TYPES = {
     "external_link_resource",
 }
 
+CERTIFICATE_REQUIRED_MODULE_COUNT = 12
+
 
 def build_unique_username(db: Session, email: str, role: str) -> str:
     local_part = email.split("@", maxsplit=1)[0].strip().lower()
@@ -75,6 +77,17 @@ def user_summary(user: User) -> UserSummaryOut:
         company_name=user.company_name,
         email=user.email,
     )
+
+
+def user_display_name(user: User | None) -> str:
+    if user is None:
+        return "Unknown Instructor"
+    full_name = " ".join(
+        part.strip()
+        for part in [user.first_name or "", user.last_name or ""]
+        if part and part.strip()
+    ).strip()
+    return full_name or user.username
 
 
 def section_out(section: Section) -> SectionOut:
@@ -425,6 +438,7 @@ def serialize_course_for_student(db: Session, student: User, *, include_unpublis
         db.query(Section)
         .options(
             joinedload(Section.modules).joinedload(SectionModule.items),
+            joinedload(Section.modules).joinedload(SectionModule.created_by_teacher),
             joinedload(Section.teachers).joinedload(SectionTeacherAssignment.teacher),
             joinedload(Section.students).joinedload(SectionStudentAssignment.student),
         )
@@ -482,6 +496,8 @@ def serialize_course_for_student(db: Session, student: User, *, include_unpublis
                 title=module.title,
                 description=module.description,
                 order_index=module.order_index,
+                created_by_teacher_id=module.created_by_teacher_id,
+                instructor_name=user_display_name(module.created_by_teacher),
                 is_locked=module_locked,
                 status=module_progress.status,
                 progress_percent=module_progress.progress_percent,
@@ -494,15 +510,27 @@ def serialize_course_for_student(db: Session, student: User, *, include_unpublis
 
 
 def section_completion_ready(db: Session, student_id: int, section_id: int) -> bool:
+    assignment = (
+        db.query(SectionStudentAssignment)
+        .filter(
+            SectionStudentAssignment.student_id == student_id,
+            SectionStudentAssignment.section_id == section_id,
+        )
+        .first()
+    )
+    # Keep certificate unlocked once the student has already completed the required track.
+    if assignment and assignment.course_completed_at is not None:
+        return True
+
     modules = (
         db.query(SectionModule)
         .filter(SectionModule.section_id == section_id, SectionModule.is_published.is_(True))
         .order_by(SectionModule.order_index.asc())
         .all()
     )
-    if not modules:
+    if len(modules) < CERTIFICATE_REQUIRED_MODULE_COUNT:
         return False
-    for module in modules:
+    for module in modules[:CERTIFICATE_REQUIRED_MODULE_COUNT]:
         progress = sync_module_progress(db, student_id=student_id, module=module)
         if progress.status != "completed":
             return False
@@ -520,17 +548,17 @@ def refresh_student_completion_schedule(
     if assignment is None:
         return None
 
+    if assignment.course_completed_at is not None:
+        if assignment.auto_archive_due_at is None:
+            assignment.auto_archive_due_at = assignment.course_completed_at + timedelta(days=30)
+            db.add(assignment)
+        return assignment
+
     completed = section_completion_ready(db, student_id, assignment.section_id)
-    if completed and assignment.course_completed_at is None:
+    if completed:
         completed_at = utc_now()
         assignment.course_completed_at = completed_at
         assignment.auto_archive_due_at = completed_at + timedelta(days=30)
-        db.add(assignment)
-    elif not completed and (
-        assignment.course_completed_at is not None or assignment.auto_archive_due_at is not None
-    ):
-        assignment.course_completed_at = None
-        assignment.auto_archive_due_at = None
         db.add(assignment)
     return assignment
 

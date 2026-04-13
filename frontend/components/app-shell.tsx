@@ -19,6 +19,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { displayName, id, loading, logout, mustChangePassword, profileImagePath, role } = useAuth();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const publicRoute = useMemo(() => isPublicRoute(pathname), [pathname]);
@@ -67,6 +68,67 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setUserMenuOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    function handleScroll() {
+      setShowScrollTop(window.scrollY > 220);
+    }
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    let lastOpenModal: Element | null = null;
+
+    function findOpenModal(): Element | null {
+      return (
+        document.querySelector(".modal.show .modal-dialog") ??
+        document.querySelector("[aria-modal='true'] .modal-dialog") ??
+        document.querySelector("[aria-modal='true']") ??
+        null
+      );
+    }
+
+    function bringModalIntoView() {
+      const modalTarget = findOpenModal();
+      if (!modalTarget) {
+        lastOpenModal = null;
+        return;
+      }
+      if (modalTarget === lastOpenModal) {
+        return;
+      }
+      lastOpenModal = modalTarget;
+      modalTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (modalTarget instanceof HTMLElement) {
+        if (!modalTarget.hasAttribute("tabindex")) {
+          modalTarget.setAttribute("tabindex", "-1");
+        }
+        window.setTimeout(() => {
+          modalTarget.focus({ preventScroll: true });
+        }, 140);
+      }
+    }
+
+    const observer = new MutationObserver(() => {
+      window.requestAnimationFrame(bringModalIntoView);
+    });
+
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "aria-hidden", "aria-modal"],
+    });
+
+    bringModalIntoView();
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (!userMenuOpen) {
@@ -120,7 +182,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             />
             <div>
               <p className="text-xl font-bold text-slate-900 md:text-2xl">FSL Learning Hub</p>
-              <p className="text-sm text-muted">Hand &amp; Heart LMS Portal</p>
+              <p className="text-sm text-muted">Hand &amp; Heart</p>
             </div>
           </div>
         </header>
@@ -131,6 +193,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </main>
         <SiteFooter variant="bar" />
+        {showScrollTop ? (
+          <button
+            aria-label="Scroll to top"
+            className="fixed bottom-5 right-4 z-[250] inline-flex h-11 w-11 items-center justify-center rounded-full border border-brandBlue/35 bg-brandBlue text-lg font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-brandBlue/90 md:bottom-6 md:right-6"
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            type="button"
+          >
+            ↑
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -219,6 +291,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <SiteFooter />
       </div>
+      {showScrollTop ? (
+        <button
+          aria-label="Scroll to top"
+          className="fixed bottom-5 right-4 z-[250] inline-flex h-11 w-11 items-center justify-center rounded-full border border-brandBlue/35 bg-brandBlue text-lg font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-brandBlue/90 md:bottom-6 md:right-6"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          type="button"
+        >
+          ↑
+        </button>
+      ) : null}
     </div>
   );
 }
