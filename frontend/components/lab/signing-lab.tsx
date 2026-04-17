@@ -1019,7 +1019,7 @@ export function SigningLab({
       : "Live mode active";
 
   return (
-    <section className="container-fluid px-0">
+    <section className={`container-fluid px-0 ${!embedded ? "lms-lab-screen-fit" : ""}`}>
       {!isTeacherTester && !embedded ? (
         <div className="card lms-bootstrap-card mb-3">
           <div className="card-body">
@@ -1033,10 +1033,92 @@ export function SigningLab({
         <div className="col-lg-8">
           <div className="card lms-bootstrap-card h-100">
             <div className="card-body">
+              {!hideModeControls ? (
+                <div className="mb-3">
+                  <div className="row g-2">
+                    <div className={mode === "alphabet" ? "col-12" : "col-md-6"}>
+                      <label className="form-label lms-label mb-1" htmlFor="recognition-mode">
+                        {modeLabel}
+                      </label>
+                      <select
+                        className="form-select"
+                        disabled={isModeLocked}
+                        id="recognition-mode"
+                        onChange={(event) => setMode(event.target.value as RecognitionMode)}
+                        value={mode}
+                      >
+                        <option value="alphabet">Alphabet</option>
+                        <option value="numbers">Numbers</option>
+                        <option value="words">Words</option>
+                      </select>
+                    </div>
+
+                    {mode === "numbers" ? (
+                      <div className="col-md-6">
+                        <label className="form-label lms-label mb-1" htmlFor="numbers-category">
+                          Numbers Range
+                        </label>
+                        <select
+                          className="form-select"
+                          disabled={isModeLocked}
+                          id="numbers-category"
+                          onChange={(event) => setNumbersCategory(event.target.value as NumbersCategory)}
+                          value={numbersCategory}
+                        >
+                          <option value="0-10">1-10</option>
+                          <option value="11-20">11-20</option>
+                          <option value="21-30">21-30</option>
+                          <option value="31-40">31-40</option>
+                          <option value="41-50">41-50</option>
+                          <option value="51-60">51-60</option>
+                          <option value="61-70">61-70</option>
+                          <option value="71-80">71-80</option>
+                          <option value="81-90">81-90</option>
+                          <option value="91-100">91-100</option>
+                        </select>
+                      </div>
+                    ) : null}
+
+                    {mode === "words" ? (
+                      <div className="col-md-6">
+                        <label className="form-label lms-label mb-1" htmlFor="words-category">
+                          Words Category
+                        </label>
+                        <select
+                          className="form-select"
+                          disabled={isModeLocked}
+                          id="words-category"
+                          onChange={(event) => setWordsCategory(event.target.value as WordsCategory)}
+                          value={wordsCategory}
+                        >
+                          <option value="greeting">Greeting</option>
+                          <option value="responses">Responses</option>
+                          <option value="date">Days</option>
+                          <option value="family">Family</option>
+                          <option value="relationship">People</option>
+                          <option value="color">Color</option>
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {mode === "numbers" ? (
+                    <div className="alert alert-danger mt-2 mb-0 py-2 px-3 small fw-semibold" role="note">
+                      Choose the range first. Example: if you want to sign 11-20, select 11-20 before analyzing.
+                    </div>
+                  ) : null}
+                  {mode === "words" ? (
+                    <div className="alert alert-danger mt-2 mb-0 py-2 px-3 small fw-semibold" role="note">
+                      Choose the words category first. Example: if the target is a greeting, select Greeting before analyzing.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="position-relative overflow-hidden rounded-4 border border-secondary-subtle bg-dark">
             <video
-              autoPlay
-                  className="d-block w-100 lms-sign-video"
+                  autoPlay
+                  className={`d-block w-100 lms-sign-video ${!embedded ? "lms-sign-video-screen-fit" : ""}`}
               muted
               playsInline
               ref={videoRef}
@@ -1096,82 +1178,9 @@ export function SigningLab({
         <aside className="col-lg-4">
           <div className="card lms-bootstrap-card h-100">
             <div className="card-body">
-              {!hideModeControls ? (
-                <>
-                  <label className="form-label lms-label" htmlFor="recognition-mode">
-                    {modeLabel}
-                  </label>
-                  <select
-                    className="form-select"
-                    disabled={isModeLocked}
-                    id="recognition-mode"
-                    onChange={(event) => setMode(event.target.value as RecognitionMode)}
-                    value={mode}
-                  >
-                    <option value="alphabet">Alphabet</option>
-                    <option value="numbers">Numbers</option>
-                    <option value="words">Words</option>
-                  </select>
-
-                  {mode === "numbers" ? (
-                    <div className="mt-3">
-                      <label className="form-label lms-label" htmlFor="numbers-category">
-                        Numbers Range
-                      </label>
-                      <select
-                        className="form-select"
-                        disabled={isModeLocked}
-                        id="numbers-category"
-                        onChange={(event) => setNumbersCategory(event.target.value as NumbersCategory)}
-                        value={numbersCategory}
-                      >
-                        <option value="0-10">1-10</option>
-                        <option value="11-20">11-20</option>
-                        <option value="21-30">21-30</option>
-                        <option value="31-40">31-40</option>
-                        <option value="41-50">41-50</option>
-                        <option value="51-60">51-60</option>
-                        <option value="61-70">61-70</option>
-                        <option value="71-80">71-80</option>
-                        <option value="81-90">81-90</option>
-                        <option value="91-100">91-100</option>
-                      </select>
-                      <div className="alert alert-danger mt-2 mb-0 py-2 px-3 small fw-semibold" role="note">
-                        Choose the range first. Example: if you want to sign 11-20, select 11-20 before analyzing.
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {mode === "words" ? (
-                    <div className="mt-3">
-                      <label className="form-label lms-label" htmlFor="words-category">
-                        Words Category
-                      </label>
-                      <select
-                        className="form-select"
-                        disabled={isModeLocked}
-                        id="words-category"
-                        onChange={(event) => setWordsCategory(event.target.value as WordsCategory)}
-                        value={wordsCategory}
-                      >
-                        <option value="greeting">Greeting</option>
-                        <option value="responses">Responses</option>
-                        <option value="date">Days</option>
-                        <option value="family">Family</option>
-                        <option value="relationship">People</option>
-                        <option value="color">Color</option>
-                      </select>
-                      <div className="alert alert-danger mt-2 mb-0 py-2 px-3 small fw-semibold" role="note">
-                        Choose the words category first. Example: if the target is a greeting, select Greeting before analyzing.
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-
               {modeStatusMessage && modeReady === false ? (
                 <div
-                  className="alert alert-danger mt-3 mb-0 py-2 px-3 small"
+                  className="alert alert-danger mb-0 py-2 px-3 small"
                   role="status"
                 >
                   {modeStatusMessage}

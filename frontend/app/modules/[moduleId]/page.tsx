@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { SigningLab } from "@/components/lab/signing-lab";
 
 import {
@@ -491,6 +491,7 @@ export default function StudentModulePlayerPage() {
   const [isCourseFlowCollapsed, setIsCourseFlowCollapsed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const itemPanelRef = useRef<HTMLDivElement | null>(null);
 
   async function refresh(options?: { tolerateCertificateError?: boolean }) {
     const tolerateCertificateError = options?.tolerateCertificateError ?? false;
@@ -583,6 +584,16 @@ export default function StudentModulePlayerPage() {
       currentItem.status !== "completed" &&
       isContentItemType(currentItem.item_type)
   );
+
+  useEffect(() => {
+    if (!currentItem) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      itemPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [currentItem?.id]);
 
   async function onCompleteReadable(item: StudentCourseItem) {
     try {
@@ -1455,7 +1466,7 @@ export default function StudentModulePlayerPage() {
             </aside>
           ) : null}
 
-          <div className="panel">
+          <div className="panel" ref={itemPanelRef}>
             {currentItem ? (
               <>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] label-accent">

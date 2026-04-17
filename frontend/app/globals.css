@@ -86,6 +86,13 @@ body {
   background: #0f172a;
 }
 
+@media (min-width: 992px) {
+  .lms-lab-screen-fit .lms-sign-video.lms-sign-video-screen-fit {
+    aspect-ratio: auto;
+    height: clamp(220px, calc(100vh - 430px), 420px);
+  }
+}
+
 .lms-guide-box {
   height: 56%;
   width: 56%;

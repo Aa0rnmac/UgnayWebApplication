@@ -996,6 +996,9 @@ export default function TeacherSectionsPage() {
       setError("View only. Only the teacher who created this module can edit it.");
       return;
     }
+    window.setTimeout(() => {
+      editorPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
     setEditingItemId(item.id);
     setItemType(normalizeBuilderItemType(item.item_type));
     setItemTitle(item.title);
