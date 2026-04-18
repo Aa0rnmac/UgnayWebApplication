@@ -361,6 +361,18 @@ def _build_submission_out(
         ]
     max_points = _module_max_points(item)
     score_points = _parse_float(payload.get("teacher_score_points"))
+    note_raw = payload.get("note")
+    student_note = note_raw.strip() if isinstance(note_raw, str) and note_raw.strip() else None
+    if student_note is None:
+        raw_history = payload.get("history")
+        if isinstance(raw_history, list):
+            for entry in reversed(raw_history):
+                if not isinstance(entry, dict):
+                    continue
+                entry_note = entry.get("note")
+                if isinstance(entry_note, str) and entry_note.strip():
+                    student_note = entry_note.strip()
+                    break
     feedback_raw = payload.get("teacher_feedback")
     feedback = feedback_raw.strip() if isinstance(feedback_raw, str) and feedback_raw.strip() else None
     rubric_raw = (item.config or {}).get("rubric_text")
@@ -431,6 +443,7 @@ def _build_submission_out(
         score_percent=progress.score_percent if progress else None,
         max_points=max_points,
         score_points=score_points,
+        student_note=student_note,
         feedback=feedback,
         rubric_text=rubric_text,
         rubric_items=rubric_items,

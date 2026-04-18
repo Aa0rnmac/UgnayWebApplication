@@ -318,6 +318,7 @@ export type TeacherModuleSubmission = {
   score_percent?: number | null;
   max_points: number;
   score_points?: number | null;
+  student_note?: string | null;
   feedback?: string | null;
   rubric_text?: string | null;
   rubric_items?: TeacherRubricCriterion[];

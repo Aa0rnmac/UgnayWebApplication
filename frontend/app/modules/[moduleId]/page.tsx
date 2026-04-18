@@ -1488,21 +1488,35 @@ export default function StudentModulePlayerPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.24em] label-accent">Course Flow</p>
               <div className="mt-4 space-y-3">
                 {(course?.modules ?? []).map((module) => (
-                  <div className={`rounded-2xl border p-3 ${module.id === currentModule.id ? "border-brandBlue bg-brandBlueLight/60" : "border-brandBorder bg-white"}`} key={module.id}>
+                  <div
+                    className={`rounded-2xl border p-3 transition ${
+                      module.id === currentModule.id
+                        ? "border-brandBlue bg-brandBlueLight/60"
+                        : module.is_locked
+                          ? "border-brandBorder bg-white"
+                          : "border-brandBorder bg-white hover:border-brandBlue/60 cursor-pointer"
+                    }`}
+                    key={module.id}
+                    onClick={() => {
+                      if (module.id !== currentModule.id && !module.is_locked) {
+                        router.push(`/modules/${module.id}`);
+                      }
+                    }}
+                    role={module.id !== currentModule.id && !module.is_locked ? "button" : undefined}
+                    tabIndex={module.id !== currentModule.id && !module.is_locked ? 0 : undefined}
+                    onKeyDown={(event) => {
+                      if (module.id !== currentModule.id && !module.is_locked && (event.key === "Enter" || event.key === " ")) {
+                        event.preventDefault();
+                        router.push(`/modules/${module.id}`);
+                      }
+                    }}
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Module {module.order_index}</p>
-                        {module.id !== currentModule.id && !module.is_locked ? (
-                          <button
-                            className="mt-1 border-0 bg-transparent p-0 text-left font-semibold text-brandBlue text-decoration-underline"
-                            onClick={() => router.push(`/modules/${module.id}`)}
-                            type="button"
-                          >
-                            {module.title}
-                          </button>
-                        ) : (
-                          <p className="mt-1 font-semibold text-slate-900">{module.title}</p>
-                        )}
+                        <p className={`mt-1 font-semibold ${module.id !== currentModule.id && !module.is_locked ? "text-brandBlue" : "text-slate-900"}`}>
+                          {module.title}
+                        </p>
                         <p className="mt-1 mb-0 text-[11px] text-slate-600">
                           Instructor:{" "}
                           <span className="font-semibold">

@@ -477,6 +477,7 @@ class TeacherModuleSubmissionOut(BaseModel):
     score_percent: float | None = None
     max_points: float
     score_points: float | None = None
+    student_note: str | None = None
     feedback: str | None = None
     rubric_text: str | None = None
     rubric_items: list[TeacherRubricCriterionOut] = Field(default_factory=list)

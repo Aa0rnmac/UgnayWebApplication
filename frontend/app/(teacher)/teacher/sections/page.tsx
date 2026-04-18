@@ -3634,6 +3634,17 @@ export default function TeacherSectionsPage() {
                               )}
                             </div>
 
+                            <div className="mt-3">
+                              <p className="mb-1 small fw-semibold text-uppercase text-slate-500">
+                                Student Private Note
+                              </p>
+                              <div className="rounded-3 border border-brandBorder bg-brandOffWhite px-3 py-2">
+                                <p className="mb-0 small text-slate-700">
+                                  {row.student_note?.trim() || "No note provided."}
+                                </p>
+                              </div>
+                            </div>
+
                             <div className="mt-3 row g-3">
                               <div className="col-12 col-lg-3">
                                 <p className="mb-1 small fw-semibold text-uppercase text-slate-500">Score</p>

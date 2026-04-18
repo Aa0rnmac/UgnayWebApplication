@@ -28,6 +28,9 @@
   --bs-primary-rgb: 46, 68, 168;
   --bs-link-color: #2e44a8;
   --bs-link-hover-color: #263b92;
+  --lms-scrollbar-track: rgba(46, 68, 168, 0.08);
+  --lms-scrollbar-thumb: rgba(46, 68, 168, 0.5);
+  --lms-scrollbar-thumb-hover: rgba(46, 68, 168, 0.72);
 }
 
 * {
@@ -48,6 +51,36 @@ body {
 
 html {
   scroll-behavior: smooth;
+}
+
+/* Global scrollbar styling: keeps the bar visible but blended with LMS brand tones. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--lms-scrollbar-thumb) var(--lms-scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--lms-scrollbar-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(46, 68, 168, 0.46), rgba(31, 179, 216, 0.42));
+  border: 2px solid rgba(245, 244, 241, 0.9);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--lms-scrollbar-thumb-hover), rgba(31, 179, 216, 0.62));
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .lms-bootstrap-card {
