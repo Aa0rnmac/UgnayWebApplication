@@ -26,6 +26,7 @@ from app.schemas.lms import (
     TeacherSectionSummaryOut,
     TeacherStudentAttemptDetailOut,
     TeacherModuleSubmissionOut,
+    TeacherUploadAssessmentSummaryOut,
     TeacherSubmissionGradeRequest,
     TeacherStudentItemReportOut,
     TeacherStudentModuleReportOut,
@@ -347,6 +348,7 @@ def _build_submission_out(
     item: SectionModuleItem,
     student: User,
     progress: SectionModuleItemProgress | None,
+    can_grade: bool,
 ) -> TeacherModuleSubmissionOut:
     payload = dict(progress.submitted_payload or {}) if progress else {}
     raw_files = payload.get("files")
@@ -416,6 +418,9 @@ def _build_submission_out(
         item_id=item.id,
         item_title=item.title,
         item_order_index=item.order_index,
+        assessment_creator_teacher_id=module.created_by_teacher_id,
+        assessment_creator_name=user_display_name(module.created_by_teacher),
+        can_grade=can_grade,
         student_id=student.id,
         student_name=_student_display_name(student),
         student_email=student.email,
@@ -433,6 +438,46 @@ def _build_submission_out(
         rubric_score_percent=rubric_score_percent,
         files=files,
     )
+
+
+def _can_grade_module_upload_assessments(current_teacher: User, module: SectionModule) -> bool:
+    return module.created_by_teacher_id is None or module.created_by_teacher_id == current_teacher.id
+
+
+def _module_upload_submission_context(
+    db: Session,
+    module: SectionModule,
+) -> tuple[list[SectionModuleItem], list[SectionStudentAssignment], dict[tuple[int, int], SectionModuleItemProgress]]:
+    upload_items = [
+        item
+        for item in sorted(module.items, key=lambda row: row.order_index)
+        if item.item_type == "upload_assessment"
+    ]
+    student_assignments = sorted(
+        [assignment for assignment in module.section.students if assignment.student is not None],
+        key=lambda entry: (
+            _student_display_name(entry.student).lower(),
+            entry.student.id,
+        ),
+    )
+    if not upload_items or not student_assignments:
+        return upload_items, student_assignments, {}
+
+    item_ids = [item.id for item in upload_items]
+    student_ids = [assignment.student_id for assignment in student_assignments]
+    progress_rows = (
+        db.query(SectionModuleItemProgress)
+        .filter(
+            SectionModuleItemProgress.section_module_id == module.id,
+            SectionModuleItemProgress.section_module_item_id.in_(item_ids),
+            SectionModuleItemProgress.student_id.in_(student_ids),
+        )
+        .all()
+    )
+    progress_by_key = {
+        (row.section_module_item_id, row.student_id): row for row in progress_rows
+    }
+    return upload_items, student_assignments, progress_by_key
 
 
 def _resource_kind_for_file(
@@ -928,16 +973,20 @@ def delete_teacher_module_item(
     return _module_out(module)
 
 
-@router.get("/modules/{module_id}/submissions", response_model=list[TeacherModuleSubmissionOut])
-def list_module_upload_submissions(
+@router.get(
+    "/modules/{module_id}/upload-assessments",
+    response_model=list[TeacherUploadAssessmentSummaryOut],
+)
+def list_module_upload_assessments(
     module_id: int,
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
-) -> list[TeacherModuleSubmissionOut]:
+) -> list[TeacherUploadAssessmentSummaryOut]:
     module = (
         db.query(SectionModule)
         .options(
             joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
             joinedload(SectionModule.section).joinedload(Section.students).joinedload(SectionStudentAssignment.student),
         )
         .filter(SectionModule.id == module_id)
@@ -946,38 +995,103 @@ def list_module_upload_submissions(
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
     _require_teacher_section(db, current_teacher, module.section_id)
-
-    upload_items = [
-        item
-        for item in sorted(module.items, key=lambda row: row.order_index)
-        if item.item_type == "upload_assessment"
-    ]
-    if not upload_items:
-        return []
-
-    item_ids = [item.id for item in upload_items]
-    student_assignments = sorted(
-        [assignment for assignment in module.section.students if assignment.student is not None],
-        key=lambda entry: (
-            _student_display_name(entry.student).lower(),
-            entry.student.id,
-        ),
-    )
-    if not student_assignments:
-        return []
-    student_ids = [assignment.student_id for assignment in student_assignments]
-    progress_rows = (
-        db.query(SectionModuleItemProgress)
-        .filter(
-            SectionModuleItemProgress.section_module_id == module.id,
-            SectionModuleItemProgress.section_module_item_id.in_(item_ids),
-            SectionModuleItemProgress.student_id.in_(student_ids),
+    can_grade = _can_grade_module_upload_assessments(current_teacher, module)
+    upload_items, student_assignments, progress_by_key = _module_upload_submission_context(db, module)
+    summaries: list[TeacherUploadAssessmentSummaryOut] = []
+    for item in upload_items:
+        submitted_count = 0
+        for assignment in student_assignments:
+            progress = progress_by_key.get((item.id, assignment.student_id))
+            if progress and progress.status == "completed":
+                submitted_count += 1
+        summaries.append(
+            TeacherUploadAssessmentSummaryOut(
+                module_id=module.id,
+                module_title=module.title,
+                item_id=item.id,
+                item_title=item.title,
+                item_order_index=item.order_index,
+                assessment_creator_teacher_id=module.created_by_teacher_id,
+                assessment_creator_name=user_display_name(module.created_by_teacher),
+                can_grade=can_grade,
+                submitted_students=submitted_count,
+                total_students=len(student_assignments),
+            )
         )
-        .all()
+    return summaries
+
+
+@router.get(
+    "/modules/{module_id}/upload-assessments/{item_id}/submissions",
+    response_model=list[TeacherModuleSubmissionOut],
+)
+def list_upload_assessment_submissions(
+    module_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> list[TeacherModuleSubmissionOut]:
+    module = (
+        db.query(SectionModule)
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
+            joinedload(SectionModule.section).joinedload(Section.students).joinedload(SectionStudentAssignment.student),
+        )
+        .filter(SectionModule.id == module_id)
+        .first()
     )
-    progress_by_key = {
-        (row.section_module_item_id, row.student_id): row for row in progress_rows
-    }
+    if not module:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
+    _require_teacher_section(db, current_teacher, module.section_id)
+    upload_items, student_assignments, progress_by_key = _module_upload_submission_context(db, module)
+    selected_item = next((item for item in upload_items if item.id == item_id), None)
+    if selected_item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Upload assessment item not found in this module.",
+        )
+    can_grade = _can_grade_module_upload_assessments(current_teacher, module)
+    submissions: list[TeacherModuleSubmissionOut] = []
+    for assignment in student_assignments:
+        student = assignment.student
+        if not student:
+            continue
+        progress = progress_by_key.get((selected_item.id, student.id))
+        submissions.append(
+            _build_submission_out(
+                module=module,
+                item=selected_item,
+                student=student,
+                progress=progress,
+                can_grade=can_grade,
+            )
+        )
+    return submissions
+
+
+@router.get("/modules/{module_id}/submissions", response_model=list[TeacherModuleSubmissionOut])
+def list_module_upload_submissions(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> list[TeacherModuleSubmissionOut]:
+    """Backward-compatible endpoint that returns all upload-assessment submissions in a module."""
+    module = (
+        db.query(SectionModule)
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
+            joinedload(SectionModule.section).joinedload(Section.students).joinedload(SectionStudentAssignment.student),
+        )
+        .filter(SectionModule.id == module_id)
+        .first()
+    )
+    if not module:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
+    _require_teacher_section(db, current_teacher, module.section_id)
+    can_grade = _can_grade_module_upload_assessments(current_teacher, module)
+    upload_items, student_assignments, progress_by_key = _module_upload_submission_context(db, module)
     submissions: list[TeacherModuleSubmissionOut] = []
     for item in upload_items:
         for assignment in student_assignments:
@@ -991,6 +1105,7 @@ def list_module_upload_submissions(
                     item=item,
                     student=student,
                     progress=progress,
+                    can_grade=can_grade,
                 )
             )
     return submissions
@@ -1021,6 +1136,15 @@ def grade_module_upload_submission(
     module = item.module
     student = progress.student
     _require_teacher_section(db, current_teacher, module.section_id)
+    if module.created_by_teacher_id is None:
+        module.created_by_teacher_id = current_teacher.id
+        db.add(module)
+        db.flush()
+    elif module.created_by_teacher_id != current_teacher.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the teacher who created this module can return scores.",
+        )
     if item.item_type != "upload_assessment":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1107,7 +1231,13 @@ def grade_module_upload_submission(
     )
     db.commit()
     db.refresh(progress)
-    return _build_submission_out(module=module, item=item, student=student, progress=progress)
+    return _build_submission_out(
+        module=module,
+        item=item,
+        student=student,
+        progress=progress,
+        can_grade=True,
+    )
 
 
 @router.post("/sections/{section_id}/certificate-template", response_model=CertificateTemplateOut)

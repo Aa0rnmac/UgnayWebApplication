@@ -258,6 +258,9 @@ class StudentModuleItemOut(BaseModel):
     response_text: str | None = None
     score_percent: float | None = None
     is_correct: bool | None = None
+    teacher_score_percent: float | None = None
+    teacher_feedback: str | None = None
+    teacher_returned_at: datetime | None = None
 
 
 class StudentCourseModuleOut(BaseModel):
@@ -461,6 +464,9 @@ class TeacherModuleSubmissionOut(BaseModel):
     item_id: int
     item_title: str
     item_order_index: int
+    assessment_creator_teacher_id: int | None = None
+    assessment_creator_name: str | None = None
+    can_grade: bool = False
     student_id: int
     student_name: str
     student_email: str | None = None
@@ -477,6 +483,19 @@ class TeacherModuleSubmissionOut(BaseModel):
     rubric_scores: list[TeacherRubricScoreOut] = Field(default_factory=list)
     rubric_score_percent: float | None = None
     files: list[UploadedModuleAssetOut] = Field(default_factory=list)
+
+
+class TeacherUploadAssessmentSummaryOut(BaseModel):
+    module_id: int
+    module_title: str
+    item_id: int
+    item_title: str
+    item_order_index: int
+    assessment_creator_teacher_id: int | None = None
+    assessment_creator_name: str | None = None
+    can_grade: bool = False
+    submitted_students: int = 0
+    total_students: int = 0
 
 
 class TeacherRubricScoreInput(BaseModel):

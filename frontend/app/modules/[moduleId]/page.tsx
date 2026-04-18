@@ -928,6 +928,14 @@ export default function StudentModulePlayerPage() {
         typeof item.config.rubric_text === "string" && item.config.rubric_text.trim()
           ? item.config.rubric_text
           : "No rubric provided yet.";
+      const teacherFeedback = typeof item.teacher_feedback === "string" ? item.teacher_feedback.trim() : "";
+      const teacherScore =
+        typeof item.teacher_score_percent === "number"
+          ? item.teacher_score_percent
+          : typeof item.score_percent === "number"
+            ? item.score_percent
+            : null;
+      const hasTeacherReview = Boolean(teacherFeedback || teacherScore !== null || item.teacher_returned_at);
       return (
         <form className="space-y-4" onSubmit={(event) => void onUploadSubmission(event, item)}>
           <p className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm leading-7 text-slate-700">
@@ -1002,6 +1010,28 @@ export default function StudentModulePlayerPage() {
               />
             </div>
           </div>
+          {hasTeacherReview ? (
+            <div className="rounded-2xl border border-brandBlue/35 bg-brandBlueLight/40 p-4">
+              <p className="mb-2 text-xs uppercase tracking-[0.16em] text-brandBlue fw-semibold">
+                Teacher Feedback
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-sm fw-semibold text-slate-800">
+                    Score: {teacherScore !== null ? `${teacherScore.toFixed(1)}%` : "Pending"}
+                  </p>
+                  <p className="mb-0 text-xs text-slate-600">
+                    {item.teacher_returned_at
+                      ? `Returned: ${new Date(item.teacher_returned_at).toLocaleString()}`
+                      : "Score not returned yet."}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-brandBorder bg-white px-3 py-2 text-sm text-slate-700">
+                  {teacherFeedback || "No feedback note yet."}
+                </div>
+              </div>
+            </div>
+          ) : null}
           <button
             className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             disabled={uploadingItemId === item.id}

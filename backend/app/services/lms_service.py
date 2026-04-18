@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 import string
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func
@@ -88,6 +88,33 @@ def user_display_name(user: User | None) -> str:
         if part and part.strip()
     ).strip()
     return full_name or user.username
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    raw_value = value.strip()
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _parse_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
 
 
 def section_out(section: Section) -> SectionOut:
@@ -468,6 +495,22 @@ def serialize_course_for_student(db: Session, student: User, *, include_unpublis
             if not include_unpublished and not item.is_published:
                 continue
             progress_entry = all_item_progress.get(item.id)
+            progress_payload = dict(progress_entry.submitted_payload or {}) if progress_entry else {}
+            feedback_raw = progress_payload.get("teacher_feedback")
+            teacher_feedback = (
+                feedback_raw.strip()
+                if isinstance(feedback_raw, str) and feedback_raw.strip()
+                else None
+            )
+            teacher_returned_at = _parse_iso_datetime(progress_payload.get("teacher_scored_at"))
+            rubric_score_percent = _parse_float(progress_payload.get("teacher_rubric_score_percent"))
+            teacher_score_percent = None
+            if item.item_type == "upload_assessment" and progress_entry:
+                teacher_score_percent = (
+                    round(max(0.0, min(float(rubric_score_percent), 100.0)), 2)
+                    if rubric_score_percent is not None
+                    else progress_entry.score_percent
+                )
             item_status = progress_entry.status if progress_entry else "not_started"
             item_locked = not next_item_unlocked
             is_complete = item_status == "completed"
@@ -486,6 +529,9 @@ def serialize_course_for_student(db: Session, student: User, *, include_unpublis
                     response_text=progress_entry.response_text if progress_entry else None,
                     score_percent=progress_entry.score_percent if progress_entry else None,
                     is_correct=progress_entry.is_correct if progress_entry else None,
+                    teacher_score_percent=teacher_score_percent,
+                    teacher_feedback=teacher_feedback,
+                    teacher_returned_at=teacher_returned_at,
                 )
             )
             if item.is_required and not is_complete:

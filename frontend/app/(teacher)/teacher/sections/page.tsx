@@ -8,15 +8,17 @@ import {
   createTeacherModuleItem,
   createTeacherSectionModule,
   deleteTeacherModuleItem,
-  getTeacherModuleSubmissions,
+  getTeacherModuleUploadAssessments,
   getTeacherSection,
   getTeacherSectionModules,
   getTeacherSections,
+  getTeacherUploadAssessmentSubmissions,
   gradeTeacherModuleSubmission,
   type NumbersCategory,
   type RecognitionMode,
   resolveUploadsBase,
   type TeacherModuleSubmission,
+  type TeacherUploadAssessmentSummary,
   updateTeacherModuleItem,
   updateTeacherModule,
   uploadTeacherModuleItemAsset,
@@ -765,7 +767,10 @@ export default function TeacherSectionsPage() {
   const [uploadMaxPoints, setUploadMaxPoints] = useState(100);
   const [uploadReferenceLink, setUploadReferenceLink] = useState("");
   const [activeSubmissionModuleId, setActiveSubmissionModuleId] = useState<number | null>(null);
+  const [activeSubmissionItemId, setActiveSubmissionItemId] = useState<number | null>(null);
+  const [submissionAssessments, setSubmissionAssessments] = useState<TeacherUploadAssessmentSummary[]>([]);
   const [moduleSubmissions, setModuleSubmissions] = useState<TeacherModuleSubmission[]>([]);
+  const [isLoadingSubmissionAssessments, setIsLoadingSubmissionAssessments] = useState(false);
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
   const [gradingProgressId, setGradingProgressId] = useState<number | null>(null);
   const [feedbackDraftByProgressId, setFeedbackDraftByProgressId] = useState<Record<number, string>>({});
@@ -789,6 +794,14 @@ export default function TeacherSectionsPage() {
         : null,
     [activeSubmissionModuleId, modules]
   );
+  const activeSubmissionAssessment = useMemo(
+    () =>
+      activeSubmissionItemId !== null
+        ? submissionAssessments.find((entry) => entry.item_id === activeSubmissionItemId) ?? null
+        : null,
+    [activeSubmissionItemId, submissionAssessments]
+  );
+  const activeSubmissionCanGrade = Boolean(activeSubmissionAssessment?.can_grade);
   const editingItem = useMemo(
     () => selectedModule?.items.find((item) => item.id === editingItemId) ?? null,
     [selectedModule, editingItemId]
@@ -2149,11 +2162,41 @@ export default function TeacherSectionsPage() {
 
   async function openSubmissionsView(module: TeacherSectionModule) {
     setActiveSubmissionModuleId(module.id);
+    setActiveSubmissionItemId(null);
+    setSubmissionAssessments([]);
+    setModuleSubmissions([]);
+    setIsLoadingSubmissionAssessments(true);
+    setIsLoadingSubmissions(false);
+    setError(null);
+    setFeedbackDraftByProgressId({});
+    setActiveRubricSubmission(null);
+    setActiveRubricCriteria([]);
+    setRubricAchievedByCriterionId({});
+    try {
+      const rows = await getTeacherModuleUploadAssessments(module.id);
+      setSubmissionAssessments(rows);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : "Unable to load upload assessments."
+      );
+    } finally {
+      setIsLoadingSubmissionAssessments(false);
+    }
+  }
+
+  async function openAssessmentSubmissions(assessment: TeacherUploadAssessmentSummary) {
+    setActiveSubmissionItemId(assessment.item_id);
     setModuleSubmissions([]);
     setIsLoadingSubmissions(true);
     setError(null);
+    setActiveRubricSubmission(null);
+    setActiveRubricCriteria([]);
+    setRubricAchievedByCriterionId({});
     try {
-      const rows = await getTeacherModuleSubmissions(module.id);
+      const rows = await getTeacherUploadAssessmentSubmissions(
+        assessment.module_id,
+        assessment.item_id
+      );
       setModuleSubmissions(rows);
       const nextFeedbackDrafts: Record<number, string> = {};
       rows.forEach((row) => {
@@ -2169,9 +2212,23 @@ export default function TeacherSectionsPage() {
     }
   }
 
+  function backToAssessmentList() {
+    setActiveSubmissionItemId(null);
+    setModuleSubmissions([]);
+    setIsLoadingSubmissions(false);
+    setGradingProgressId(null);
+    setFeedbackDraftByProgressId({});
+    setActiveRubricSubmission(null);
+    setActiveRubricCriteria([]);
+    setRubricAchievedByCriterionId({});
+  }
+
   function closeSubmissionsView() {
     setActiveSubmissionModuleId(null);
+    setActiveSubmissionItemId(null);
+    setSubmissionAssessments([]);
     setModuleSubmissions([]);
+    setIsLoadingSubmissionAssessments(false);
     setIsLoadingSubmissions(false);
     setGradingProgressId(null);
     setFeedbackDraftByProgressId({});
@@ -2182,6 +2239,10 @@ export default function TeacherSectionsPage() {
 
   function openRubricScorer(entry: TeacherModuleSubmission) {
     if (!entry.progress_id) {
+      return;
+    }
+    if (!entry.can_grade) {
+      setError("View only. Only the module creator can return scores.");
       return;
     }
     const rubricCriteria = normalizeSubmissionRubricCriteria(entry);
@@ -2220,6 +2281,10 @@ export default function TeacherSectionsPage() {
     if (!activeRubricSubmission?.progress_id || !activeRubricTotals) {
       return;
     }
+    if (!activeRubricSubmission.can_grade || !activeSubmissionCanGrade) {
+      setError("View only. Only the module creator can return scores.");
+      return;
+    }
     const progressId = activeRubricSubmission.progress_id;
     setError(null);
     setGradingProgressId(progressId);
@@ -2235,7 +2300,7 @@ export default function TeacherSectionsPage() {
       setModuleSubmissions((current) =>
         current.map((row) => (row.progress_id === updated.progress_id ? updated : row))
       );
-      setMessage(`Rubric score saved for ${activeRubricSubmission.student_name}.`);
+      setMessage(`Rubric score returned to ${activeRubricSubmission.student_name}.`);
       closeRubricScorer();
       if (updated.progress_id) {
         setFeedbackDraftByProgressId((current) => ({
@@ -2244,7 +2309,7 @@ export default function TeacherSectionsPage() {
         }));
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to save rubric score.");
+      setError(requestError instanceof Error ? requestError.message : "Unable to return rubric score.");
     } finally {
       setGradingProgressId(null);
     }
@@ -2252,6 +2317,10 @@ export default function TeacherSectionsPage() {
 
   async function onSaveSubmissionRow(row: TeacherModuleSubmission) {
     if (!row.progress_id) {
+      return;
+    }
+    if (!row.can_grade || !activeSubmissionCanGrade) {
+      setError("View only. Only the module creator can return scores.");
       return;
     }
     const progressId = row.progress_id;
@@ -2268,7 +2337,7 @@ export default function TeacherSectionsPage() {
     if (hasRubric) {
       const existingRubricScores = Array.isArray(row.rubric_scores) ? row.rubric_scores : [];
       if (existingRubricScores.length === 0) {
-        setError("Open Rubric Scorer first, then click Save.");
+        setError("Open Rubric Scorer first, then click Return to Student.");
         return;
       }
       payload.rubric_scores = existingRubricScores.map((entry) => ({
@@ -2283,7 +2352,7 @@ export default function TeacherSectionsPage() {
             ? Number(((row.score_percent / 100) * row.max_points).toFixed(2))
             : null;
       if (resolvedScorePoints === null) {
-        setError("Set score first before saving.");
+        setError("Set score first before returning to student.");
         return;
       }
       payload.score_points = resolvedScorePoints;
@@ -2302,9 +2371,9 @@ export default function TeacherSectionsPage() {
           [updated.progress_id as number]: updated.feedback ?? "",
         }));
       }
-      setMessage(`Saved for ${row.student_name}.`);
+      setMessage(`Returned to ${row.student_name}.`);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to save submission.");
+      setError(requestError instanceof Error ? requestError.message : "Unable to return submission.");
     } finally {
       setGradingProgressId(null);
     }
@@ -3432,58 +3501,122 @@ export default function TeacherSectionsPage() {
                 <button aria-label="Close" className="btn-close" onClick={closeSubmissionsView} type="button" />
               </div>
               <div className="modal-body">
-                {isLoadingSubmissions ? (
-                  <p className="mb-0 text-sm text-slate-700">Loading submissions...</p>
-                ) : moduleSubmissions.length === 0 ? (
-                  <p className="mb-0 text-sm text-slate-700">
-                    No upload assessment items found in this module yet.
-                  </p>
+                {activeSubmissionItemId === null ? (
+                  <>
+                    {isLoadingSubmissionAssessments ? (
+                      <p className="mb-0 text-sm text-slate-700">Loading upload assessments...</p>
+                    ) : submissionAssessments.length === 0 ? (
+                      <p className="mb-0 text-sm text-slate-700">
+                        No upload assessment items found in this module yet.
+                      </p>
+                    ) : (
+                      <div className="table-responsive">
+                        <table className="table align-middle">
+                          <thead>
+                            <tr>
+                              <th>Topic</th>
+                              <th>Created By</th>
+                              <th>Submissions</th>
+                              <th>Access</th>
+                              <th className="text-end">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {submissionAssessments.map((assessment) => (
+                              <tr key={assessment.item_id}>
+                                <td>
+                                  <p className="mb-0 fw-semibold">
+                                    Topic {assessment.item_order_index}: {assessment.item_title}
+                                  </p>
+                                </td>
+                                <td>
+                                  <p className="mb-0 text-sm text-slate-700">
+                                    {assessment.assessment_creator_name?.trim() || "Unknown Instructor"}
+                                  </p>
+                                </td>
+                                <td>
+                                  <span className="badge text-bg-light border border-brandBorder text-slate-700">
+                                    {assessment.submitted_students}/{assessment.total_students} submitted
+                                  </span>
+                                </td>
+                                <td>
+                                  {assessment.can_grade ? (
+                                    <span className="badge text-bg-success">Can Grade</span>
+                                  ) : (
+                                    <span className="badge text-bg-secondary">View Only</span>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  <button
+                                    className="btn btn-sm btn-outline-primary fw-semibold"
+                                    onClick={() => void openAssessmentSubmissions(assessment)}
+                                    type="button"
+                                  >
+                                    View Submissions
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="table-responsive">
-                    <table className="table table-sm align-middle">
-                      <thead>
-                        <tr>
-                          <th>Topic</th>
-                          <th>Student</th>
-                          <th>Status</th>
-                          <th>Files</th>
-                          <th>Score</th>
-                          <th>Feedback</th>
-                          <th>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                  <div className="vstack gap-3">
+                    <div className="rounded-3 border border-brandBorder bg-brandOffWhite p-3">
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                        <div>
+                          <p className="mb-1 text-xs uppercase tracking-[0.16em] text-slate-500">Selected Assessment</p>
+                          <p className="mb-0 fw-semibold">
+                            Topic {activeSubmissionAssessment?.item_order_index}:{" "}
+                            {activeSubmissionAssessment?.item_title}
+                          </p>
+                          <p className="mb-0 small text-slate-700">
+                            Created by {activeSubmissionAssessment?.assessment_creator_name?.trim() || "Unknown Instructor"}
+                          </p>
+                        </div>
+                        {activeSubmissionCanGrade ? (
+                          <span className="badge text-bg-success">Creator Access</span>
+                        ) : (
+                          <span className="badge text-bg-secondary">View Only</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {isLoadingSubmissions ? (
+                      <p className="mb-0 text-sm text-slate-700">Loading submissions...</p>
+                    ) : moduleSubmissions.length === 0 ? (
+                      <p className="mb-0 text-sm text-slate-700">No student records found for this assessment.</p>
+                    ) : (
+                      <div className="vstack gap-3">
                         {moduleSubmissions.map((row) => (
-                          <tr key={`${row.item_id}-${row.student_id}`}>
-                            <td>
-                              <p className="mb-0 fw-semibold">
-                                Topic {row.item_order_index}: {row.item_title}
-                              </p>
-                              <p className="mb-0 small text-muted">
-                                Max: {row.max_points} pts
-                              </p>
-                            </td>
-                            <td>
-                              <p className="mb-0 fw-semibold">{row.student_name}</p>
-                              <p className="mb-0 small text-muted">{row.student_email || "No email"}</p>
-                            </td>
-                            <td>
-                              <span
-                                className={`badge ${
-                                  row.status === "completed" ? "text-bg-success" : "text-bg-secondary"
-                                }`}
-                              >
-                                {row.status === "completed" ? "Submitted" : "Not Submitted"}
-                              </span>
-                              {row.submitted_at ? (
-                                <p className="mb-0 small text-muted mt-1">
-                                  {new Date(row.submitted_at).toLocaleString()}
-                                </p>
-                              ) : null}
-                            </td>
-                            <td>
+                          <article className="rounded-3 border border-brandBorder bg-white p-3" key={`${row.item_id}-${row.student_id}`}>
+                            <div className="d-flex flex-wrap justify-content-between gap-2">
+                              <div>
+                                <p className="mb-0 fw-semibold">{row.student_name}</p>
+                                <p className="mb-0 small text-muted">{row.student_email || "No email"}</p>
+                              </div>
+                              <div className="text-end">
+                                <span
+                                  className={`badge ${
+                                    row.status === "completed" ? "text-bg-success" : "text-bg-secondary"
+                                  }`}
+                                >
+                                  {row.status === "completed" ? "Submitted" : "Not Submitted"}
+                                </span>
+                                {row.submitted_at ? (
+                                  <p className="mb-0 small text-muted mt-1">
+                                    {new Date(row.submitted_at).toLocaleString()}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="mt-3">
+                              <p className="mb-1 small fw-semibold text-uppercase text-slate-500">Files</p>
                               {row.files.length > 0 ? (
-                                <div className="vstack gap-1">
+                                <div className="d-flex flex-wrap gap-2">
                                   {row.files.map((file, index) => (
                                     <a
                                       className="small text-primary text-decoration-underline"
@@ -3497,64 +3630,83 @@ export default function TeacherSectionsPage() {
                                   ))}
                                 </div>
                               ) : (
-                                <span className="small text-muted">No file yet</span>
+                                <p className="mb-0 small text-muted">No file yet</p>
                               )}
-                            </td>
-                            <td style={{ minWidth: "120px" }}>
-                              {row.progress_id ? (
-                                <button
-                                  className="btn btn-sm btn-outline-primary w-100"
-                                  disabled={gradingProgressId === row.progress_id}
-                                  onClick={() => openRubricScorer(row)}
-                                  type="button"
-                                >
-                                  {row.score_percent !== null && row.score_percent !== undefined
-                                    ? `${Number(row.score_percent).toFixed(1)}%`
-                                    : "Rubric Scorer"}
-                                </button>
-                              ) : (
-                                <span className="small text-muted">-</span>
-                              )}
-                            </td>
-                            <td style={{ minWidth: "180px" }}>
-                              {row.progress_id ? (
-                                <textarea
-                                  className="form-control form-control-sm"
-                                  onChange={(event) =>
-                                    setFeedbackDraftByProgressId((current) => ({
-                                      ...current,
-                                      [row.progress_id as number]: event.target.value,
-                                    }))
-                                  }
-                                  rows={2}
-                                  value={feedbackDraftByProgressId[row.progress_id] ?? ""}
-                                />
-                              ) : (
-                                <span className="small text-muted">-</span>
-                              )}
-                            </td>
-                            <td>
-                              {row.progress_id ? (
-                                <button
-                                  className="btn btn-sm btn-primary"
-                                  disabled={gradingProgressId === row.progress_id}
-                                  onClick={() => void onSaveSubmissionRow(row)}
-                                  type="button"
-                                >
-                                  {gradingProgressId === row.progress_id ? "Saving..." : "Save"}
-                                </button>
-                              ) : (
-                                <span className="small text-muted">Waiting</span>
-                              )}
-                            </td>
-                          </tr>
+                            </div>
+
+                            <div className="mt-3 row g-3">
+                              <div className="col-12 col-lg-3">
+                                <p className="mb-1 small fw-semibold text-uppercase text-slate-500">Score</p>
+                                {row.progress_id ? (
+                                  <button
+                                    className="btn btn-sm btn-outline-primary w-100"
+                                    disabled={gradingProgressId === row.progress_id || !row.can_grade}
+                                    onClick={() => openRubricScorer(row)}
+                                    type="button"
+                                  >
+                                    {row.score_percent !== null && row.score_percent !== undefined
+                                      ? `${Number(row.score_percent).toFixed(1)}%`
+                                      : row.can_grade
+                                        ? "Rubric Scorer"
+                                        : "No Score"}
+                                  </button>
+                                ) : (
+                                  <span className="small text-muted">-</span>
+                                )}
+                              </div>
+                              <div className="col-12 col-lg-6">
+                                <label className="form-label mb-1 small fw-semibold text-uppercase text-slate-500">
+                                  Feedback
+                                </label>
+                                {row.progress_id ? (
+                                  <textarea
+                                    className="form-control form-control-sm"
+                                    onChange={(event) =>
+                                      setFeedbackDraftByProgressId((current) => ({
+                                        ...current,
+                                        [row.progress_id as number]: event.target.value,
+                                      }))
+                                    }
+                                    readOnly={!row.can_grade}
+                                    rows={2}
+                                    value={feedbackDraftByProgressId[row.progress_id] ?? ""}
+                                  />
+                                ) : (
+                                  <span className="small text-muted">-</span>
+                                )}
+                              </div>
+                              <div className="col-12 col-lg-3 d-flex align-items-end">
+                                {row.progress_id ? (
+                                  row.can_grade ? (
+                                    <button
+                                      className="btn btn-sm btn-primary w-100 fw-semibold"
+                                      disabled={gradingProgressId === row.progress_id}
+                                      onClick={() => void onSaveSubmissionRow(row)}
+                                      type="button"
+                                    >
+                                      {gradingProgressId === row.progress_id ? "Returning..." : "Return to Student"}
+                                    </button>
+                                  ) : (
+                                    <span className="badge text-bg-secondary w-100 py-2">View Only</span>
+                                  )
+                                ) : (
+                                  <span className="small text-muted">Waiting</span>
+                                )}
+                              </div>
+                            </div>
+                          </article>
                         ))}
-                      </tbody>
-                    </table>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
               <div className="modal-footer">
+                {activeSubmissionItemId !== null ? (
+                  <button className="btn btn-outline-primary" onClick={backToAssessmentList} type="button">
+                    Back to Assessments
+                  </button>
+                ) : null}
                 <button className="btn btn-outline-secondary" onClick={closeSubmissionsView} type="button">
                   Close
                 </button>
@@ -3688,7 +3840,7 @@ export default function TeacherSectionsPage() {
                   onClick={() => void onSaveRubricScore()}
                   type="button"
                 >
-                  {gradingProgressId === activeRubricSubmission.progress_id ? "Saving..." : "Save Rubric Score"}
+                  {gradingProgressId === activeRubricSubmission.progress_id ? "Returning..." : "Return Rubric Score"}
                 </button>
               </div>
             </div>

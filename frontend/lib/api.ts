@@ -207,6 +207,9 @@ export type StudentCourseItem = {
   response_text?: string | null;
   score_percent?: number | null;
   is_correct?: boolean | null;
+  teacher_score_percent?: number | null;
+  teacher_feedback?: string | null;
+  teacher_returned_at?: string | null;
 };
 
 export type StudentCourseModule = {
@@ -302,6 +305,9 @@ export type TeacherModuleSubmission = {
   item_id: number;
   item_title: string;
   item_order_index: number;
+  assessment_creator_teacher_id?: number | null;
+  assessment_creator_name?: string | null;
+  can_grade: boolean;
   student_id: number;
   student_name: string;
   student_email?: string | null;
@@ -318,6 +324,19 @@ export type TeacherModuleSubmission = {
   rubric_scores?: TeacherRubricScore[];
   rubric_score_percent?: number | null;
   files: ModuleAsset[];
+};
+
+export type TeacherUploadAssessmentSummary = {
+  module_id: number;
+  module_title: string;
+  item_id: number;
+  item_title: string;
+  item_order_index: number;
+  assessment_creator_teacher_id?: number | null;
+  assessment_creator_name?: string | null;
+  can_grade: boolean;
+  submitted_students: number;
+  total_students: number;
 };
 
 export type CertificateTemplateSummary = {
@@ -1667,6 +1686,29 @@ export function getTeacherModuleSubmissions(
   token?: string
 ): Promise<TeacherModuleSubmission[]> {
   return request<TeacherModuleSubmission[]>(`/teacher/modules/${moduleId}/submissions`, undefined, token);
+}
+
+export function getTeacherModuleUploadAssessments(
+  moduleId: number,
+  token?: string
+): Promise<TeacherUploadAssessmentSummary[]> {
+  return request<TeacherUploadAssessmentSummary[]>(
+    `/teacher/modules/${moduleId}/upload-assessments`,
+    undefined,
+    token
+  );
+}
+
+export function getTeacherUploadAssessmentSubmissions(
+  moduleId: number,
+  itemId: number,
+  token?: string
+): Promise<TeacherModuleSubmission[]> {
+  return request<TeacherModuleSubmission[]>(
+    `/teacher/modules/${moduleId}/upload-assessments/${itemId}/submissions`,
+    undefined,
+    token
+  );
 }
 
 export function gradeTeacherModuleSubmission(
