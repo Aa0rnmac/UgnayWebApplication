@@ -339,9 +339,16 @@ export function AppShell({ children }: { children: ReactNode }) {
               src="/brand/logo.png"
               width={40}
             />
-            <div>
-              <p className="text-xl font-bold text-slate-900 md:text-2xl">FSL Learning Hub</p>
-              <p className="text-sm text-muted">Hand &amp; Heart</p>
+            <div className="leading-tight">
+              <p className="text-[20px] font-black uppercase tracking-[0.16em] text-brandBlue md:text-[22px]">
+                UGNAY LEARNING HUB
+              </p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-900">
+                BASIC FSL COURSE
+              </p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-900">
+                HAND AND HEART
+              </p>
             </div>
           </div>
         </header>

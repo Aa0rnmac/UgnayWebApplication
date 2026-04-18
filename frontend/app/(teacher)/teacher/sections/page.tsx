@@ -2552,10 +2552,6 @@ export default function TeacherSectionsPage() {
 
                     {itemType === "readable" ? (
                       <>
-                        <div className="alert alert-danger py-2 px-3 mb-0 small fw-semibold" role="note">
-                          Important: Keep the instruction simple, then add files and/or one external link (example:
-                          YouTube) for non-tech learners.
-                        </div>
                         <div>
                           <label className="form-label fw-semibold">Introduction / Resource Content</label>
                           <textarea
@@ -3086,8 +3082,7 @@ export default function TeacherSectionsPage() {
                       <div className="rounded-3 border border-brandBorder bg-brandOffWhite p-3">
                         <p className="mb-2 fw-semibold">Student Upload Assessment</p>
                         <div className="alert alert-danger py-2 px-3 mb-3 small fw-semibold" role="note">
-                          Important: Add a clear upload instruction and rubric. You can also add one reference link
-                          (example: YouTube demo) for student guidance.
+                          Important: Add a clear upload instruction and rubric.
                         </div>
                         <div className="mb-3">
                           <label className="form-label fw-semibold mb-1">Reference Link (Optional)</label>
