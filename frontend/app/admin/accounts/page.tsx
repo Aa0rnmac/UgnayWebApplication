@@ -13,6 +13,7 @@ import {
   type BulkAccountImportJob,
   type LmsSection
 } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 
 const HAND_AND_HEART = "HAND AND HEART";
 
@@ -78,6 +79,14 @@ export default function AdminAccountsPage() {
     void refreshUsers();
   }, []);
 
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+    notifySuccess(message);
+    setMessage(null);
+  }, [message]);
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
@@ -98,6 +107,39 @@ export default function AdminAccountsPage() {
       setError(requestError instanceof Error ? requestError.message : "Unable to import accounts.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function onResetAndResend(userId: number) {
+    setError(null);
+    try {
+      await resendCredentials(userId);
+      await refreshUsers();
+      setMessage("Credentials sent.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to resend credentials.");
+    }
+  }
+
+  async function onArchiveTeacher(userId: number) {
+    setError(null);
+    try {
+      await archiveTeacherAccount(userId);
+      await refreshUsers();
+      setMessage("Teacher account archived.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to archive teacher.");
+    }
+  }
+
+  async function onUnarchiveAccount(userId: number) {
+    setError(null);
+    try {
+      await reactivateUser(userId);
+      await refreshUsers();
+      setMessage("Account unarchived.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to unarchive account.");
     }
   }
 
@@ -152,12 +194,6 @@ export default function AdminAccountsPage() {
           {error}
         </p>
       ) : null}
-      {message ? (
-        <p className="rounded-xl border border-brandGreen/35 bg-brandGreenLight px-4 py-3 text-sm text-brandGreen">
-          {message}
-        </p>
-      ) : null}
-
       <div className="panel">
         <div className="grid gap-3 md:grid-cols-[auto_1fr_1fr_1.6fr]">
           <button
@@ -271,7 +307,7 @@ export default function AdminAccountsPage() {
                           {user.role !== "admin" ? (
                             <button
                               className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-                              onClick={() => void resendCredentials(user.id).then(() => refreshUsers())}
+                              onClick={() => void onResetAndResend(user.id)}
                               type="button"
                             >
                               Reset & Resend
@@ -280,7 +316,7 @@ export default function AdminAccountsPage() {
                           {user.role === "teacher" ? (
                             <button
                               className="rounded-lg border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed transition hover:bg-brandRed/20"
-                              onClick={() => void archiveTeacherAccount(user.id).then(() => refreshUsers())}
+                              onClick={() => void onArchiveTeacher(user.id)}
                               type="button"
                             >
                               Archive Teacher
@@ -303,7 +339,7 @@ export default function AdminAccountsPage() {
                         {user.role !== "admin" ? (
                           <button
                             className="rounded-lg border border-brandGreen/35 bg-brandGreenLight px-3 py-2 text-xs font-semibold text-brandGreen transition hover:bg-brandGreen/20"
-                            onClick={() => void reactivateUser(user.id).then(() => refreshUsers())}
+                            onClick={() => void onUnarchiveAccount(user.id)}
                             type="button"
                           >
                             Unarchive Account

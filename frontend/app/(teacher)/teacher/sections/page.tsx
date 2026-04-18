@@ -27,6 +27,7 @@ import {
   type TeacherSectionSummary,
   type WordsCategory
 } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 
 const ITEM_TYPE_OPTIONS = [
   { value: "readable", label: "Resources" },
@@ -416,6 +417,22 @@ function parseRequiredCount(value: unknown): number | null {
   return null;
 }
 
+function normalizeExternalLink(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
+function readConfigLink(config: Record<string, unknown>, key: string): string {
+  const raw = config[key];
+  return typeof raw === "string" ? normalizeExternalLink(raw) : "";
+}
+
 function buildReadableUploadId(file: File): string {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
@@ -733,6 +750,7 @@ export default function TeacherSectionsPage() {
   const [isReadableDropActive, setIsReadableDropActive] = useState(false);
   const [readablePresentationMode, setReadablePresentationMode] =
     useState<ReadablePresentationMode>("auto");
+  const [readableResourceLink, setReadableResourceLink] = useState("");
   const [signingLabMode, setSigningLabMode] = useState<RecognitionMode>("alphabet");
   const [signingLabNumbersRange, setSigningLabNumbersRange] = useState<NumbersCategory>("0-10");
   const [signingLabWordsCategory, setSigningLabWordsCategory] = useState<WordsCategory>("greeting");
@@ -745,6 +763,7 @@ export default function TeacherSectionsPage() {
     createUploadRubricDraft({ id: "rubric-1", weightPercent: 25 }),
   ]);
   const [uploadMaxPoints, setUploadMaxPoints] = useState(100);
+  const [uploadReferenceLink, setUploadReferenceLink] = useState("");
   const [activeSubmissionModuleId, setActiveSubmissionModuleId] = useState<number | null>(null);
   const [moduleSubmissions, setModuleSubmissions] = useState<TeacherModuleSubmission[]>([]);
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
@@ -960,6 +979,14 @@ export default function TeacherSectionsPage() {
   }, [moduleQuery, sectionQuery]);
 
   useEffect(() => {
+    if (!message) {
+      return;
+    }
+    notifySuccess(message);
+    setMessage(null);
+  }, [message]);
+
+  useEffect(() => {
     if (!selectedModuleId || !selectedModule) {
       return;
     }
@@ -980,6 +1007,7 @@ export default function TeacherSectionsPage() {
     setReadableFiles([]);
     setIsReadableDropActive(false);
     setReadablePresentationMode("auto");
+    setReadableResourceLink("");
     setSigningLabMode("alphabet");
     setSigningLabNumbersRange("0-10");
     setSigningLabWordsCategory("greeting");
@@ -988,6 +1016,7 @@ export default function TeacherSectionsPage() {
     setSigningLabRequiredCount(1);
     setUploadRubrics([createUploadRubricDraft({ id: "rubric-1", weightPercent: 25 })]);
     setUploadMaxPoints(100);
+    setUploadReferenceLink("");
     setEditingItemId(null);
   }
 
@@ -1006,9 +1035,12 @@ export default function TeacherSectionsPage() {
     setItemContent(item.content_text ?? "");
     setReadableFiles([]);
     setReadablePresentationMode("auto");
+    setReadableResourceLink("");
+    setUploadReferenceLink("");
 
     if (item.item_type === "readable") {
       setReadablePresentationMode(parseReadablePresentationMode(item.config.presentation_mode));
+      setReadableResourceLink(readConfigLink(item.config, "resource_link"));
       setItemQuestion("");
       setItemAnswer("");
       setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
@@ -1076,6 +1108,7 @@ export default function TeacherSectionsPage() {
           ? Math.min(Math.max(parsedMaxPoints, 1), 100)
           : 100
       );
+      setUploadReferenceLink(readConfigLink(item.config, "reference_link"));
       setItemQuestion("");
       setItemAnswer("");
       setMcqQuestions([createMcqQuestionDraft({ id: "q1" })]);
@@ -1403,6 +1436,7 @@ export default function TeacherSectionsPage() {
     if (item.item_type === "readable") {
       const attachments = getItemAttachments(item);
       const mode = parseReadablePresentationMode(item.config.presentation_mode);
+      const resourceLink = readConfigLink(item.config, "resource_link");
       const cardVideos = attachments.filter((asset) => asset.resource_kind === "video");
       const cardNonVideos = attachments.filter((asset) => asset.resource_kind !== "video");
       const currentSlide =
@@ -1415,6 +1449,19 @@ export default function TeacherSectionsPage() {
           <p className="mb-0 rounded-3 bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
             {item.content_text || "No readable content yet."}
           </p>
+          {resourceLink ? (
+            <div className="rounded-3 border border-brandBorder bg-white px-3 py-3">
+              <p className="small fw-semibold mb-1">Resource Link</p>
+              <a
+                className="small fw-semibold text-primary text-break"
+                href={resourceLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {resourceLink}
+              </a>
+            </div>
+          ) : null}
           {attachments.length > 0 && mode !== "slideshow" ? (
             <div className="vstack gap-3">
               {cardVideos.map((asset) => (
@@ -1687,6 +1734,32 @@ export default function TeacherSectionsPage() {
       );
     }
 
+    if (item.item_type === "upload_assessment") {
+      const referenceLink = readConfigLink(item.config, "reference_link");
+      return (
+        <div className="vstack gap-2">
+          <p className="mb-0 rounded-3 bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
+            {item.instructions || "Students upload output files, then teacher scores using rubric."}
+          </p>
+          {referenceLink ? (
+            <div className="rounded-3 border border-brandBorder bg-white px-3 py-3">
+              <p className="small fw-semibold mb-1">Reference Link</p>
+              <a
+                className="small fw-semibold text-primary text-break"
+                href={referenceLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {referenceLink}
+              </a>
+            </div>
+          ) : (
+            <p className="mb-0 small text-slate-600">No reference link yet.</p>
+          )}
+        </div>
+      );
+    }
+
     return <p className="mb-0 small text-slate-600">No preview available.</p>;
   }
 
@@ -1907,6 +1980,7 @@ export default function TeacherSectionsPage() {
             .join("\n"),
           rubric_total_weight_percent: Number(totalWeight.toFixed(2)),
           max_points: Number(resolvedMaxPoints.toFixed(2)),
+          reference_link: normalizeExternalLink(uploadReferenceLink),
           allowed_file_types: [
             "video/*",
             "image/*",
@@ -1928,6 +2002,7 @@ export default function TeacherSectionsPage() {
         config = {
           presentation_mode:
             readablePresentationMode === "auto" ? null : readablePresentationMode,
+          resource_link: normalizeExternalLink(readableResourceLink),
           attachments:
             editingItem && itemType === "readable"
               ? (editingItem.config.attachments as unknown[] | undefined) ?? []
@@ -2250,11 +2325,6 @@ export default function TeacherSectionsPage() {
           {error}
         </div>
       ) : null}
-      {message ? (
-        <div className="alert alert-success mb-0" role="alert">
-          {message}
-        </div>
-      ) : null}
 
       <div className="panel">
         <label className="form-label fw-semibold">Choose Section</label>
@@ -2413,6 +2483,10 @@ export default function TeacherSectionsPage() {
 
                     {itemType === "readable" ? (
                       <>
+                        <div className="alert alert-danger py-2 px-3 mb-0 small fw-semibold" role="note">
+                          Important: Keep the instruction simple, then add files and/or one external link (example:
+                          YouTube) for non-tech learners.
+                        </div>
                         <div>
                           <label className="form-label fw-semibold">Introduction / Resource Content</label>
                           <textarea
@@ -2421,6 +2495,19 @@ export default function TeacherSectionsPage() {
                             rows={5}
                             value={itemContent}
                           />
+                        </div>
+                        <div>
+                          <label className="form-label fw-semibold">Resource Link (Optional)</label>
+                          <input
+                            className="form-control"
+                            onChange={(event) => setReadableResourceLink(event.target.value)}
+                            placeholder="Paste link (example: https://youtu.be/...)"
+                            type="url"
+                            value={readableResourceLink}
+                          />
+                          <div className="form-text">
+                            This link will appear in the student topic page as additional reference.
+                          </div>
                         </div>
                         <div>
                           <label className="form-label fw-semibold">Resource Display Format</label>
@@ -2929,6 +3016,23 @@ export default function TeacherSectionsPage() {
                     {itemType === "upload_assessment" ? (
                       <div className="rounded-3 border border-brandBorder bg-brandOffWhite p-3">
                         <p className="mb-2 fw-semibold">Student Upload Assessment</p>
+                        <div className="alert alert-danger py-2 px-3 mb-3 small fw-semibold" role="note">
+                          Important: Add a clear upload instruction and rubric. You can also add one reference link
+                          (example: YouTube demo) for student guidance.
+                        </div>
+                        <div className="mb-3">
+                          <label className="form-label fw-semibold mb-1">Reference Link (Optional)</label>
+                          <input
+                            className="form-control"
+                            onChange={(event) => setUploadReferenceLink(event.target.value)}
+                            placeholder="Paste link (example: https://youtu.be/...)"
+                            type="url"
+                            value={uploadReferenceLink}
+                          />
+                          <div className="form-text">
+                            Students will see this as guidance before uploading their files.
+                          </div>
+                        </div>
                         <div className="vstack gap-3 mb-3">
                           {uploadRubrics.map((rubric, rubricIndex) => (
                             <div className="card border-brandBorder" key={rubric.id}>
@@ -3184,6 +3288,20 @@ export default function TeacherSectionsPage() {
                                       : "No rubric yet."}
                                   </span>
                                 </p>
+                                {typeof item.config.reference_link === "string" &&
+                                item.config.reference_link.trim() ? (
+                                  <p className="mb-0 mt-1">
+                                    Reference link:{" "}
+                                    <a
+                                      className="fw-semibold text-primary text-break"
+                                      href={normalizeExternalLink(item.config.reference_link)}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      {normalizeExternalLink(item.config.reference_link)}
+                                    </a>
+                                  </p>
+                                ) : null}
                               </div>
                             ) : null}
                             <div className="d-flex flex-wrap gap-2 mt-3">

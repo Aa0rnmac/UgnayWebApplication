@@ -13,13 +13,23 @@ export default function TeacherDashboardPage() {
     getTeacherDashboard().then(setSections).catch((requestError: Error) => setError(requestError.message));
   }, []);
 
+  const totalStudents = sections.reduce((total, section) => total + section.section.student_count, 0);
+  const totalPublishedModules = sections.reduce((total, section) => total + section.published_module_count, 0);
+  const totalDraftModules = sections.reduce((total, section) => total + section.draft_module_count, 0);
+  const totalModuleCount = totalPublishedModules + totalDraftModules;
+  const publishedShare = totalModuleCount > 0 ? Math.round((totalPublishedModules / totalModuleCount) * 100) : 0;
+  const draftShare = totalModuleCount > 0 ? 100 - publishedShare : 0;
+  const topSectionsByStudents = [...sections]
+    .sort((left, right) => right.section.student_count - left.section.student_count)
+    .slice(0, 3);
+
   return (
     <section className="space-y-6">
       <div className="panel">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Teacher Dashboard</p>
         <h2 className="mt-3 text-3xl font-bold title-gradient">Assigned Sections</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Quick Access Too Build modules, monitor student progress, and review reports.
+          Quick Access To build modules, monitor student progress, and review reports.
         </p>
       </div>
 
@@ -33,19 +43,75 @@ export default function TeacherDashboardPage() {
         <div className="panel panel-lively">
           <p className="text-xs uppercase tracking-[0.22em] label-accent">Students</p>
           <p className="mt-3 text-4xl font-black text-brandGreen">
-            {sections.reduce((total, section) => total + section.section.student_count, 0)}
+            {totalStudents}
           </p>
         </div>
         <div className="panel panel-lively">
           <p className="text-xs uppercase tracking-[0.22em] label-accent">Published Modules</p>
           <p className="mt-3 text-4xl font-black text-accentWarm">
-            {sections.reduce((total, section) => total + section.published_module_count, 0)}
+            {totalPublishedModules}
           </p>
         </div>
         <div className="panel panel-lively">
           <p className="text-xs uppercase tracking-[0.22em] label-accent">Draft Modules</p>
           <p className="mt-3 text-4xl font-black text-brandRed">
-            {sections.reduce((total, section) => total + section.draft_module_count, 0)}
+            {totalDraftModules}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="panel">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Quick Graph - Module Status</p>
+          <p className="mt-2 mb-4 text-sm text-slate-700">Simple progress bars showing published vs draft modules.</p>
+          <div className="space-y-3">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-800">Published</span>
+                <span className="text-slate-600">{totalPublishedModules} ({publishedShare}%)</span>
+              </div>
+              <div className="h-2 rounded-full bg-brandGreenLight">
+                <div className="h-full rounded-full bg-brandGreen" style={{ width: `${publishedShare}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-800">Draft</span>
+                <span className="text-slate-600">{totalDraftModules} ({draftShare}%)</span>
+              </div>
+              <div className="h-2 rounded-full bg-brandRedLight">
+                <div className="h-full rounded-full bg-brandRed" style={{ width: `${draftShare}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="panel">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Quick Graph - Top Sections</p>
+          <p className="mt-2 mb-4 text-sm text-slate-700">Top 3 sections by student count.</p>
+          <div className="space-y-3">
+            {topSectionsByStudents.length === 0 ? (
+              <p className="mb-0 rounded-xl border border-brandBorder bg-white px-3 py-2 text-sm text-slate-600">
+                No section data yet.
+              </p>
+            ) : (
+              topSectionsByStudents.map((entry) => {
+                const share = totalStudents > 0 ? Math.round((entry.section.student_count / totalStudents) * 100) : 0;
+                return (
+                  <div key={entry.section.id}>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <span className="font-semibold text-slate-800">{entry.section.name}</span>
+                      <span className="text-slate-600">{entry.section.student_count} students</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-brandBlueLight">
+                      <div className="h-full rounded-full bg-brandBlue" style={{ width: `${share}%` }} />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <p className="mt-4 mb-0 rounded-xl border border-brandRed/30 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed">
+            NOTE: Use short, clear instructions in each module item so students can follow without help.
           </p>
         </div>
       </div>

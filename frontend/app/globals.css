@@ -46,6 +46,10 @@ body {
     linear-gradient(135deg, #f7f7f3, #efeeeb);
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 .lms-bootstrap-card {
   position: relative;
   overflow: hidden;
@@ -385,6 +389,80 @@ textarea:focus {
   will-change: opacity, transform;
 }
 
+.app-route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 420;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, #2e44a8 10%, #1fb3d8 42%, #2e44a8 78%);
+  background-size: 220% 100%;
+  animation: route-progress-slide 1.1s linear infinite;
+  box-shadow: 0 0 8px rgba(46, 68, 168, 0.35);
+}
+
+.app-route-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 419;
+  background: rgba(245, 245, 250, 0.56);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-route-overlay-card {
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 28px rgba(28, 28, 46, 0.12);
+  padding: 14px 18px;
+  min-width: 160px;
+  text-align: center;
+}
+
+.app-toast-stack {
+  position: fixed;
+  top: 18px;
+  right: 16px;
+  z-index: 430;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.app-toast {
+  min-width: 240px;
+  max-width: min(420px, calc(100vw - 32px));
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: #ffffff;
+  box-shadow: 0 10px 20px rgba(28, 28, 46, 0.14);
+  padding: 10px 12px;
+  animation: toast-enter 220ms ease;
+}
+
+.app-toast-success {
+  border-color: rgba(42, 140, 63, 0.35);
+  background: #eef8f0;
+  color: #246f35;
+}
+
+.app-toast-error {
+  border-color: rgba(204, 40, 40, 0.35);
+  background: #fff1f1;
+  color: #b02020;
+}
+
+.app-toast-info {
+  border-color: rgba(46, 68, 168, 0.3);
+  background: #edf1ff;
+  color: #243d9f;
+}
+
 @keyframes bg-float {
   0% {
     background-position:
@@ -429,6 +507,26 @@ textarea:focus {
   }
 }
 
+@keyframes route-progress-slide {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@keyframes toast-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @keyframes modal-pop {
   0% {
     opacity: 0;
@@ -441,6 +539,10 @@ textarea:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   .bg-grid,
   .card-hand {
     animation: none;
@@ -452,6 +554,11 @@ textarea:focus {
   }
 
   .page-transition-enter {
+    animation: none;
+  }
+
+  .app-route-progress,
+  .app-toast {
     animation: none;
   }
 

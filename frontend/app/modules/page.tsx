@@ -10,6 +10,7 @@ import {
   type StudentCertificateDownloadStatus,
   type StudentCourse
 } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 
 export default function StudentModulesPage() {
   const [course, setCourse] = useState<StudentCourse | null>(null);
@@ -36,6 +37,14 @@ export default function StudentModulesPage() {
       setCertificateRecipientName(storedName);
     }
   }, []);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+    notifySuccess(message);
+    setMessage(null);
+  }, [message]);
 
   async function onDownloadCertificate() {
     if (!certificateStatus?.eligible || isDownloadingCertificate) {
@@ -77,8 +86,6 @@ export default function StudentModulesPage() {
       </div>
 
       {error ? <p className="rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm text-brandRed">{error}</p> : null}
-      {message ? <p className="rounded-xl border border-brandGreen/35 bg-brandGreenLight px-4 py-3 text-sm text-slate-800">{message}</p> : null}
-
       <div className="grid gap-4 lg:grid-cols-2">
         {(course?.modules ?? []).map((module) => (
           <article className="panel panel-lively" key={module.id}>

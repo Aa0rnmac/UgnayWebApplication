@@ -21,6 +21,7 @@ import {
   type StudentCourseModule,
   type WordsCategory
 } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 
 const CONTENT_ITEM_TYPES = new Set([
   "readable",
@@ -107,6 +108,21 @@ function parseWordsCategoryValue(value: unknown): WordsCategory | undefined {
   return WORD_CATEGORY_VALUES.includes(value as WordsCategory)
     ? (value as WordsCategory)
     : undefined;
+}
+
+function readConfigLink(config: Record<string, unknown>, key: string): string {
+  const raw = config[key];
+  if (typeof raw !== "string") {
+    return "";
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
 }
 
 function parseAsset(value: unknown): ModuleAsset | null {
@@ -595,6 +611,14 @@ export default function StudentModulePlayerPage() {
     return () => window.clearTimeout(timer);
   }, [currentItem?.id]);
 
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+    notifySuccess(message);
+    setMessage(null);
+  }, [message]);
+
   async function onCompleteReadable(item: StudentCourseItem) {
     try {
       setError(null);
@@ -787,6 +811,7 @@ export default function StudentModulePlayerPage() {
 
     if (isContentItemType(item.item_type)) {
       const attachments = getItemAttachments(item);
+      const resourceLink = readConfigLink(item.config, "resource_link");
       const presentationMode = parseReadablePresentationMode(item.config.presentation_mode);
       const videoAttachments = attachments.filter((asset) => asset.resource_kind === "video");
       const nonVideoAttachments = attachments.filter((asset) => asset.resource_kind !== "video");
@@ -803,6 +828,19 @@ export default function StudentModulePlayerPage() {
           <p className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm leading-7 text-slate-700">
             {item.content_text || "No reading content yet."}
           </p>
+          {resourceLink ? (
+            <div className="rounded-xl border border-brandBlue/25 bg-white px-4 py-3 text-sm">
+              <p className="mb-1 font-semibold text-slate-800">Reference Link</p>
+              <a
+                className="font-semibold text-brandBlue text-decoration-underline"
+                href={resourceLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open link
+              </a>
+            </div>
+          ) : null}
           {attachments.length > 0 && presentationMode !== "slideshow" ? (
             <div className="space-y-4">
               {videoAttachments.map((asset) => (
@@ -878,6 +916,7 @@ export default function StudentModulePlayerPage() {
 
     if (item.item_type === "upload_assessment") {
       const selectedFiles = uploadFilesByItem[item.id] ?? [];
+      const referenceLink = readConfigLink(item.config, "reference_link");
       const maxPointsRaw = item.config.max_points;
       const maxPoints =
         typeof maxPointsRaw === "number"
@@ -895,6 +934,19 @@ export default function StudentModulePlayerPage() {
             {item.instructions ||
               "Upload your video or file output for this assessment. Your teacher will score it manually."}
           </p>
+          {referenceLink ? (
+            <div className="rounded-xl border border-brandBlue/25 bg-white px-4 py-3 text-sm">
+              <p className="mb-1 font-semibold text-slate-800">Reference Link</p>
+              <a
+                className="font-semibold text-brandBlue text-decoration-underline"
+                href={referenceLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open guide link
+              </a>
+            </div>
+          ) : null}
           <div className="rounded-2xl border border-brandBorder bg-white p-4">
             <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
               <div>
@@ -1399,8 +1451,6 @@ export default function StudentModulePlayerPage() {
       </div>
 
       {error ? <p className="rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm text-brandRed">{error}</p> : null}
-      {message ? <p className="rounded-xl border border-brandGreen/35 bg-brandGreenLight px-4 py-3 text-sm text-slate-800">{message}</p> : null}
-
       {currentModule ? (
         <div className={`grid gap-4 ${isCourseFlowCollapsed ? "grid-cols-1" : "xl:grid-cols-[0.36fr_0.64fr]"}`}>
           {!isCourseFlowCollapsed ? (

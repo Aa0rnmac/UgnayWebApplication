@@ -15,6 +15,7 @@ import {
   type AdminCertificateTemplate,
   type LmsSection
 } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 
 export default function AdminSectionsPage() {
   const [sections, setSections] = useState<LmsSection[]>([]);
@@ -145,6 +146,14 @@ export default function AdminSectionsPage() {
     void loadCertificateTemplate();
   }, []);
 
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+    notifySuccess(message);
+    setMessage(null);
+  }, [message]);
+
   async function onSaveCertificateTemplate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -198,12 +207,6 @@ export default function AdminSectionsPage() {
           {error}
         </p>
       ) : null}
-      {message ? (
-        <p className="rounded-xl border border-brandGreen/35 bg-brandGreenLight px-4 py-3 text-sm text-slate-800">
-          {message}
-        </p>
-      ) : null}
-
       <div className="panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Current Sections</p>

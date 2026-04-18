@@ -13,6 +13,30 @@ export default function AdminDashboardPage() {
     getAdminDashboard().then(setDashboard).catch((requestError: Error) => setError(requestError.message));
   }, []);
 
+  const totalStudents = dashboard?.total_students ?? 0;
+  const totalTeachers = dashboard?.total_teachers ?? 0;
+  const totalUsers = totalStudents + totalTeachers;
+  const totalSections = dashboard?.total_sections ?? 0;
+  const activeSections = dashboard?.active_sections ?? 0;
+  const archivedSections = Math.max(totalSections - activeSections, 0);
+  const studentShare = totalUsers > 0 ? Math.round((totalStudents / totalUsers) * 100) : 0;
+  const teacherShare = totalUsers > 0 ? 100 - studentShare : 0;
+  const activeSectionShare = totalSections > 0 ? Math.round((activeSections / totalSections) * 100) : 0;
+  const archivedSectionShare = totalSections > 0 ? 100 - activeSectionShare : 0;
+  const recentRoleCounts = (dashboard?.recent_accounts ?? []).reduce(
+    (acc, account) => {
+      if (account.role === "teacher") {
+        acc.teachers += 1;
+      } else if (account.role === "student") {
+        acc.students += 1;
+      } else if (account.role === "admin") {
+        acc.admins += 1;
+      }
+      return acc;
+    },
+    { students: 0, teachers: 0, admins: 0 }
+  );
+
   return (
     <section className="space-y-6">
       <div className="panel">
@@ -37,6 +61,61 @@ export default function AdminDashboardPage() {
             <p className={`mt-3 text-4xl font-black ${card.tone}`}>{card.value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="panel">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Quick Graph - User Mix</p>
+          <p className="mt-2 mb-4 text-sm text-slate-700">Simple view for non-tech users: how many students vs teachers.</p>
+          <div className="space-y-3">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-800">Students</span>
+                <span className="text-slate-600">{totalStudents} ({studentShare}%)</span>
+              </div>
+              <div className="h-2 rounded-full bg-brandBlueLight">
+                <div className="h-full rounded-full bg-brandBlue" style={{ width: `${studentShare}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-800">Teachers</span>
+                <span className="text-slate-600">{totalTeachers} ({teacherShare}%)</span>
+              </div>
+              <div className="h-2 rounded-full bg-brandGreenLight">
+                <div className="h-full rounded-full bg-brandGreen" style={{ width: `${teacherShare}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="panel">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Quick Graph - Section Status</p>
+          <p className="mt-2 mb-4 text-sm text-slate-700">At-a-glance section availability across the LMS.</p>
+          <div className="space-y-3">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-800">Active Sections</span>
+                <span className="text-slate-600">{activeSections} ({activeSectionShare}%)</span>
+              </div>
+              <div className="h-2 rounded-full bg-brandGreenLight">
+                <div className="h-full rounded-full bg-brandGreen" style={{ width: `${activeSectionShare}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-800">Archived Sections</span>
+                <span className="text-slate-600">{archivedSections} ({archivedSectionShare}%)</span>
+              </div>
+              <div className="h-2 rounded-full bg-brandRedLight">
+                <div className="h-full rounded-full bg-brandRed" style={{ width: `${archivedSectionShare}%` }} />
+              </div>
+            </div>
+          </div>
+          <p className="mt-4 mb-0 rounded-xl border border-brandRed/30 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed">
+            NOTE: Keep instructions short and direct for easier admin operations.
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
@@ -75,6 +154,9 @@ export default function AdminDashboardPage() {
 
         <div className="panel">
           <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Quick Actions</p>
+          <div className="mt-3 mb-3 rounded-xl border border-brandBlue/30 bg-brandBlueLight px-3 py-2 text-xs font-semibold text-brandBlue">
+            NEW ACCOUNT SNAPSHOT: {recentRoleCounts.students} students, {recentRoleCounts.teachers} teachers, {recentRoleCounts.admins} admins in the latest account batch.
+          </div>
           <div className="mt-4 grid gap-3">
             <Link className="rounded-xl border border-brandBorder bg-white px-4 py-4 font-semibold text-brandBlue transition hover:bg-brandBlueLight" href="/admin/accounts">
               Bulk create student and teacher accounts
