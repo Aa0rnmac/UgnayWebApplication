@@ -4,8 +4,12 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
-PHONE_PATTERN = re.compile(r"^\d{11}$")
+PHONE_PATTERN = re.compile(r"^09\d{9}$")
 PASSWORD_PATTERN = re.compile(r"^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
+
+
+def _normalize_phone(value: str) -> str:
+    return re.sub(r"\D+", "", value)
 
 
 class RegistrationCreate(BaseModel):
@@ -15,7 +19,7 @@ class RegistrationCreate(BaseModel):
     birth_date: date
     address: str = Field(min_length=1, max_length=1000)
     email: str = Field(min_length=5, max_length=255)
-    phone_number: str = Field(min_length=11, max_length=11)
+    phone_number: str = Field(min_length=1, max_length=40)
     reference_number: str = Field(min_length=1, max_length=120)
 
     @field_validator("email")
@@ -31,10 +35,12 @@ class RegistrationCreate(BaseModel):
     @field_validator("phone_number")
     @classmethod
     def validate_phone(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not PHONE_PATTERN.match(trimmed):
-            raise ValueError("Phone number must be exactly 11 digits (example: 09XXXXXXXXX).")
-        return trimmed
+        normalized = _normalize_phone(value)
+        if not PHONE_PATTERN.match(normalized):
+            raise ValueError(
+                "Phone number must start with 09 and contain exactly 11 digits (example: 09123456789)."
+            )
+        return normalized
 
 
 class RegistrationOut(BaseModel):
@@ -55,6 +61,8 @@ class RegistrationOut(BaseModel):
     validated_by: str | None
     linked_user_id: int | None
     issued_username: str | None
+    enrollment_id: int | None = None
+    payment_review_status: str | None = None
     notes: str | None
     created_at: datetime
 

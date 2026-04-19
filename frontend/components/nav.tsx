@@ -5,16 +5,37 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
-const NAV_ITEMS = [
+const STUDENT_NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", short: "D" },
   { href: "/modules", label: "Modules", short: "M" },
   { href: "/lab", label: "Free Signing Gesture", short: "F" }
 ] as const;
 
-export function AppNav() {
+const TEACHER_NAV_ITEMS = [
+  { href: "/teacher", label: "Dashboard", short: "D" },
+  { href: "/teacher/modules", label: "Modules", short: "M" },
+  { href: "/teacher/reports", label: "Reports", short: "R" },
+] as const;
+
+const ADMIN_NAV_ITEMS = [
+  { href: "/admin", label: "Dashboard", short: "D" },
+  { href: "/admin/accounts", label: "Accounts", short: "A" },
+  { href: "/admin/sections", label: "Batches", short: "B" },
+  { href: "/admin/reports", label: "Reports", short: "R" }
+] as const;
+
+export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const navItems =
+    role === "admin" ? ADMIN_NAV_ITEMS : role === "teacher" ? TEACHER_NAV_ITEMS : STUDENT_NAV_ITEMS;
+  const dailyGoal =
+    role === "admin"
+      ? "Create accounts, organize batches, and monitor system activity."
+      : role === "teacher"
+      ? "Publish batch modules, check reports, and guide learners in the signing lab."
+      : "Practice at least one module and one gesture set.";
 
   return (
     <>
@@ -35,9 +56,9 @@ export function AppNav() {
             width={32}
           />
           <div className="leading-tight">
-            <p className="text-sm font-semibold text-slate-900">UGNAY Learning hub</p>
-            <p className="text-[10px] text-slate-900">basic FSL course</p>
-            <p className="text-[10px] text-slate-900">hand and heart</p>
+            <p className="text-[15px] font-black uppercase tracking-[0.18em] text-brandBlue">UGNAY LEARNING HUB</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-900">BASIC FSL COURSE</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-900">HAND AND HEART</p>
           </div>
         </div>
       </div>
@@ -57,7 +78,7 @@ export function AppNav() {
         } ${mobileOpen ? "translate-x-0 w-72" : "w-72"}`}
       >
         <div className="flex h-full flex-col border-r border-brandBorder bg-gradient-to-b from-white via-brandMutedSurface/55 to-white backdrop-blur">
-          <div className="flex items-center gap-3 border-b border-brandBorder p-4">
+          <div className="relative flex items-start gap-3 border-b border-brandBorder p-4 pr-20">
             <Image
               alt="FSL Learning Hub logo"
               className="h-10 w-10 rounded-full border border-brandBorder object-cover shadow-sm"
@@ -66,17 +87,17 @@ export function AppNav() {
               width={40}
             />
             {!collapsed ? (
-              <div className="min-w-0 md:block">
-                <h1 className="truncate text-sm font-semibold tracking-wide text-slate-900">
-                  UGNAY Learning hub
+              <div className="min-w-0 pr-4 md:block">
+                <h1 className="text-base leading-tight font-black uppercase tracking-[0.12em] text-brandBlue whitespace-normal break-words">
+                  UGNAY LEARNING HUB
                 </h1>
-                <p className="text-[11px] text-slate-900">basic FSL course</p>
-                <p className="text-[11px] text-slate-900">hand and heart</p>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-900">BASIC FSL COURSE</p>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-900">HAND AND HEART</p>
               </div>
             ) : null}
 
             <button
-              className="ml-auto hidden rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:-translate-y-0.5 hover:bg-brandBlueLight md:block"
+              className="absolute right-3 top-6 hidden rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:-translate-y-0.5 hover:bg-brandBlueLight md:inline-flex"
               onClick={() => setCollapsed((value) => !value)}
               type="button"
             >
@@ -84,7 +105,7 @@ export function AppNav() {
             </button>
 
             <button
-              className="ml-auto rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:bg-brandBlueLight md:hidden"
+              className="absolute right-3 top-6 inline-flex rounded-lg border border-brandBlue/25 bg-white px-2 py-1 text-xs font-semibold text-brandBlue shadow-sm transition hover:bg-brandBlueLight md:hidden"
               onClick={() => setMobileOpen(false)}
               type="button"
             >
@@ -93,8 +114,16 @@ export function AppNav() {
           </div>
 
           <nav className="flex-1 space-y-2 p-3">
-            {NAV_ITEMS.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            {navItems.map((item) => {
+              const active =
+                item.href === "/teacher"
+                  ? pathname === item.href
+                  : item.href === "/teacher/modules"
+                    ? pathname === item.href ||
+                      pathname.startsWith("/teacher/modules/") ||
+                      pathname === "/teacher/sections" ||
+                      pathname.startsWith("/teacher/sections/")
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link
                   key={item.href}
@@ -119,7 +148,7 @@ export function AppNav() {
           {!collapsed ? (
             <div className="mx-3 mb-3 rounded-xl border border-brandYellow/35 bg-brandYellowLight p-3">
               <p className="text-[11px] uppercase tracking-wide text-[#9a7800]">Daily Goal</p>
-              <p className="mt-1 text-xs font-semibold text-slate-800">Practice at least one module and one gesture set.</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800">{dailyGoal}</p>
             </div>
           ) : null}
         </div>

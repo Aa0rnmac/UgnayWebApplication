@@ -30,3 +30,9 @@ class Registration(Base):
     )
 
     linked_user = relationship("User")
+    enrollment = relationship(
+        "Enrollment",
+        back_populates="registration",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )

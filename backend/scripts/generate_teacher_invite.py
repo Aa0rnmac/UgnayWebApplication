@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
-from app.core.config import PROJECT_ROOT
+from app.core.config import PROJECT_ROOT, settings
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.models.teacher_invite import TeacherInvite
@@ -48,6 +49,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate reusable teacher QR + passkey invite.")
     parser.add_argument("--label", default="Teacher Invite", help="Label for this invite.")
     parser.add_argument(
+        "--expires-days",
+        type=int,
+        default=settings.teacher_invite_default_expiry_days,
+        help=(
+            "Number of days before the invite expires. Use 0 to disable expiry. "
+            "Defaults to TEACHER_INVITE_DEFAULT_EXPIRY_DAYS."
+        ),
+    )
+    parser.add_argument(
+        "--max-uses",
+        type=int,
+        default=settings.teacher_invite_default_max_uses,
+        help=(
+            "Maximum times this invite can be used. Use 0 to allow unlimited uses. "
+            "Defaults to TEACHER_INVITE_DEFAULT_MAX_USES."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         default=str((PROJECT_ROOT / "backend" / "artifacts" / "teacher_invites").resolve()),
         help="Directory where QR and printable files will be written.",
@@ -57,6 +76,12 @@ def main() -> None:
     invite_code = generate_invite_code()
     passkey = generate_teacher_passkey()
     qr_payload = build_qr_payload(invite_code)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=args.expires_days)
+        if args.expires_days > 0
+        else None
+    )
+    max_use_count = args.max_uses if args.max_uses > 0 else None
 
     with SessionLocal() as db:
         invite = TeacherInvite(
@@ -64,6 +89,8 @@ def main() -> None:
             label=args.label.strip() or "Teacher Invite",
             passkey_hash=hash_password(passkey),
             status="active",
+            max_use_count=max_use_count,
+            expires_at=expires_at,
         )
         db.add(invite)
         db.commit()
@@ -89,6 +116,8 @@ def main() -> None:
     print("Teacher invite generated successfully.")
     print(f"Invite Code : {invite_code}")
     print(f"Passkey     : {passkey}")
+    print(f"Expires At  : {expires_at.isoformat() if expires_at else 'No expiry'}")
+    print(f"Max Uses    : {max_use_count if max_use_count is not None else 'Unlimited'}")
     print(f"QR Image    : {qr_path}")
     print(f"Print PNG   : {card_png_path}")
     print(f"Print PDF   : {card_pdf_path}")

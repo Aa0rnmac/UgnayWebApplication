@@ -15,12 +15,14 @@ class User(Base):
     first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     middle_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    company_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     phone_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     profile_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     role: Mapped[str] = mapped_column(
         String(20), nullable=False, default="student", server_default="student"
     )
@@ -34,4 +36,19 @@ class User(Base):
     )
     progress_entries = relationship(
         "UserModuleProgress", back_populates="user", cascade="all, delete-orphan"
+    )
+    enrollments = relationship(
+        "Enrollment",
+        back_populates="user",
+        foreign_keys="Enrollment.user_id",
+    )
+    activity_attempts = relationship(
+        "ActivityAttempt",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    created_batches = relationship(
+        "Batch",
+        back_populates="created_by",
+        foreign_keys="Batch.created_by_user_id",
     )

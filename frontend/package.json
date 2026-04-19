@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "setup": "npm ci",
     "dev": "node scripts/dev-clean.mjs",
-    "dev:clean": "node scripts/dev-clean.mjs",
+    "dev:clean": "node scripts/dev-clean.mjs --clean",
     "dev:raw": "next dev",
     "serve": "npm run build && npm run start",
     "build": "next build",
@@ -12,7 +13,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@mermaid-js/mermaid-cli": "^11.12.0",
     "@zxing/browser": "0.1.5",
+    "bootstrap": "^5.3.3",
     "next": "15.3.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"

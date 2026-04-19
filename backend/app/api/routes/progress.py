@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_learning_user, has_teacher_access
 from app.db.session import get_db
 from app.models.module import Module
 from app.models.progress import UserModuleProgress
@@ -13,9 +13,12 @@ router = APIRouter(prefix="/progress", tags=["progress"])
 
 @router.get("/summary", response_model=ProgressSummaryOut)
 def progress_summary(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_learning_user)
 ) -> ProgressSummaryOut:
-    total_modules = db.query(Module).filter(Module.is_published.is_(True)).count()
+    module_query = db.query(Module)
+    if not has_teacher_access(current_user):
+        module_query = module_query.filter(Module.is_published.is_(True))
+    total_modules = module_query.count()
     progress_entries = (
         db.query(UserModuleProgress)
         .filter(UserModuleProgress.user_id == current_user.id)

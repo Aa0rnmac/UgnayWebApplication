@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 import secrets
 from uuid import uuid4
@@ -7,27 +7,35 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_teacher, get_current_user
 from app.core.config import settings
+from app.core.datetime_utils import as_utc, utc_now
 from app.core.security import create_session_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.password_reset_otp import PasswordResetOtp
+from app.models.archived_student_account import ArchivedStudentAccount
+from app.models.enrollment import Enrollment
 from app.models.session import UserSession
 from app.models.teacher_invite import TeacherInvite
 from app.models.user import User
 from app.schemas.auth import (
     AuthResponse,
+    ForgotPasswordConfirmOtpRequest,
+    ForgotPasswordConfirmOtpResponse,
     ForgotPasswordRequest,
+    ForgotPasswordResetRequest,
     ForgotPasswordVerifyRequest,
     PasswordChangeRequest,
     TeacherInviteIssueCredentialsRequest,
     TeacherInviteIssueCredentialsResponse,
+    TeacherInviteRevokeRequest,
     TeacherInviteVerifyPasskeyRequest,
     TeacherInviteVerifyPasskeyResponse,
     TeacherInviteVerifyQrRequest,
     TeacherInviteVerifyQrResponse,
     UserCreate,
     UserLogin,
+    UserSelfArchiveResponse,
     UserOut,
     UserProfileUpdate,
 )
@@ -37,17 +45,25 @@ from app.services.email_sender import (
 )
 from app.services.teacher_invites import (
     create_onboarding_token,
+    ensure_invite_is_usable,
     generate_temporary_password,
     parse_qr_payload,
     verify_onboarding_token,
 )
+from app.services.audit_log_service import log_user_activity
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _remaining_invite_uses(invite: TeacherInvite) -> int | None:
+    if invite.max_use_count is None:
+        return None
+    return max(invite.max_use_count - invite.use_count, 0)
+
+
 def create_user_session(db: Session, user_id: int) -> str:
     token = create_session_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.session_hours)
+    expires_at = utc_now() + timedelta(hours=settings.session_hours)
 
     session = UserSession(user_id=user_id, token=token, expires_at=expires_at)
     db.add(session)
@@ -60,21 +76,38 @@ def find_user_by_identity(db: Session, identity: str) -> User | None:
     if not trimmed:
         return None
 
-    by_username = db.query(User).filter(User.username == trimmed).first()
+    by_username = (
+        db.query(User)
+        .filter(User.username == trimmed, User.archived_at.is_(None))
+        .first()
+    )
     if by_username:
         return by_username
 
-    return db.query(User).filter(User.email == trimmed.lower()).first()
+    return (
+        db.query(User)
+        .filter(User.email == trimmed.lower(), User.archived_at.is_(None))
+        .first()
+    )
+
+
+def _get_active_password_reset_otp(db: Session, user_id: int) -> PasswordResetOtp | None:
+    return (
+        db.query(PasswordResetOtp)
+        .filter(
+            PasswordResetOtp.user_id == user_id,
+            PasswordResetOtp.consumed_at.is_(None),
+        )
+        .order_by(PasswordResetOtp.created_at.desc())
+        .first()
+    )
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: UserCreate, db: Session = Depends(get_db)) -> AuthResponse:
     raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=(
-            "Direct self-registration is disabled. Submit registration first, then wait for "
-            "teacher validation and initial credentials via email."
-        ),
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Registration is no longer available. Contact the LMS admin for your account.",
     )
 
 
@@ -83,7 +116,10 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthResponse:
     identity = payload.username.strip()
     user = (
         db.query(User)
-        .filter(or_(User.username == identity, User.email == identity.lower()))
+        .filter(
+            or_(User.username == identity, User.email == identity.lower()),
+            User.archived_at.is_(None),
+        )
         .first()
     )
     if not user or not verify_password(payload.password, user.password_hash):
@@ -97,34 +133,9 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthResponse:
 def verify_teacher_qr(
     payload: TeacherInviteVerifyQrRequest, db: Session = Depends(get_db)
 ) -> TeacherInviteVerifyQrResponse:
-    qr_input = payload.qr_payload.strip()
-    invite_code: str | None = None
-
-    try:
-        invite_code = parse_qr_payload(qr_input)
-    except ValueError as exc:
-        # Fallback: allow direct invite code entry when browser QR scanner is unavailable.
-        # Passkey verification is still required in the next step.
-        if qr_input and ":" not in qr_input:
-            invite_code = qr_input
-        else:
-            message = str(exc)
-            status_code = (
-                status.HTTP_503_SERVICE_UNAVAILABLE
-                if "TEACHER_INVITE_SIGNING_SECRET" in message
-                else status.HTTP_401_UNAUTHORIZED
-            )
-            raise HTTPException(status_code=status_code, detail=message) from exc
-
-    invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == invite_code).first()
-    if not invite or invite.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Teacher invite is invalid or inactive."
-        )
-
-    return TeacherInviteVerifyQrResponse(
-        invite_code=invite_code,
-        message="QR verified. Enter the matching passkey.",
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Teacher invite onboarding has been removed. Contact the LMS admin for your account.",
     )
 
 
@@ -132,25 +143,9 @@ def verify_teacher_qr(
 def verify_teacher_passkey(
     payload: TeacherInviteVerifyPasskeyRequest, db: Session = Depends(get_db)
 ) -> TeacherInviteVerifyPasskeyResponse:
-    invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == payload.invite_code).first()
-    if not invite or invite.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Teacher invite is invalid or inactive."
-        )
-
-    if not verify_password(payload.passkey, invite.passkey_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid passkey.")
-
-    try:
-        onboarding_token = create_onboarding_token(invite.invite_code, minutes=10)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    return TeacherInviteVerifyPasskeyResponse(
-        onboarding_token=onboarding_token,
-        message="Passkey verified. Enter teacher email to receive credentials.",
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Teacher invite onboarding has been removed. Contact the LMS admin for your account.",
     )
 
 
@@ -160,82 +155,22 @@ def verify_teacher_passkey(
 def issue_teacher_credentials(
     payload: TeacherInviteIssueCredentialsRequest, db: Session = Depends(get_db)
 ) -> TeacherInviteIssueCredentialsResponse:
-    try:
-        invite_code = verify_onboarding_token(payload.onboarding_token)
-    except ValueError as exc:
-        message = str(exc)
-        status_code = (
-            status.HTTP_503_SERVICE_UNAVAILABLE
-            if "TEACHER_INVITE_SIGNING_SECRET" in message
-            else status.HTTP_401_UNAUTHORIZED
-        )
-        raise HTTPException(status_code=status_code, detail=message) from exc
-
-    invite = db.query(TeacherInvite).filter(TeacherInvite.invite_code == invite_code).first()
-    if not invite or invite.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Teacher invite is invalid or inactive."
-        )
-
-    normalized_email = payload.email.strip().lower()
-
-    existing_teacher = (
-        db.query(User)
-        .filter(User.email == normalized_email, User.role == "teacher")
-        .first()
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Teacher invite onboarding has been removed. Contact the LMS admin for your account.",
     )
-    if existing_teacher:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Teacher account for this email already exists.",
-        )
 
-    existing_email = db.query(User).filter(User.email == normalized_email).first()
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email is already linked to another account.",
-        )
 
-    existing_username = db.query(User).filter(User.username == normalized_email).first()
-    if existing_username:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username conflict detected. Please use another teacher email.",
-        )
-
-    temporary_password = generate_temporary_password()
-    teacher_user = User(
-        username=normalized_email,
-        email=normalized_email,
-        password_hash=hash_password(temporary_password),
-        role="teacher",
-        must_change_password=True,
-    )
-    db.add(teacher_user)
-    db.flush()
-
-    try:
-        send_teacher_initial_credentials_email(
-            to_email=normalized_email,
-            username=normalized_email,
-            temporary_password=temporary_password,
-        )
-    except RuntimeError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-
-    invite.use_count += 1
-    invite.last_used_at = datetime.now(timezone.utc)
-    db.add(invite)
-    db.commit()
-
-    return TeacherInviteIssueCredentialsResponse(
-        message="Teacher credentials sent successfully.",
-        username=normalized_email,
+@router.post("/teacher-invite/{invite_code}/revoke")
+def revoke_teacher_invite(
+    invite_code: str,
+    payload: TeacherInviteRevokeRequest,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> dict[str, str]:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Teacher invite onboarding has been removed.",
     )
 
 
@@ -252,7 +187,7 @@ def request_password_reset_otp(
             detail="No email is linked to this account yet. Please contact your teacher/admin.",
         )
 
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     db.query(PasswordResetOtp).filter(
         PasswordResetOtp.expires_at < now,
     ).delete(synchronize_session=False)
@@ -291,6 +226,114 @@ def request_password_reset_otp(
     return {"message": "OTP sent. Check your email inbox for the reset code."}
 
 
+@router.post("/forgot-password/confirm-otp", response_model=ForgotPasswordConfirmOtpResponse)
+def confirm_password_reset_otp(
+    payload: ForgotPasswordConfirmOtpRequest, db: Session = Depends(get_db)
+) -> ForgotPasswordConfirmOtpResponse:
+    user = find_user_by_identity(db, payload.username_or_email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP request.")
+
+    now = utc_now()
+    otp_record = _get_active_password_reset_otp(db, user.id)
+    if not otp_record or (as_utc(otp_record.expires_at) and as_utc(otp_record.expires_at) < now):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OTP is missing or expired. Request a new code.",
+        )
+
+    if otp_record.attempt_count >= settings.password_reset_max_attempts:
+        otp_record.consumed_at = now
+        db.add(otp_record)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="OTP attempts exceeded. Please request a new code.",
+        )
+
+    if not verify_password(payload.otp_code, otp_record.otp_hash):
+        otp_record.attempt_count += 1
+        if otp_record.attempt_count >= settings.password_reset_max_attempts:
+            otp_record.consumed_at = now
+        db.add(otp_record)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP code.")
+
+    reset_token = secrets.token_urlsafe(32)
+    otp_record.verified_at = now
+    otp_record.reset_token_hash = hash_password(reset_token)
+    db.add(otp_record)
+    db.commit()
+
+    return ForgotPasswordConfirmOtpResponse(
+        message="OTP verified. You can now set a new password.",
+        reset_token=reset_token,
+    )
+
+
+@router.post("/forgot-password/reset", response_model=AuthResponse)
+def reset_password_with_verified_otp(
+    payload: ForgotPasswordResetRequest, db: Session = Depends(get_db)
+) -> AuthResponse:
+    now = utc_now()
+    candidates = (
+        db.query(PasswordResetOtp)
+        .filter(
+            PasswordResetOtp.verified_at.is_not(None),
+            PasswordResetOtp.reset_token_hash.is_not(None),
+            PasswordResetOtp.consumed_at.is_(None),
+        )
+        .order_by(PasswordResetOtp.verified_at.desc(), PasswordResetOtp.id.desc())
+        .all()
+    )
+
+    otp_record = next(
+        (
+            record
+            for record in candidates
+            if record.reset_token_hash and verify_password(payload.reset_token, record.reset_token_hash)
+        ),
+        None,
+    )
+    if not otp_record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password reset session is invalid or expired. Verify OTP again.",
+        )
+
+    if as_utc(otp_record.expires_at) and as_utc(otp_record.expires_at) < now:
+        otp_record.consumed_at = now
+        db.add(otp_record)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password reset session is expired. Request a new OTP code.",
+        )
+
+    user = db.query(User).filter(User.id == otp_record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP request.")
+
+    otp_record.consumed_at = now
+    user.password_hash = hash_password(payload.new_password)
+    user.must_change_password = False
+    db.add(otp_record)
+    db.add(user)
+    log_user_activity(
+        db,
+        actor=user,
+        action_type="account_password_changed",
+        target_type="user",
+        target_id=user.id,
+        details={"change_source": "forgot_password_reset"},
+    )
+    db.commit()
+    db.refresh(user)
+
+    token = create_user_session(db, user.id)
+    return AuthResponse(token=token, user=UserOut.model_validate(user))
+
+
 @router.post("/forgot-password/verify", response_model=AuthResponse)
 def verify_password_reset_otp(
     payload: ForgotPasswordVerifyRequest, db: Session = Depends(get_db)
@@ -299,17 +342,9 @@ def verify_password_reset_otp(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP request.")
 
-    now = datetime.now(timezone.utc)
-    otp_record = (
-        db.query(PasswordResetOtp)
-        .filter(
-            PasswordResetOtp.user_id == user.id,
-            PasswordResetOtp.consumed_at.is_(None),
-        )
-        .order_by(PasswordResetOtp.created_at.desc())
-        .first()
-    )
-    if not otp_record or otp_record.expires_at < now:
+    now = utc_now()
+    otp_record = _get_active_password_reset_otp(db, user.id)
+    if not otp_record or (as_utc(otp_record.expires_at) and as_utc(otp_record.expires_at) < now):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP is missing or expired. Request a new code.",
@@ -337,6 +372,14 @@ def verify_password_reset_otp(
     user.must_change_password = False
     db.add(otp_record)
     db.add(user)
+    log_user_activity(
+        db,
+        actor=user,
+        action_type="account_password_changed",
+        target_type="user",
+        target_id=user.id,
+        details={"change_source": "forgot_password_verify"},
+    )
     db.commit()
     db.refresh(user)
 
@@ -361,6 +404,8 @@ def update_my_profile(
         current_user.middle_name = payload.middle_name.strip() or None
     if payload.last_name is not None:
         current_user.last_name = payload.last_name.strip() or None
+    if payload.company_name is not None:
+        current_user.company_name = payload.company_name.strip() or None
     if payload.email is not None:
         normalized_email = payload.email.strip().lower()
         if normalized_email:
@@ -382,6 +427,17 @@ def update_my_profile(
         current_user.address = payload.address.strip() or None
     if payload.birth_date is not None:
         current_user.birth_date = payload.birth_date
+
+    if not (current_user.first_name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="First name is required.",
+        )
+    if not (current_user.last_name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Last name is required.",
+        )
 
     db.add(current_user)
     db.commit()
@@ -407,8 +463,124 @@ def change_password(
     current_user.password_hash = hash_password(payload.new_password)
     current_user.must_change_password = False
     db.add(current_user)
+    log_user_activity(
+        db,
+        actor=current_user,
+        action_type="account_password_changed",
+        target_type="user",
+        target_id=current_user.id,
+        details={"change_source": "self_service_change_password"},
+    )
     db.commit()
     return {"message": "Password updated successfully."}
+
+
+def _append_archive_note(existing: str | None, note: str) -> str:
+    normalized_existing = (existing or "").strip()
+    if not normalized_existing:
+        return note
+    if note in normalized_existing:
+        return normalized_existing
+    return f"{normalized_existing}\n{note}"
+
+
+@router.post("/me/unenroll", response_model=UserSelfArchiveResponse)
+def unenroll_my_account(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserSelfArchiveResponse:
+    if current_user.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only student accounts can be unenrolled from this screen.",
+        )
+    if current_user.archived_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account is already archived.",
+        )
+
+    now = utc_now()
+    timestamp_token = now.strftime("%Y%m%d%H%M%S")
+    archive_note = f"Student account archived by self-service unenroll on {now.isoformat()}."
+
+    linked_enrollments = (
+        db.query(Enrollment)
+        .filter(Enrollment.user_id == current_user.id)
+        .order_by(Enrollment.id.desc())
+        .all()
+    )
+    primary_enrollment = linked_enrollments[0] if linked_enrollments else None
+
+    existing_archive = (
+        db.query(ArchivedStudentAccount)
+        .filter(ArchivedStudentAccount.original_user_id == current_user.id)
+        .first()
+    )
+    if existing_archive:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account has already been moved to the archive.",
+        )
+
+    db.add(
+        ArchivedStudentAccount(
+            original_user_id=current_user.id,
+            original_username=current_user.username,
+            original_email=current_user.email,
+            first_name=current_user.first_name,
+            middle_name=current_user.middle_name,
+            last_name=current_user.last_name,
+            company_name=current_user.company_name,
+            phone_number=current_user.phone_number,
+            address=current_user.address,
+            birth_date=current_user.birth_date,
+            profile_image_path=current_user.profile_image_path,
+            role=current_user.role,
+            enrollment_id=primary_enrollment.id if primary_enrollment else None,
+            registration_id=primary_enrollment.registration_id if primary_enrollment else None,
+            batch_id=primary_enrollment.batch_id if primary_enrollment else None,
+            archive_reason="student_unenrolled",
+            archived_at=now,
+        )
+    )
+
+    for enrollment in linked_enrollments:
+        enrollment.status = "archived"
+        enrollment.user_id = None
+        enrollment.review_notes = _append_archive_note(enrollment.review_notes, archive_note)
+        db.add(enrollment)
+
+        registration = enrollment.registration
+        if registration is not None:
+            registration.status = "archived"
+            registration.linked_user_id = None
+            registration.notes = _append_archive_note(registration.notes, archive_note)
+            db.add(registration)
+
+    current_user.archived_at = now
+    current_user.username = f"archived-student-{current_user.id}-{timestamp_token}"
+    current_user.email = f"archived-student-{current_user.id}-{timestamp_token}@archive.local"
+    current_user.phone_number = None
+    current_user.company_name = None
+    current_user.address = None
+    current_user.birth_date = None
+    current_user.profile_image_path = None
+    current_user.password_hash = hash_password(f"Archived{uuid4().hex}!")
+    current_user.must_change_password = False
+    db.add(current_user)
+
+    db.query(UserSession).filter(UserSession.user_id == current_user.id).delete(
+        synchronize_session=False
+    )
+    db.query(PasswordResetOtp).filter(PasswordResetOtp.user_id == current_user.id).delete(
+        synchronize_session=False
+    )
+
+    db.commit()
+    return UserSelfArchiveResponse(
+        message="Your student account has been unenrolled and moved to the archive."
+    )
 
 
 @router.post("/me/profile-photo", response_model=UserOut)
