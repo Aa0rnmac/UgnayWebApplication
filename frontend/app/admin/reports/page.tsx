@@ -21,6 +21,9 @@ function resolveActorCompany(event: SystemActivityEvent): string {
 }
 
 function formatActionType(value: string): string {
+  if (value === "teacher_module_deleted") {
+    return "deleted module";
+  }
   if (value === "global_certificate_template_updated") {
     return "certificate template updated";
   }

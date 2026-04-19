@@ -130,6 +130,12 @@ html {
   }
 }
 
+@media (min-width: 992px) {
+  .lms-lab-screen-fit .lms-sign-video.lms-sign-video-screen-fit.lms-sign-video-student {
+    height: clamp(300px, calc(100vh - 345px), 560px);
+  }
+}
+
 .lms-guide-box {
   height: 56%;
   width: 56%;

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -74,6 +74,279 @@ def _parse_bool_flag(value: Any) -> bool | None:
 def _format_certificate_date(value: datetime | None) -> str:
     resolved = value or utc_now()
     return f"{resolved.strftime('%B')} {resolved.day}, {resolved.year}"
+
+
+def _build_certificate_html(
+    *,
+    display_name: str,
+    completion_date: str,
+    signatory_name: str,
+    template_background: str | None,
+    preview_watermark: bool,
+) -> str:
+    safe_display_name = escape(display_name)
+    safe_completion_date = escape(completion_date)
+    safe_signatory_name = escape(signatory_name)
+    watermark_style = ""
+    watermark_markup = ""
+    if preview_watermark:
+        watermark_style = """
+      .preview-watermark-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 5;
+      }
+      .preview-watermark-text {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%) rotate(-24deg);
+        white-space: nowrap;
+        font-size: clamp(42px, 7.8vw, 108px);
+        font-weight: 900;
+        letter-spacing: 0.18em;
+        color: rgba(46, 68, 168, 0.2);
+        text-transform: uppercase;
+      }
+      .preview-watermark-text.top {
+        top: 18%;
+      }
+      .preview-watermark-text.center {
+        top: 45%;
+      }
+      .preview-watermark-text.bottom {
+        top: 72%;
+      }
+"""
+        watermark_markup = """
+      <div class="preview-watermark-layer" aria-hidden="true">
+        <div class="preview-watermark-text top">UGNAY PREVIEW</div>
+        <div class="preview-watermark-text center">UGNAY PREVIEW</div>
+        <div class="preview-watermark-text bottom">UGNAY PREVIEW</div>
+      </div>
+"""
+
+    if template_background:
+        return f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FSL Basic Course Certificate</title>
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        padding: 24px;
+        background: #e9e9e9;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+      }}
+      .certificate {{
+        position: relative;
+        width: 1123px;
+        max-width: 100%;
+        aspect-ratio: 1123 / 794;
+        margin: 0 auto;
+        overflow: hidden;
+        background: #f5f5f5 url("{template_background}") center / 100% 100% no-repeat;
+      }}
+      .line {{
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 82%;
+        text-align: center;
+        color: #355389;
+      }}
+      .line-award {{
+        top: 25.8%;
+        font-size: clamp(26px, 2.5vw, 46px);
+        font-weight: 300;
+      }}
+      .name {{
+        position: absolute;
+        left: 50%;
+        top: 36.7%;
+        transform: translateX(-50%);
+        width: 72%;
+        text-align: center;
+        font-size: clamp(34px, 5vw, 78px);
+        line-height: 1.08;
+        letter-spacing: 0.02em;
+        font-weight: 800;
+        color: #2f3137;
+        background: rgba(247, 247, 247, 0.93);
+        padding: 5px 14px;
+        border-radius: 8px;
+      }}
+      .line-complete {{
+        top: 51.8%;
+        font-size: clamp(24px, 2.3vw, 40px);
+        font-weight: 300;
+      }}
+      .line-course {{
+        top: 59.6%;
+        font-size: clamp(40px, 4.2vw, 76px);
+        font-weight: 800;
+      }}
+      .line-offered {{
+        top: 70.1%;
+        font-size: clamp(24px, 2.3vw, 40px);
+        font-weight: 300;
+      }}
+      .date {{
+        position: absolute;
+        left: 16.55%;
+        bottom: 8.2%;
+        transform: translateX(-50%);
+        min-width: 240px;
+        text-align: center;
+        font-size: clamp(16px, 2vw, 32px);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: #355389;
+        background: rgba(247, 247, 247, 0.9);
+        padding: 2px 10px;
+        border-radius: 6px;
+      }}
+      .signature-block {{
+        position: absolute;
+        right: 11.7%;
+        bottom: 7.9%;
+        width: 280px;
+        text-align: center;
+      }}
+      .signature-name {{
+        font-size: clamp(15px, 1.8vw, 28px);
+        font-weight: 800;
+        color: #2f3137;
+        line-height: 1.15;
+      }}
+      .signature-title {{
+        font-size: clamp(12px, 1.2vw, 20px);
+        color: #4b5563;
+        margin-top: 2px;
+      }}
+      .signature-org {{
+        font-size: clamp(12px, 1.1vw, 18px);
+        color: #4b5563;
+        margin-top: 1px;
+      }}
+{watermark_style}
+    </style>
+  </head>
+  <body>
+    <div class="certificate">
+      <div class="line line-award">This certificate is awarded to</div>
+      <div class="name">{safe_display_name}</div>
+      <div class="line line-complete">for successfully completing</div>
+      <div class="line line-course">FSL Basic Course</div>
+      <div class="line line-offered">offered by Hand and Heart</div>
+      <div class="date">{safe_completion_date}</div>
+      <div class="signature-block">
+        <div class="signature-name">{safe_signatory_name}</div>
+        <div class="signature-title">Founder / General Manager</div>
+        <div class="signature-org">Hand and Heart</div>
+      </div>
+{watermark_markup}
+    </div>
+  </body>
+</html>
+""".strip()
+
+    return f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FSL Basic Course Certificate</title>
+    <style>
+      body {{
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        padding: 40px;
+        background: #f5f4f1;
+        color: #1c1c2e;
+      }}
+      .card {{
+        position: relative;
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 64px 56px;
+        border: 8px solid #2e44a8;
+        background: white;
+        overflow: hidden;
+      }}
+      .line {{
+        text-align: center;
+        color: #355389;
+      }}
+      .line-award {{
+        font-size: 44px;
+        margin: 24px 0 10px;
+        font-weight: 300;
+      }}
+      .line-name {{
+        font-size: 64px;
+        font-weight: 800;
+        color: #2f3137;
+        margin: 0 0 16px;
+      }}
+      .line-complete {{
+        font-size: 34px;
+        margin: 12px 0 6px;
+        font-weight: 300;
+      }}
+      .line-course {{
+        font-size: 72px;
+        margin: 0;
+        font-weight: 800;
+      }}
+      .line-offered {{
+        font-size: 34px;
+        margin: 6px 0 26px;
+        font-weight: 300;
+      }}
+      .date {{
+        text-align: left;
+        color: #355389;
+        margin-top: 18px;
+        font-weight: 700;
+      }}
+      .signature {{
+        margin-top: 10px;
+        text-align: right;
+        color: #2f3137;
+      }}
+      .signature .name {{
+        font-size: 26px;
+        font-weight: 800;
+      }}
+      .signature .title,
+      .signature .org {{
+        font-size: 16px;
+        color: #4b5563;
+      }}
+{watermark_style}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <p class="line line-award">This certificate awarded to</p>
+      <p class="line line-name">{safe_display_name}</p>
+      <p class="line line-complete">for successfully completing</p>
+      <p class="line line-course">FSL Basic Course</p>
+      <p class="line line-offered">offered by Hand and Heart</p>
+      <p class="date">{safe_completion_date}</p>
+      <div class="signature">
+        <div class="name">{safe_signatory_name}</div>
+        <div class="title">Founder / General Manager</div>
+        <div class="org">Hand and Heart</div>
+      </div>
+{watermark_markup}
+    </div>
+  </body>
+</html>
+""".strip()
 
 
 def _resource_kind_for_file(
@@ -572,7 +845,7 @@ def get_student_certificate_status(
     return CertificateStudentDownloadOut(
         eligible=True,
         section_name=assignment.section.name,
-        message="Certificate is ready to download.",
+        message="Certificate is ready to download. You have 1 month to download it.",
         completion_date=_format_certificate_date(completion_date),
     )
 
@@ -598,7 +871,7 @@ def download_student_certificate(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Finish the first 12 published modules before downloading your certificate.",
         )
-    assignment.auto_archive_due_at = utc_now() + timedelta(hours=24)
+    assignment.auto_archive_due_at = None
     db.add(assignment)
     _safe_log_user_activity(
         db,
@@ -615,204 +888,63 @@ def download_student_certificate(
         part for part in [current_student.first_name, current_student.last_name] if part
     ).strip() or current_student.username
     completion_date = _format_certificate_date(assignment.course_completed_at)
-    safe_display_name = escape(display_name)
-    safe_completion_date = escape(completion_date)
     template_config = get_admin_certificate_template() or {}
     template_background = build_template_data_uri(
         str(template_config.get("template_file_path")).strip()
         if template_config.get("template_file_path")
         else None
     )
-    signatory_name = (
-        str(template_config.get("signatory_name")).strip()
-        if template_config.get("signatory_name")
-        else "Admin Name"
+    signatory_name = "Genevieve Diokno"
+    html = _build_certificate_html(
+        display_name=display_name,
+        completion_date=completion_date,
+        signatory_name=signatory_name,
+        template_background=template_background,
+        preview_watermark=False,
     )
-    safe_signatory_name = escape(signatory_name)
-    if template_background:
-        html = f"""
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>FSL Basic Course Certificate</title>
-    <style>
-      * {{ box-sizing: border-box; }}
-      body {{
-        margin: 0;
-        padding: 24px;
-        background: #e9e9e9;
-        font-family: "Segoe UI", Tahoma, sans-serif;
-      }}
-      .certificate {{
-        position: relative;
-        width: 1123px;
-        max-width: 100%;
-        aspect-ratio: 1123 / 794;
-        margin: 0 auto;
-        overflow: hidden;
-        background: #f5f5f5 url("{template_background}") center / 100% 100% no-repeat;
-      }}
-      .name {{
-        position: absolute;
-        left: 50%;
-        top: 36.7%;
-        transform: translateX(-50%);
-        width: 72%;
-        text-align: center;
-        font-size: clamp(34px, 5vw, 78px);
-        line-height: 1.08;
-        letter-spacing: 0.02em;
-        font-weight: 800;
-        color: #2f3137;
-        background: rgba(247, 247, 247, 0.93);
-        padding: 5px 14px;
-        border-radius: 8px;
-      }}
-      .date {{
-        position: absolute;
-        left: 16.55%;
-        bottom: 8.2%;
-        transform: translateX(-50%);
-        min-width: 240px;
-        text-align: center;
-        font-size: clamp(16px, 2vw, 32px);
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        color: #355389;
-        background: rgba(247, 247, 247, 0.9);
-        padding: 2px 10px;
-        border-radius: 6px;
-      }}
-      .signature-block {{
-        position: absolute;
-        right: 11.7%;
-        bottom: 7.9%;
-        width: 280px;
-        text-align: center;
-      }}
-      .signature-name {{
-        font-size: clamp(15px, 1.8vw, 28px);
-        font-weight: 800;
-        color: #2f3137;
-        line-height: 1.15;
-      }}
-      .signature-title {{
-        font-size: clamp(12px, 1.2vw, 20px);
-        color: #4b5563;
-        margin-top: 2px;
-      }}
-      .signature-org {{
-        font-size: clamp(12px, 1.1vw, 18px);
-        color: #4b5563;
-        margin-top: 1px;
-      }}
-    </style>
-  </head>
-  <body>
-    <div class="certificate">
-      <div class="name">{safe_display_name}</div>
-      <div class="date">{safe_completion_date}</div>
-      <div class="signature-block">
-        <div class="signature-name">{safe_signatory_name}</div>
-        <div class="signature-title">Head Instructor</div>
-        <div class="signature-org">Hand and Heart</div>
-      </div>
-    </div>
-  </body>
-</html>
-""".strip()
-    else:
-        html = f"""
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>FSL Basic Course Certificate</title>
-    <style>
-      body {{
-        font-family: "Segoe UI", Tahoma, sans-serif;
-        padding: 40px;
-        background: #f5f4f1;
-        color: #1c1c2e;
-      }}
-      .card {{
-        max-width: 960px;
-        margin: 0 auto;
-        padding: 64px 56px;
-        border: 8px solid #2e44a8;
-        background: white;
-      }}
-      .line {{
-        text-align: center;
-        color: #355389;
-      }}
-      .line-award {{
-        font-size: 44px;
-        margin: 24px 0 10px;
-        font-weight: 300;
-      }}
-      .line-name {{
-        font-size: 64px;
-        font-weight: 800;
-        color: #2f3137;
-        margin: 0 0 16px;
-      }}
-      .line-complete {{
-        font-size: 34px;
-        margin: 12px 0 6px;
-        font-weight: 300;
-      }}
-      .line-course {{
-        font-size: 72px;
-        margin: 0;
-        font-weight: 800;
-      }}
-      .line-offered {{
-        font-size: 34px;
-        margin: 6px 0 26px;
-        font-weight: 300;
-      }}
-      .date {{
-        text-align: left;
-        color: #355389;
-        margin-top: 18px;
-        font-weight: 700;
-      }}
-      .signature {{
-        margin-top: 10px;
-        text-align: right;
-        color: #2f3137;
-      }}
-      .signature .name {{
-        font-size: 26px;
-        font-weight: 800;
-      }}
-      .signature .title,
-      .signature .org {{
-        font-size: 16px;
-        color: #4b5563;
-      }}
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <p class="line line-award">This certificate awarded to</p>
-      <p class="line line-name">{safe_display_name}</p>
-      <p class="line line-complete">for successfully completing</p>
-      <p class="line line-course">FSL Basic Course</p>
-      <p class="line line-offered">offered by Hand and Heart</p>
-      <p class="date">{safe_completion_date}</p>
-      <div class="signature">
-        <div class="name">{safe_signatory_name}</div>
-        <div class="title">Head Instructor</div>
-        <div class="org">Hand and Heart</div>
-      </div>
-    </div>
-  </body>
-</html>
-""".strip()
     headers = {
         "Content-Disposition": f'attachment; filename="ugnay-certificate-{current_student.id}.html"'
     }
     return Response(content=html, media_type="text/html", headers=headers)
+
+
+@router.get("/certificate/preview")
+def preview_student_certificate(
+    db: Session = Depends(get_db),
+    current_student: User = Depends(get_current_student),
+) -> Response:
+    assignment = (
+        db.query(SectionStudentAssignment)
+        .options(joinedload(SectionStudentAssignment.section))
+        .filter(SectionStudentAssignment.student_id == current_student.id)
+        .first()
+    )
+    if not assignment or not assignment.section:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found.")
+
+    refresh_student_completion_schedule(db, student_id=current_student.id)
+    db.commit()
+
+    display_name = " ".join(
+        part for part in [current_student.first_name, current_student.last_name] if part
+    ).strip() or current_student.username
+    completion_date = _format_certificate_date(assignment.course_completed_at)
+    template_config = get_admin_certificate_template() or {}
+    template_background = build_template_data_uri(
+        str(template_config.get("template_file_path")).strip()
+        if template_config.get("template_file_path")
+        else None
+    )
+    signatory_name = "Genevieve Diokno"
+    html = _build_certificate_html(
+        display_name=display_name,
+        completion_date=completion_date,
+        signatory_name=signatory_name,
+        template_background=template_background,
+        preview_watermark=True,
+    )
+    return Response(
+        content=html,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )

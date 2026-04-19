@@ -7,6 +7,7 @@ import {
   downloadStudentCertificate,
   getStudentCertificateDownloadStatus,
   getStudentCourse,
+  previewStudentCertificate,
   type StudentCertificateDownloadStatus,
   type StudentCourse
 } from "@/lib/api";
@@ -15,6 +16,7 @@ import { notifySuccess } from "@/lib/notify";
 export default function StudentModulesPage() {
   const [course, setCourse] = useState<StudentCourse | null>(null);
   const [certificateStatus, setCertificateStatus] = useState<StudentCertificateDownloadStatus | null>(null);
+  const [isPreviewingCertificate, setIsPreviewingCertificate] = useState(false);
   const [isDownloadingCertificate, setIsDownloadingCertificate] = useState(false);
   const [certificateRecipientName, setCertificateRecipientName] = useState("Account Holder");
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +69,7 @@ export default function StudentModulesPage() {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-      setMessage("Certificate downloaded. Your account will be archived in 24 hours.");
+      setMessage("Certificate downloaded successfully.");
       setShowArchiveNotice(true);
       const latestStatus = await getStudentCertificateDownloadStatus();
       setCertificateStatus(latestStatus);
@@ -75,6 +77,30 @@ export default function StudentModulesPage() {
       setError(requestError instanceof Error ? requestError.message : "Unable to download certificate.");
     } finally {
       setIsDownloadingCertificate(false);
+    }
+  }
+
+  async function onPreviewCertificate() {
+    if (isPreviewingCertificate) {
+      return;
+    }
+    try {
+      setIsPreviewingCertificate(true);
+      setError(null);
+      const blob = await previewStudentCertificate();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to preview certificate.");
+    } finally {
+      setIsPreviewingCertificate(false);
     }
   }
 
@@ -123,6 +149,9 @@ export default function StudentModulesPage() {
               <p className="mt-2 text-sm text-slate-700">
                 Your certificate is unlocked after the first 12 published modules are completed.
               </p>
+              <p className="mt-2 rounded-xl border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed">
+                Reminder: download your e-certificate within 1 month after completion.
+              </p>
             </div>
             <span
               className={`rounded-full px-3 py-1 text-xs font-semibold ${
@@ -140,6 +169,9 @@ export default function StudentModulesPage() {
             <p className="mb-1 text-base font-semibold text-slate-900">FSL Basic Course</p>
             <p className="mb-0 text-sm text-slate-700">offered by Hand and Heart</p>
           </div>
+          <p className="mt-3 mb-0 rounded-xl border border-brandBlue/30 bg-brandBlueLight px-3 py-2 text-xs font-semibold text-brandBlue">
+            Preview includes an UGNAY watermark. The final downloaded certificate has no watermark.
+          </p>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <p className="mb-0 text-sm text-slate-600">
@@ -147,14 +179,24 @@ export default function StudentModulesPage() {
                 ? `Completion Date: ${certificateStatus.completion_date}`
                 : certificateStatus?.message || "Finish the first 12 published modules to unlock your certificate."}
             </p>
-            <button
-              className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!certificateStatus?.eligible || isDownloadingCertificate}
-              onClick={() => void onDownloadCertificate()}
-              type="button"
-            >
-              {isDownloadingCertificate ? "Downloading..." : "Download E-Certificate"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-lg border border-brandBlue bg-white px-4 py-2 text-sm font-semibold text-brandBlue disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isPreviewingCertificate}
+                onClick={() => void onPreviewCertificate()}
+                type="button"
+              >
+                {isPreviewingCertificate ? "Opening Preview..." : "Preview E-Certificate"}
+              </button>
+              <button
+                className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!certificateStatus?.eligible || isDownloadingCertificate}
+                onClick={() => void onDownloadCertificate()}
+                type="button"
+              >
+                {isDownloadingCertificate ? "Downloading..." : "Download E-Certificate"}
+              </button>
+            </div>
           </div>
         </article>
       </div>
@@ -163,7 +205,7 @@ export default function StudentModulesPage() {
           <div className="w-full max-w-md rounded-2xl border border-brandBorder bg-white p-5 shadow-2xl">
             <h4 className="mb-2 text-lg font-bold text-slate-900">Notice</h4>
             <p className="mb-4 text-sm text-slate-700">
-              Your certificate was downloaded. This student account will be archived in 24 hours.
+              Your certificate was downloaded. Please keep a copy. You have 1 month after completion to download your e-certificate.
             </p>
             <div className="flex justify-end">
               <button

@@ -86,6 +86,47 @@ def send_teacher_initial_credentials_email(
         raise RuntimeError("Failed to send teacher credentials email. Check SMTP settings.") from exc
 
 
+def send_admin_initial_credentials_email(
+    to_email: str, username: str, temporary_password: str
+) -> None:
+    if not settings.smtp_host or not settings.smtp_from_email:
+        raise RuntimeError(
+            "SMTP is not configured. Set SMTP_HOST and SMTP_FROM_EMAIL in backend/.env."
+        )
+
+    message = EmailMessage()
+    message["Subject"] = "UGNAY Learning Hub - Admin Initial Credentials"
+    message["From"] = settings.smtp_from_email
+    message["To"] = to_email
+    message.set_content(
+        (
+            "Hello Admin,\n\n"
+            "Your admin account has been created for UGNAY Learning Hub.\n\n"
+            f"Username: {username}\n"
+            f"Temporary Password: {temporary_password}\n\n"
+            "Please log in and change your password immediately.\n\n"
+            "Hand and Heart\n"
+        )
+    )
+
+    try:
+        if settings.smtp_use_ssl:
+            with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=30) as client:
+                if settings.smtp_username:
+                    client.login(settings.smtp_username, settings.smtp_password)
+                client.send_message(message)
+            return
+
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as client:
+            if settings.smtp_use_tls:
+                client.starttls()
+            if settings.smtp_username:
+                client.login(settings.smtp_username, settings.smtp_password)
+            client.send_message(message)
+    except Exception as exc:  # pragma: no cover - depends on SMTP environment
+        raise RuntimeError("Failed to send admin credentials email. Check SMTP settings.") from exc
+
+
 def send_student_initial_credentials_email(
     *,
     to_email: str,

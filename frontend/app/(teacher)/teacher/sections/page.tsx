@@ -7,6 +7,7 @@ import { useAuth } from "@/components/auth-context";
 import {
   createTeacherModuleItem,
   createTeacherSectionModule,
+  deleteTeacherModule,
   deleteTeacherModuleItem,
   getTeacherModuleUploadAssessments,
   getTeacherSection,
@@ -29,10 +30,10 @@ import {
   type TeacherSectionSummary,
   type WordsCategory
 } from "@/lib/api";
-import { notifySuccess } from "@/lib/notify";
+import { notifyInfo, notifySuccess } from "@/lib/notify";
 
 const ITEM_TYPE_OPTIONS = [
-  { value: "readable", label: "Resources" },
+  { value: "readable", label: "Learning Materials" },
   { value: "multiple_choice_assessment", label: "Multiple Choice" },
   { value: "identification_assessment", label: "Identification" },
   { value: "signing_lab_assessment", label: "Camera Interface" },
@@ -115,7 +116,7 @@ function displayType(value: string): string {
 
 function displayItemTypeLabel(value: string): string {
   if (value === "readable") {
-    return "Resources";
+    return "Learning Materials";
   }
   return displayType(value);
 }
@@ -724,6 +725,7 @@ export default function TeacherSectionsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [isSavingItem, setIsSavingItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [deletingModuleId, setDeletingModuleId] = useState<number | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
   const [previewItemId, setPreviewItemId] = useState<number | null>(null);
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
@@ -766,6 +768,7 @@ export default function TeacherSectionsPage() {
   ]);
   const [uploadMaxPoints, setUploadMaxPoints] = useState(100);
   const [uploadReferenceLink, setUploadReferenceLink] = useState("");
+  const [uploadSupportFiles, setUploadSupportFiles] = useState<File[]>([]);
   const [activeSubmissionModuleId, setActiveSubmissionModuleId] = useState<number | null>(null);
   const [activeSubmissionItemId, setActiveSubmissionItemId] = useState<number | null>(null);
   const [submissionAssessments, setSubmissionAssessments] = useState<TeacherUploadAssessmentSummary[]>([]);
@@ -794,6 +797,16 @@ export default function TeacherSectionsPage() {
         : null,
     [activeSubmissionModuleId, modules]
   );
+  const activeSubmissionBatchName = useMemo(() => {
+    if (!activeSubmissionModule) {
+      return selectedSection?.name ?? null;
+    }
+    return (
+      sections.find((entry) => entry.section.id === activeSubmissionModule.section_id)?.section.name ??
+      selectedSection?.name ??
+      null
+    );
+  }, [activeSubmissionModule, sections, selectedSection]);
   const activeSubmissionAssessment = useMemo(
     () =>
       activeSubmissionItemId !== null
@@ -1030,6 +1043,7 @@ export default function TeacherSectionsPage() {
     setUploadRubrics([createUploadRubricDraft({ id: "rubric-1", weightPercent: 25 })]);
     setUploadMaxPoints(100);
     setUploadReferenceLink("");
+    setUploadSupportFiles([]);
     setEditingItemId(null);
   }
 
@@ -1050,6 +1064,7 @@ export default function TeacherSectionsPage() {
     setReadablePresentationMode("auto");
     setReadableResourceLink("");
     setUploadReferenceLink("");
+    setUploadSupportFiles([]);
 
     if (item.item_type === "readable") {
       setReadablePresentationMode(parseReadablePresentationMode(item.config.presentation_mode));
@@ -1464,7 +1479,7 @@ export default function TeacherSectionsPage() {
           </p>
           {resourceLink ? (
             <div className="rounded-3 border border-brandBorder bg-white px-3 py-3">
-              <p className="small fw-semibold mb-1">Resource Link</p>
+              <p className="small fw-semibold mb-1">Learning Material Link</p>
               <a
                 className="small fw-semibold text-primary text-break"
                 href={resourceLink}
@@ -1732,8 +1747,8 @@ export default function TeacherSectionsPage() {
                 <div className="rounded-3 border border-brandBorder bg-white px-3 py-3">
                   <p className="mb-2 fw-semibold text-sm">Entry 1 Preview</p>
                   <p className="mb-1 text-sm text-slate-700">
-                    Prompt:{" "}
-                    <span className="fw-semibold">{config.entries[0].question || "No prompt yet."}</span>
+                    Instruction:{" "}
+                    <span className="fw-semibold">{config.entries[0].question || "No instruction yet."}</span>
                   </p>
                   <p className="mb-0 text-sm text-slate-700">
                     Expected answer:{" "}
@@ -1939,7 +1954,7 @@ export default function TeacherSectionsPage() {
           const prompt = entry.prompt.trim();
           const expectedAnswer = entry.expectedAnswer.trim();
           if (!prompt) {
-            throw new Error(`Camera interface entry ${index + 1} needs a prompt.`);
+            throw new Error(`Camera interface entry ${index + 1} needs an instruction.`);
           }
           if (!expectedAnswer) {
             throw new Error(`Camera interface entry ${index + 1} needs an expected answer.`);
@@ -1986,6 +2001,10 @@ export default function TeacherSectionsPage() {
           return;
         }
         const resolvedMaxPoints = Math.min(Math.max(uploadMaxPoints || 100, 1), 100);
+        const existingAttachments =
+          isEditingItem && editingItem
+            ? (editingItem.config.attachments as unknown[] | undefined) ?? []
+            : [];
         config = {
           rubric_items: normalizedRubrics,
           rubric_text: normalizedRubrics
@@ -2004,12 +2023,13 @@ export default function TeacherSectionsPage() {
             ".docx",
             ".txt",
           ],
+          attachments: existingAttachments,
         };
       } else {
         const existingAttachmentCount =
           editingItem && itemType === "readable" ? getItemAttachments(editingItem).length : 0;
         if (!itemContent.trim() && readableFiles.length === 0 && existingAttachmentCount === 0) {
-          setError("Add resource text or upload at least one file.");
+          setError("Add learning material text or upload at least one file.");
           return;
         }
         config = {
@@ -2081,6 +2101,15 @@ export default function TeacherSectionsPage() {
           });
         }
       }
+      if (itemType === "upload_assessment" && uploadSupportFiles.length > 0) {
+        for (const file of uploadSupportFiles) {
+          updatedModule = await uploadTeacherModuleItemAsset(targetItemId, {
+            file,
+            usage: "attachment",
+            label: defaultReadableLabel(file.name),
+          });
+        }
+      }
 
       if (selectedSectionId) {
         await refreshSection(selectedSectionId, String(updatedModule.id));
@@ -2123,6 +2152,49 @@ export default function TeacherSectionsPage() {
       setError(requestError instanceof Error ? requestError.message : "Unable to delete module item.");
     } finally {
       setDeletingItemId(null);
+    }
+  }
+
+  async function onDeleteModule(module: TeacherSectionModule) {
+    if (!canManageModule(module)) {
+      setError("View only. Only the teacher who created this module can delete it.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete "${module.title}" and all of its items/submissions? This cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    setDeletingModuleId(module.id);
+    try {
+      await deleteTeacherModule(module.id);
+      const nextSelectedModuleId = selectedModuleId === String(module.id) ? null : selectedModuleId || null;
+      if (selectedModuleId === String(module.id)) {
+        setSelectedModuleId("");
+        clearItemBuilder();
+        closePreview();
+      }
+      if (activeSubmissionModuleId === module.id) {
+        closeSubmissionsView();
+      }
+      if (selectedSectionId) {
+        await refreshSection(selectedSectionId, nextSelectedModuleId);
+      } else {
+        setModules((current) => current.filter((entry) => entry.id !== module.id));
+      }
+      if (selectedModuleId === String(module.id)) {
+        window.setTimeout(() => {
+          modulesPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 40);
+      }
+      setMessage("Module deleted.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to delete module.");
+    } finally {
+      setDeletingModuleId(null);
     }
   }
 
@@ -2396,7 +2468,7 @@ export default function TeacherSectionsPage() {
       ) : null}
 
       <div className="panel">
-        <label className="form-label fw-semibold">Choose Section</label>
+        <label className="form-label fw-semibold">Choose Batch</label>
         <select
           className="form-select"
           onChange={(event) => {
@@ -2407,7 +2479,7 @@ export default function TeacherSectionsPage() {
           }}
           value={selectedSectionId}
         >
-          <option value="">Choose a section</option>
+          <option value="">Choose a batch</option>
           {sections.map((entry) => (
             <option key={entry.section.id} value={entry.section.id}>
               {entry.section.name}
@@ -2472,6 +2544,16 @@ export default function TeacherSectionsPage() {
                         >
                           {canManageModule(module) ? "Edit Items" : "View Items"}
                         </button>
+                        {canManageModule(module) ? (
+                          <button
+                            className="btn btn-sm btn-outline-danger fw-semibold"
+                            disabled={deletingModuleId === module.id}
+                            onClick={() => void onDeleteModule(module)}
+                            type="button"
+                          >
+                            {deletingModuleId === module.id ? "Deleting..." : "Delete Module"}
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -2553,7 +2635,7 @@ export default function TeacherSectionsPage() {
                     {itemType === "readable" ? (
                       <>
                         <div>
-                          <label className="form-label fw-semibold">Introduction / Resource Content</label>
+                          <label className="form-label fw-semibold">Introduction / Learning Material Content</label>
                           <textarea
                             className="form-control"
                             onChange={(event) => setItemContent(event.target.value)}
@@ -2562,7 +2644,7 @@ export default function TeacherSectionsPage() {
                           />
                         </div>
                         <div>
-                          <label className="form-label fw-semibold">Resource Link (Optional)</label>
+                          <label className="form-label fw-semibold">Learning Material Link (Optional)</label>
                           <input
                             className="form-control"
                             onChange={(event) => setReadableResourceLink(event.target.value)}
@@ -2575,7 +2657,7 @@ export default function TeacherSectionsPage() {
                           </div>
                         </div>
                         <div>
-                          <label className="form-label fw-semibold">Resource Display Format</label>
+                          <label className="form-label fw-semibold">Learning Material Display Format</label>
                           <select
                             className="form-select"
                             onChange={(event) =>
@@ -3005,7 +3087,7 @@ export default function TeacherSectionsPage() {
                                     </div>
                                   </div>
                                   <div>
-                                    <label className="form-label fw-semibold mb-1">Prompt</label>
+                                    <label className="form-label fw-semibold mb-1">Instruction</label>
                                     <input
                                       className="form-control"
                                       onChange={(event) =>
@@ -3055,6 +3137,11 @@ export default function TeacherSectionsPage() {
                                 onChange={(event) => {
                                   const parsed = Number.parseInt(event.target.value, 10);
                                   if (Number.isFinite(parsed)) {
+                                    if (signingLabEntries.length <= 1 && parsed > 1) {
+                                      notifyInfo("Add entry first.");
+                                      setSigningLabRequiredCount(1);
+                                      return;
+                                    }
                                     setSigningLabRequiredCount(
                                       Math.max(1, Math.min(parsed, Math.max(1, signingLabEntries.length)))
                                     );
@@ -3095,7 +3182,39 @@ export default function TeacherSectionsPage() {
                           />
                           <div className="form-text">
                             Students will see this as guidance before uploading their files.
+                            </div>
                           </div>
+                        <div className="mb-3">
+                          <label className="form-label fw-semibold mb-1">
+                            Additional Learning Materials (Optional)
+                          </label>
+                          <input
+                            accept={READABLE_ACCEPT}
+                            className="form-control"
+                            multiple
+                            onChange={(event) =>
+                              setUploadSupportFiles(
+                                Array.from(event.target.files ?? [])
+                              )
+                            }
+                            type="file"
+                          />
+                          <div className="form-text">
+                            Upload optional guides for students (video, image, PDF, PPT, DOC, and related files).
+                          </div>
+                          {isEditingItem && editingItem ? (
+                            <div className="form-text">
+                              Existing uploaded materials:{" "}
+                              <span className="fw-semibold">{getItemAttachments(editingItem).length}</span>
+                            </div>
+                          ) : null}
+                          {uploadSupportFiles.length > 0 ? (
+                            <ul className="mt-2 mb-0 small text-slate-700">
+                              {uploadSupportFiles.map((file) => (
+                                <li key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}</li>
+                              ))}
+                            </ul>
+                          ) : null}
                         </div>
                         <div className="vstack gap-3 mb-3">
                           {uploadRubrics.map((rubric, rubricIndex) => (
@@ -3490,9 +3609,14 @@ export default function TeacherSectionsPage() {
           <div className="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">
-                  Upload Submissions - {activeSubmissionModule.title}
-                </h5>
+                <div>
+                  <h5 className="modal-title">
+                    Upload Submissions - {activeSubmissionModule.title}
+                  </h5>
+                  <p className="mb-0 small text-slate-700">
+                    Batch: {activeSubmissionBatchName ?? "N/A"}
+                  </p>
+                </div>
                 <button aria-label="Close" className="btn-close" onClick={closeSubmissionsView} type="button" />
               </div>
               <div className="modal-body">

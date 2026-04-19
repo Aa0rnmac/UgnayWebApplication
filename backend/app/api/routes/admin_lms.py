@@ -41,6 +41,7 @@ from app.services.admin_certificate_template_service import (
     upsert_admin_certificate_template,
 )
 from app.services.email_sender import (
+    send_admin_initial_credentials_email,
     send_student_initial_credentials_email,
     send_teacher_initial_credentials_email,
 )
@@ -49,6 +50,7 @@ from app.services.lms_service import (
     assign_student_to_section,
     build_unique_username,
     count_users_by_role,
+    section_completion_ready,
     section_out,
     user_summary,
     generate_temporary_password,
@@ -62,6 +64,9 @@ CERTIFICATE_TEMPLATES_DIR = (
     Path(__file__).resolve().parents[3] / "uploads" / "certificate-templates"
 ).resolve()
 CERTIFICATE_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+FIXED_SIGNATORY_NAME = "Genevieve Diokno"
+FIXED_SIGNATORY_TITLE = "Founder / General Manager"
+FIXED_ORGANIZATION_NAME = "Hand and Heart"
 
 
 def _log_admin_action(
@@ -86,7 +91,13 @@ def _log_admin_action(
 
 def _send_initial_credentials(email: str, username: str, temporary_password: str, role: str) -> str:
     try:
-        if role == "teacher":
+        if role == "admin":
+            send_admin_initial_credentials_email(
+                to_email=email,
+                username=username,
+                temporary_password=temporary_password,
+            )
+        elif role == "teacher":
             send_teacher_initial_credentials_email(
                 to_email=email,
                 username=username,
@@ -137,11 +148,46 @@ def _serialize_admin_certificate_template(config: dict | None) -> AdminCertifica
         template_file_name=template_file_name,
         template_file_path=template_file_path,
         template_file_url=template_file_url,
-        signatory_name=signatory_name,
-        signatory_title="Head Instructor",
-        organization_name="Hand and Heart",
+        signatory_name=signatory_name or FIXED_SIGNATORY_NAME,
+        signatory_title=FIXED_SIGNATORY_TITLE,
+        organization_name=FIXED_ORGANIZATION_NAME,
         updated_at=updated_at,
     )
+
+
+def _section_student_ids(section: Section) -> list[int]:
+    return [
+        assignment.student_id
+        for assignment in section.students
+        if assignment.student_id is not None
+    ]
+
+
+def _section_downloaded_certificate_student_ids(
+    db: Session, *, section_id: int
+) -> set[int]:
+    rows = (
+        db.query(AdminAuditLog.admin_user_id)
+        .filter(
+            AdminAuditLog.action_type == "student_certificate_downloaded",
+            AdminAuditLog.target_type == "section",
+            AdminAuditLog.target_id == section_id,
+        )
+        .all()
+    )
+    return {row.admin_user_id for row in rows}
+
+
+def _all_section_students_completed(db: Session, *, section: Section) -> bool:
+    for assignment in section.students:
+        student = assignment.student
+        if student is None:
+            continue
+        if assignment.course_completed_at is not None:
+            continue
+        if not section_completion_ready(db, student.id, section.id):
+            return False
+    return True
 
 
 @router.get("/dashboard", response_model=AdminDashboardOut)
@@ -291,7 +337,7 @@ def bulk_import_accounts(
                 "email": row.email,
                 "role": payload.role,
                 "company_name": row.company_name,
-                "section_id": row.section_id,
+                "section_id": row.section_id if payload.role == "student" else None,
                 "batch_index": ((index - 1) // payload.batch_size) + 1,
             },
         )
@@ -301,7 +347,7 @@ def bulk_import_accounts(
                 username=username,
                 temporary_password=temporary_password,
                 delivery_status=delivery_status,
-                section_id=row.section_id,
+                section_id=row.section_id if payload.role == "student" else None,
             )
         )
         if index % payload.batch_size == 0:
@@ -358,8 +404,14 @@ def deactivate_user(
     user = db.query(User).filter(User.id == user_id, User.archived_at.is_(None)).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    if user.role == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Admin accounts cannot be archived from this action.",
+        )
     user.archived_at = utc_now()
     db.add(user)
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
     _log_admin_action(
         db,
         admin_id=current_admin.id,
@@ -439,14 +491,6 @@ def unarchive_student_account(
         )
     student.archived_at = None
     db.add(student)
-    assignment = (
-        db.query(SectionStudentAssignment)
-        .filter(SectionStudentAssignment.student_id == student.id)
-        .first()
-    )
-    if assignment and assignment.course_completed_at is not None:
-        assignment.auto_archive_due_at = utc_now() + timedelta(days=30)
-        db.add(assignment)
     _log_admin_action(
         db,
         admin_id=current_admin.id,
@@ -604,6 +648,126 @@ def update_section_assignments(
     return section_out(refreshed)
 
 
+@router.post("/sections/{section_id}/archive", response_model=SectionOut)
+def archive_section(
+    section_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> SectionOut:
+    section = (
+        db.query(Section)
+        .options(
+            joinedload(Section.teachers).joinedload(SectionTeacherAssignment.teacher),
+            joinedload(Section.students).joinedload(SectionStudentAssignment.student),
+        )
+        .filter(Section.id == section_id)
+        .first()
+    )
+    if not section:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found.")
+    if section.status != "archived" and not _all_section_students_completed(db, section=section):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="All students in this batch must complete the first 12 published modules before archiving.",
+        )
+
+    now = utc_now()
+    section.status = "archived"
+    archived_student_ids: list[int] = []
+    for assignment in section.students:
+        student = assignment.student
+        if student is None:
+            continue
+        if student.archived_at is None:
+            student.archived_at = now
+            db.add(student)
+            db.query(UserSession).filter(UserSession.user_id == student.id).delete(
+                synchronize_session=False
+            )
+            archived_student_ids.append(student.id)
+    db.add(section)
+    _log_admin_action(
+        db,
+        admin_id=current_admin.id,
+        action_type="section_archived",
+        target_type="section",
+        target_id=section.id,
+        details={
+            "code": section.code,
+            "name": section.name,
+            "archived_student_count": len(archived_student_ids),
+            "archived_student_ids": archived_student_ids,
+        },
+    )
+    db.commit()
+    db.refresh(section)
+    return section_out(section)
+
+
+@router.delete("/sections/{section_id}")
+def delete_section(
+    section_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> dict[str, str | bool]:
+    section = (
+        db.query(Section)
+        .options(joinedload(Section.students).joinedload(SectionStudentAssignment.student))
+        .filter(Section.id == section_id)
+        .first()
+    )
+    if not section:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found.")
+    if section.status != "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Archive this batch first before deleting it.",
+        )
+
+    now = utc_now()
+    student_ids = _section_student_ids(section)
+    downloaded_student_ids = _section_downloaded_certificate_student_ids(
+        db, section_id=section.id
+    )
+    all_students_downloaded = all(
+        student_id in downloaded_student_ids for student_id in student_ids
+    )
+    updated_at = as_utc(section.updated_at) or now
+    deletion_due_at = updated_at + timedelta(days=30)
+    deletion_due_passed = now >= deletion_due_at
+    if student_ids and not all_students_downloaded and not deletion_due_passed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This batch can be deleted only after all assigned students download the e-certificate "
+                f"or after {deletion_due_at.strftime('%B %d, %Y')}."
+            ),
+        )
+
+    section_snapshot = {
+        "code": section.code,
+        "name": section.name,
+        "student_count": len(student_ids),
+        "all_students_downloaded": all_students_downloaded,
+        "deletion_due_passed": deletion_due_passed,
+    }
+    db.delete(section)
+    _log_admin_action(
+        db,
+        admin_id=current_admin.id,
+        action_type="section_deleted",
+        target_type="section",
+        target_id=section_id,
+        details=section_snapshot,
+    )
+    db.commit()
+    return {
+        "message": "Batch deleted.",
+        "all_students_downloaded": all_students_downloaded,
+        "deletion_due_passed": deletion_due_passed,
+    }
+
+
 @router.get("/certificate-template", response_model=AdminCertificateTemplateOut)
 def get_certificate_template(
     db: Session = Depends(get_db),
@@ -621,6 +785,7 @@ def upsert_certificate_template(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> AdminCertificateTemplateOut:
+    _ = signatory_name
     resolved_path: str | None = None
     resolved_name: str | None = None
     if certificate_file is not None:
@@ -639,7 +804,7 @@ def upsert_certificate_template(
     saved = upsert_admin_certificate_template(
         template_file_name=resolved_name,
         template_file_path=resolved_path,
-        signatory_name=(signatory_name.strip() if signatory_name is not None else None),
+        signatory_name=FIXED_SIGNATORY_NAME,
     )
     _log_admin_action(
         db,
@@ -670,11 +835,7 @@ def preview_certificate_template(
     )
     preview_name = escape("[name]")
     preview_date = escape("DATE")
-    signatory_name = (
-        str(config.get("signatory_name")).strip()
-        if config.get("signatory_name")
-        else "[name]"
-    )
+    signatory_name = FIXED_SIGNATORY_NAME
     safe_signatory_name = escape(signatory_name)
     if not template_background:
         raise HTTPException(
@@ -819,8 +980,8 @@ def preview_certificate_template(
       <div class="date">{preview_date}</div>
       <div class="signature-block">
         <div class="signature-name">{safe_signatory_name}</div>
-        <div class="signature-title">Head Instructor</div>
-        <div class="signature-org">Hand and Heart</div>
+        <div class="signature-title">{escape(FIXED_SIGNATORY_TITLE)}</div>
+        <div class="signature-org">{escape(FIXED_ORGANIZATION_NAME)}</div>
       </div>
     </div>
   </body>

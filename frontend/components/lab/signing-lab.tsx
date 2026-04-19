@@ -1030,7 +1030,7 @@ export function SigningLab({
       ) : null}
 
       <div className="row g-3">
-        <div className="col-lg-8">
+        <div className={!embedded && !isTeacherTester ? "col-xl-9 col-lg-8" : "col-lg-8"}>
           <div className="card lms-bootstrap-card h-100">
             <div className="card-body">
               {!hideModeControls ? (
@@ -1118,7 +1118,9 @@ export function SigningLab({
               <div className="position-relative overflow-hidden rounded-4 border border-secondary-subtle bg-dark">
             <video
                   autoPlay
-                  className={`d-block w-100 lms-sign-video ${!embedded ? "lms-sign-video-screen-fit" : ""}`}
+                  className={`d-block w-100 lms-sign-video ${!embedded ? "lms-sign-video-screen-fit" : ""} ${
+                    !embedded && !isTeacherTester ? "lms-sign-video-student" : ""
+                  }`}
               muted
               playsInline
               ref={videoRef}
@@ -1175,7 +1177,7 @@ export function SigningLab({
           </div>
         </div>
 
-        <aside className="col-lg-4">
+        <aside className={!embedded && !isTeacherTester ? "col-xl-3 col-lg-4" : "col-lg-4"}>
           <div className="card lms-bootstrap-card h-100">
             <div className="card-body">
               {modeStatusMessage && modeReady === false ? (

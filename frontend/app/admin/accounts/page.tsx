@@ -3,8 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
-  archiveTeacherAccount,
   bulkImportAccounts,
+  deactivateUser,
   getAdminSections,
   getAdminUsers,
   reactivateUser,
@@ -17,7 +17,7 @@ import { notifySuccess } from "@/lib/notify";
 
 const HAND_AND_HEART = "HAND AND HEART";
 
-type ImportRole = "student" | "teacher";
+type ImportRole = "student" | "teacher" | "admin";
 type AccountRoleFilter = "all" | "student" | "teacher" | "admin";
 type AccountStatusFilter = "active" | "archived";
 
@@ -34,7 +34,8 @@ function parseRows(source: string, defaultSectionId: number | null, role: Import
         email,
         first_name: first_name || undefined,
         last_name: last_name || undefined,
-        company_name: role === "teacher" ? HAND_AND_HEART : (company_name || undefined),
+        company_name:
+          role === "teacher" || role === "admin" ? HAND_AND_HEART : (company_name || undefined),
         section_id: role === "student" ? defaultSectionId : null,
       };
     })
@@ -121,14 +122,14 @@ export default function AdminAccountsPage() {
     }
   }
 
-  async function onArchiveTeacher(userId: number) {
+  async function onArchiveAccount(userId: number, role: "teacher" | "student") {
     setError(null);
     try {
-      await archiveTeacherAccount(userId);
+      await deactivateUser(userId);
       await refreshUsers();
-      setMessage("Teacher account archived.");
+      setMessage(role === "teacher" ? "Teacher account archived." : "Student account archived.");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to archive teacher.");
+      setError(requestError instanceof Error ? requestError.message : "Unable to archive account.");
     }
   }
 
@@ -263,19 +264,19 @@ export default function AdminAccountsPage() {
           </span>
         </div>
 
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
+        <div className="mt-4">
+          <table className="w-full table-fixed text-sm">
             <thead>
               {accountStatusFilter === "active" ? (
                 <tr className="border-b border-brandBorder text-left text-xs uppercase tracking-[0.2em] text-slate-500">
-                  <th className="px-2 py-3">Username</th>
-                  <th className="px-2 py-3">Role</th>
-                  <th className="px-2 py-3">Email</th>
-                  <th className="px-2 py-3">First Name</th>
-                  <th className="px-2 py-3">Last Name</th>
-                  <th className="px-2 py-3">Company</th>
-                  <th className="px-2 py-3">Status</th>
-                  <th className="px-2 py-3">Actions</th>
+                  <th className="px-2 py-3 w-[17%]">Username</th>
+                  <th className="px-2 py-3 w-[9%]">Role</th>
+                  <th className="px-2 py-3 w-[20%]">Email</th>
+                  <th className="px-2 py-3 w-[11%]">First Name</th>
+                  <th className="px-2 py-3 w-[11%]">Last Name</th>
+                  <th className="px-2 py-3 w-[12%]">Company</th>
+                  <th className="px-2 py-3 w-[8%]">Status</th>
+                  <th className="px-2 py-3 w-[12%]">Actions</th>
                 </tr>
               ) : (
                 <tr className="border-b border-brandBorder text-left text-xs uppercase tracking-[0.2em] text-slate-500">
@@ -293,17 +294,17 @@ export default function AdminAccountsPage() {
               {accountStatusFilter === "active"
                 ? visibleUsers.map((user) => (
                     <tr className="border-b border-brandBorder/70" key={user.id}>
-                      <td className="px-2 py-3 font-semibold">{user.username}</td>
-                      <td className="px-2 py-3 capitalize">{user.role}</td>
-                      <td className="px-2 py-3">{user.email ?? "-"}</td>
-                      <td className="px-2 py-3">{user.first_name ?? "-"}</td>
-                      <td className="px-2 py-3">{user.last_name ?? "-"}</td>
-                      <td className="px-2 py-3">{resolveCompanyName(user)}</td>
-                      <td className="px-2 py-3">
+                      <td className="px-2 py-3 font-semibold break-words">{user.username}</td>
+                      <td className="px-2 py-3 capitalize break-words">{user.role}</td>
+                      <td className="px-2 py-3 break-words">{user.email ?? "-"}</td>
+                      <td className="px-2 py-3 break-words">{user.first_name ?? "-"}</td>
+                      <td className="px-2 py-3 break-words">{user.last_name ?? "-"}</td>
+                      <td className="px-2 py-3 break-words">{resolveCompanyName(user)}</td>
+                      <td className="px-2 py-3 break-words">
                         {user.must_change_password ? "Password change required" : "Active"}
                       </td>
                       <td className="px-2 py-3">
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-col items-start gap-2">
                           {user.role !== "admin" ? (
                             <button
                               className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
@@ -313,13 +314,18 @@ export default function AdminAccountsPage() {
                               Reset & Resend
                             </button>
                           ) : null}
-                          {user.role === "teacher" ? (
+                          {user.role === "teacher" || user.role === "student" ? (
                             <button
                               className="rounded-lg border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed transition hover:bg-brandRed/20"
-                              onClick={() => void onArchiveTeacher(user.id)}
+                              onClick={() =>
+                                void onArchiveAccount(
+                                  user.id,
+                                  user.role === "teacher" ? "teacher" : "student"
+                                )
+                              }
                               type="button"
                             >
-                              Archive Teacher
+                              Archive {user.role === "teacher" ? "Teacher" : "Student"}
                             </button>
                           ) : null}
                         </div>
@@ -408,18 +414,19 @@ export default function AdminAccountsPage() {
                   >
                     <option value="student">Student</option>
                     <option value="teacher">Teacher</option>
+                    <option value="admin">Admin</option>
                   </select>
                 </label>
 
                 {importRole === "student" ? (
                   <label className="text-sm font-semibold text-slate-800">
-                    Default Section
+                    Default Batch
                     <select
                       className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2"
                       onChange={(event) => setDefaultSectionId(event.target.value)}
                       value={defaultSectionId}
                     >
-                      <option value="">No default section</option>
+                      <option value="">No default batch</option>
                       {sections.map((section) => (
                         <option key={section.id} value={section.id}>
                           {section.name}
@@ -429,7 +436,7 @@ export default function AdminAccountsPage() {
                   </label>
                 ) : (
                   <div className="rounded-xl border border-brandBorder bg-brandOffWhite px-4 py-3 text-sm text-slate-700">
-                    Teacher company is fixed to <span className="font-bold">{HAND_AND_HEART}</span>.
+                    <span className="font-bold">{HAND_AND_HEART}</span>
                   </div>
                 )}
 

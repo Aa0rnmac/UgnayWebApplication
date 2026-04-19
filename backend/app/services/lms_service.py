@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 import string
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func
@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.datetime_utils import utc_now
 from app.models.certificate import CertificateTemplate, IssuedCertificate
 from app.models.lms_progress import SectionModuleItemProgress, SectionModuleProgress
-from app.models.session import UserSession
 from app.models.section import Section, SectionStudentAssignment, SectionTeacherAssignment
 from app.models.section_module import SectionModule, SectionModuleItem
 from app.models.user import User
@@ -595,41 +594,21 @@ def refresh_student_completion_schedule(
         return None
 
     if assignment.course_completed_at is not None:
-        if assignment.auto_archive_due_at is None:
-            assignment.auto_archive_due_at = assignment.course_completed_at + timedelta(days=30)
-            db.add(assignment)
         return assignment
 
     completed = section_completion_ready(db, student_id, assignment.section_id)
     if completed:
         completed_at = utc_now()
         assignment.course_completed_at = completed_at
-        assignment.auto_archive_due_at = completed_at + timedelta(days=30)
+        assignment.auto_archive_due_at = None
         db.add(assignment)
     return assignment
 
 
 def auto_archive_due_students(db: Session) -> int:
-    now = utc_now()
-    due_assignments = (
-        db.query(SectionStudentAssignment)
-        .options(joinedload(SectionStudentAssignment.student))
-        .filter(SectionStudentAssignment.auto_archive_due_at.is_not(None))
-        .filter(SectionStudentAssignment.auto_archive_due_at <= now)
-        .all()
-    )
-    archived_count = 0
-    for assignment in due_assignments:
-        student = assignment.student
-        if not student or student.archived_at is not None:
-            continue
-        student.archived_at = now
-        db.add(student)
-        db.query(UserSession).filter(UserSession.user_id == student.id).delete(
-            synchronize_session=False
-        )
-        archived_count += 1
-    return archived_count
+    _ = db
+    # Student accounts are no longer archived automatically.
+    return 0
 
 
 def ensure_issued_certificate(

@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
+  archiveAdminSection,
+  deleteAdminSection,
   getAdminCertificateTemplate,
   getAdminCertificateTemplatePreview,
   assignSectionMembers,
@@ -17,6 +19,10 @@ import {
 } from "@/lib/api";
 import { notifySuccess } from "@/lib/notify";
 
+const FIXED_SIGNATORY_NAME = "Genevieve Diokno";
+const FIXED_SIGNATORY_TITLE = "Founder / General Manager";
+const FIXED_SIGNATORY_ORG = "Hand and Heart";
+
 export default function AdminSectionsPage() {
   const [sections, setSections] = useState<LmsSection[]>([]);
   const [students, setStudents] = useState<AdminUser[]>([]);
@@ -27,11 +33,11 @@ export default function AdminSectionsPage() {
   const [assignStudentId, setAssignStudentId] = useState<string>("");
   const [showCreateSectionModal, setShowCreateSectionModal] = useState(false);
   const [showAssignStudentModal, setShowAssignStudentModal] = useState(false);
+  const [batchViewFilter, setBatchViewFilter] = useState<"active" | "archived">("active");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isSavingSection, setIsSavingSection] = useState(false);
   const [isSavingAssignment, setIsSavingAssignment] = useState(false);
-  const [certificateSignatoryName, setCertificateSignatoryName] = useState("");
   const [certificateTemplateFile, setCertificateTemplateFile] = useState<File | null>(null);
   const [certificateTemplateInfo, setCertificateTemplateInfo] =
     useState<AdminCertificateTemplate | null>(null);
@@ -73,6 +79,10 @@ export default function AdminSectionsPage() {
     }
     return students.filter((student) => !assignedStudentIds.has(student.id));
   }, [sections, students]);
+  const filteredSections = useMemo(
+    () => sections.filter((section) => section.status === batchViewFilter),
+    [batchViewFilter, sections]
+  );
 
   async function onCreateSection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,10 +95,10 @@ export default function AdminSectionsPage() {
       setName("");
       setDescription("");
       setShowCreateSectionModal(false);
-      setMessage("Section created.");
+      setMessage("Batch created.");
       await refresh();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to create section.");
+      setError(requestError instanceof Error ? requestError.message : "Unable to create batch.");
     } finally {
       setIsSavingSection(false);
     }
@@ -97,7 +107,7 @@ export default function AdminSectionsPage() {
   async function onAssignMembers(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!assignSectionId) {
-      setError("Choose a section first.");
+      setError("Choose a batch first.");
       return;
     }
     if (!assignStudentId) {
@@ -113,7 +123,7 @@ export default function AdminSectionsPage() {
       });
       setAssignStudentId("");
       setShowAssignStudentModal(false);
-      setMessage("Student assigned to section.");
+      setMessage("Student assigned to batch.");
       await refresh();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to assign members.");
@@ -128,12 +138,36 @@ export default function AdminSectionsPage() {
     setShowAssignStudentModal(true);
   }
 
+  async function onArchiveBatch(sectionId: number) {
+    setError(null);
+    setMessage(null);
+    try {
+      await archiveAdminSection(sectionId);
+      setMessage("Batch archived. Assigned students were archived too.");
+      await refresh();
+      setBatchViewFilter("archived");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to archive batch.");
+    }
+  }
+
+  async function onDeleteBatch(sectionId: number) {
+    setError(null);
+    setMessage(null);
+    try {
+      await deleteAdminSection(sectionId);
+      setMessage("Batch deleted.");
+      await refresh();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to delete batch.");
+    }
+  }
+
   async function loadCertificateTemplate() {
     setIsLoadingCertificateTemplate(true);
     try {
       const response = await getAdminCertificateTemplate();
       setCertificateTemplateInfo(response);
-      setCertificateSignatoryName(response.signatory_name ?? "");
       setError(null);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load certificate template.");
@@ -161,7 +195,7 @@ export default function AdminSectionsPage() {
     setIsSavingCertificateTemplate(true);
     try {
       const response = await upsertAdminCertificateTemplate({
-        signatory_name: certificateSignatoryName,
+        signatory_name: FIXED_SIGNATORY_NAME,
         certificate_file: certificateTemplateFile,
       });
       setCertificateTemplateInfo(response);
@@ -196,9 +230,9 @@ export default function AdminSectionsPage() {
   return (
     <section className="space-y-6">
       <div className="panel">
-        <h2 className="text-3xl font-bold title-gradient">Section Management</h2>
+        <h2 className="text-3xl font-bold title-gradient">Batch Management</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Use this page to create sections and place students.
+          Use this page to create batches and place students.
         </p>
       </div>
 
@@ -209,18 +243,31 @@ export default function AdminSectionsPage() {
       ) : null}
       <div className="panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Current Sections</p>
-          <button
-            className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-            onClick={() => setShowCreateSectionModal(true)}
-            type="button"
-          >
-            Add Section
-          </button>
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">Batches</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              onChange={(event) => setBatchViewFilter(event.target.value as "active" | "archived")}
+              value={batchViewFilter}
+            >
+              <option value="active">Current Batches</option>
+              <option value="archived">Archived Batches</option>
+            </select>
+            <button
+              className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
+              onClick={() => setShowCreateSectionModal(true)}
+              type="button"
+            >
+              Add Batch
+            </button>
+          </div>
         </div>
+        <p className="mt-3 rounded-xl border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed">
+          Note: Archive is allowed when all students in the batch complete the required modules. Delete is allowed after all students download e-certificates, or after 30 days from archiving.
+        </p>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
-          {sections.map((section) => (
+          {filteredSections.map((section) => (
             <article className="rounded-2xl border border-brandBorder bg-white p-4 shadow-soft" key={section.id}>
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -240,22 +287,45 @@ export default function AdminSectionsPage() {
                 <div className="rounded-xl bg-brandOffWhite px-3 py-3">
                   <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Students</p>
                   <p className="mt-2 text-sm text-slate-800">{section.student_count} student(s)</p>
-                  <div className="mt-3">
-                    <button
-                      className="rounded-lg border border-brandGreen/35 bg-brandGreenLight px-3 py-2 text-xs font-semibold text-brandGreen transition hover:bg-brandGreen/20"
-                      onClick={() => openAssignModal(section.id)}
-                      type="button"
-                    >
-                      Assign Student
-                    </button>
-                  </div>
+                  {batchViewFilter === "active" ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        className="rounded-lg border border-brandGreen/35 bg-brandGreenLight px-3 py-2 text-xs font-semibold text-brandGreen transition hover:bg-brandGreen/20"
+                        onClick={() => openAssignModal(section.id)}
+                        type="button"
+                      >
+                        Assign Student
+                      </button>
+                      <button
+                        className="rounded-lg border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed transition hover:bg-brandRed/20"
+                        onClick={() => void onArchiveBatch(section.id)}
+                        type="button"
+                      >
+                        Archive Batch
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-3">
+                      <button
+                        className="rounded-lg border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed transition hover:bg-brandRed/20"
+                        onClick={() => void onDeleteBatch(section.id)}
+                        type="button"
+                      >
+                        Delete Batch
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </article>
           ))}
         </div>
-        {sections.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-600">No sections yet. Click Add Section to create one.</p>
+        {filteredSections.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-600">
+            {batchViewFilter === "active"
+              ? "No current batches yet. Click Add Batch to create one."
+              : "No archived batches yet."}
+          </p>
         ) : null}
       </div>
 
@@ -267,22 +337,11 @@ export default function AdminSectionsPage() {
 
         <form className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]" onSubmit={onSaveCertificateTemplate}>
           <div className="space-y-3">
-            <label className="block text-sm font-semibold text-slate-800">
-              Signatory Name
-              <input
-                className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2"
-                onChange={(event) => setCertificateSignatoryName(event.target.value)}
-                placeholder="Head instructor name"
-                type="text"
-                value={certificateSignatoryName}
-              />
-            </label>
-
             <div className="rounded-xl border border-brandBorder bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Signatory Format</p>
-              <p className="mt-2">{certificateSignatoryName || "[name]"}</p>
-              <p>Head Instructor</p>
-              <p>Hand and Heart</p>
+              <p className="mt-2">{FIXED_SIGNATORY_NAME}</p>
+              <p>{FIXED_SIGNATORY_TITLE}</p>
+              <p>{FIXED_SIGNATORY_ORG}</p>
             </div>
 
             <div className="rounded-xl border border-brandBorder bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
@@ -343,13 +402,13 @@ export default function AdminSectionsPage() {
             <div className="mt-4 space-y-1 text-sm text-slate-700">
               <p>
                 <span className="font-semibold">Signatory Name:</span>{" "}
-                {certificateTemplateInfo?.signatory_name || "Not set"}
+                {FIXED_SIGNATORY_NAME}
               </p>
               <p>
-                <span className="font-semibold">Title:</span> Head Instructor
+                <span className="font-semibold">Title:</span> {FIXED_SIGNATORY_TITLE}
               </p>
               <p>
-                <span className="font-semibold">Organization:</span> Hand and Heart
+                <span className="font-semibold">Organization:</span> {FIXED_SIGNATORY_ORG}
               </p>
             </div>
           </div>
@@ -359,7 +418,7 @@ export default function AdminSectionsPage() {
       {showCreateSectionModal ? (
         <div className="fixed inset-0 z-[300] flex items-start justify-center overflow-y-auto p-4 md:py-8">
           <button
-            aria-label="Close create section modal"
+            aria-label="Close create batch modal"
             className="absolute inset-0 bg-slate-900/45"
             onClick={() => {
               if (!isSavingSection) {
@@ -371,7 +430,7 @@ export default function AdminSectionsPage() {
           <div className="relative z-[301] my-4 w-full max-w-xl rounded-2xl border border-brandBorder bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-brandBorder px-5 py-4">
               <div>
-                <h3 className="text-2xl font-bold title-gradient">Add Section</h3>
+                <h3 className="text-2xl font-bold title-gradient">Add Batch</h3>
               </div>
               <button
                 className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm font-semibold text-brandBlue"
@@ -416,7 +475,7 @@ export default function AdminSectionsPage() {
                   disabled={isSavingSection}
                   type="submit"
                 >
-                  {isSavingSection ? "Saving..." : "Create Section"}
+                  {isSavingSection ? "Saving..." : "Create Batch"}
                 </button>
                 <button
                   className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue"
@@ -461,13 +520,13 @@ export default function AdminSectionsPage() {
 
             <form className="space-y-4 p-5" onSubmit={onAssignMembers}>
               <label className="block text-sm font-semibold text-slate-800">
-                Section
+                Batch
                 <select
                   className="mt-1 w-full rounded-lg border border-brandBorder bg-white px-3 py-2"
                   onChange={(event) => setAssignSectionId(event.target.value)}
                   value={assignSectionId}
                 >
-                  <option value="">Choose a section</option>
+                  <option value="">Choose a batch</option>
                   {sections.map((section) => (
                     <option key={section.id} value={section.id}>
                       {section.name}
@@ -492,7 +551,7 @@ export default function AdminSectionsPage() {
                 </select>
                 {assignableStudents.length === 0 ? (
                   <p className="mt-2 text-xs text-slate-500">
-                    No available students. All students are already assigned to sections.
+                    No available students. All students are already assigned to batches.
                   </p>
                 ) : null}
               </label>

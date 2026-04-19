@@ -62,7 +62,7 @@ class BulkAccountCreateRow(BaseModel):
 
 
 class BulkAccountImportRequest(BaseModel):
-    role: Literal["student", "teacher"]
+    role: Literal["student", "teacher", "admin"]
     batch_size: int = Field(default=25, ge=1, le=100)
     accounts: list[BulkAccountCreateRow] = Field(min_length=1)
 
@@ -385,7 +385,7 @@ class AdminCertificateTemplateOut(BaseModel):
     template_file_path: str | None = None
     template_file_url: str | None = None
     signatory_name: str | None = None
-    signatory_title: str = "Head Instructor"
+    signatory_title: str = "Founder / General Manager"
     organization_name: str = "Hand and Heart"
     updated_at: str | None = None
 

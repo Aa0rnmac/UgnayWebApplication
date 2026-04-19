@@ -32,7 +32,7 @@ export default function StudentDashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="panel panel-lively">
-          <p className="text-xs uppercase tracking-[0.22em] label-accent">Section</p>
+          <p className="text-xs uppercase tracking-[0.22em] label-accent">Batch</p>
           <p className="mt-3 text-2xl font-black text-brandBlue">{course?.section?.name ?? "Not assigned"}</p>
         </div>
         <div className="panel panel-lively">

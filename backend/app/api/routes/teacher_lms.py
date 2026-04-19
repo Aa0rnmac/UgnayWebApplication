@@ -212,6 +212,13 @@ def _extract_attempt_details(
             )
 
     if parsed_details:
+        fallback_score = _parse_float(payload.get("teacher_rubric_score_percent"))
+        if fallback_score is None:
+            fallback_score = progress_entry.score_percent
+        if fallback_score is not None:
+            latest_detail = max(parsed_details, key=lambda entry: entry.attempt_number)
+            if latest_detail.score_percent is None:
+                latest_detail.score_percent = round(max(0.0, min(float(fallback_score), 100.0)), 2)
         parsed_details.sort(key=lambda entry: entry.attempt_number)
         return parsed_details
 
@@ -686,6 +693,64 @@ def update_teacher_module(
     db.commit()
     db.refresh(module)
     return _module_out(module)
+
+
+@router.delete("/modules/{module_id}", response_model=list[TeacherSectionModuleOut])
+def delete_teacher_module(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+) -> list[TeacherSectionModuleOut]:
+    module = (
+        db.query(SectionModule)
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
+        )
+        .filter(SectionModule.id == module_id)
+        .first()
+    )
+    if not module:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found.")
+    _require_teacher_section(db, current_teacher, module.section_id)
+    _require_module_owner(db, current_teacher, module)
+
+    section_id = module.section_id
+    deleted_module_id = module.id
+    deleted_module_title = module.title
+
+    db.delete(module)
+    db.flush()
+
+    remaining_modules = (
+        db.query(SectionModule)
+        .options(
+            joinedload(SectionModule.items),
+            joinedload(SectionModule.created_by_teacher),
+        )
+        .filter(SectionModule.section_id == section_id)
+        .order_by(SectionModule.order_index.asc())
+        .all()
+    )
+    for index, entry in enumerate(remaining_modules, start=1):
+        if entry.order_index != index:
+            entry.order_index = index
+            db.add(entry)
+
+    log_user_activity(
+        db,
+        actor=current_teacher,
+        action_type="teacher_module_deleted",
+        target_type="section_module",
+        target_id=deleted_module_id,
+        details={
+            "section_id": section_id,
+            "title": deleted_module_title,
+        },
+    )
+
+    db.commit()
+    return [_module_out(entry) for entry in remaining_modules]
 
 
 @router.post("/modules/{module_id}/items", response_model=TeacherSectionModuleOut)
@@ -1217,11 +1282,21 @@ def grade_module_upload_submission(
         current_payload.pop("teacher_rubric_scores", None)
         current_payload.pop("teacher_rubric_score_percent", None)
 
+    scored_at_iso = utc_now().isoformat()
     current_payload["teacher_score_points"] = score_points
     current_payload["teacher_feedback"] = (payload.feedback or "").strip() or None
     current_payload["teacher_scored_by_teacher_id"] = current_teacher.id
-    current_payload["teacher_scored_at"] = utc_now().isoformat()
+    current_payload["teacher_scored_at"] = scored_at_iso
+    raw_history = current_payload.get("history")
+    if isinstance(raw_history, list) and raw_history:
+        for history_entry in reversed(raw_history):
+            if isinstance(history_entry, dict):
+                history_entry["score_percent"] = score_percent
+                history_entry["status"] = "completed"
+                history_entry["graded_at"] = scored_at_iso
+                break
     progress.status = "completed"
+    progress.is_correct = score_percent >= 75.0
     progress.score_percent = score_percent
     progress.submitted_payload = current_payload
     db.add(progress)

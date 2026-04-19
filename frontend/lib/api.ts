@@ -1331,7 +1331,7 @@ export function getAdminUsers(
 }
 
 export function bulkImportAccounts(
-  payload: { role: "student" | "teacher"; batch_size?: number; accounts: BulkAccountCreateRow[] },
+  payload: { role: "student" | "teacher" | "admin"; batch_size?: number; accounts: BulkAccountCreateRow[] },
   token?: string
 ): Promise<BulkAccountImportJob> {
   return request<BulkAccountImportJob>(
@@ -1420,6 +1420,21 @@ export function assignSectionMembers(
       method: "POST",
       body: JSON.stringify(payload),
     },
+    token
+  );
+}
+
+export function archiveAdminSection(sectionId: number, token?: string): Promise<LmsSection> {
+  return request<LmsSection>(`/admin/sections/${sectionId}/archive`, { method: "POST" }, token);
+}
+
+export function deleteAdminSection(
+  sectionId: number,
+  token?: string
+): Promise<{ message: string; all_students_downloaded: boolean; deletion_due_passed: boolean }> {
+  return request<{ message: string; all_students_downloaded: boolean; deletion_due_passed: boolean }>(
+    `/admin/sections/${sectionId}`,
+    { method: "DELETE" },
     token
   );
 }
@@ -1570,6 +1585,13 @@ export function updateTeacherModule(
     },
     token
   );
+}
+
+export function deleteTeacherModule(
+  moduleId: number,
+  token?: string
+): Promise<TeacherSectionModule[]> {
+  return request<TeacherSectionModule[]>(`/teacher/modules/${moduleId}`, { method: "DELETE" }, token);
 }
 
 export function createTeacherModuleItem(
@@ -1824,6 +1846,10 @@ export function getStudentCertificateStatus(token?: string) {
 
 export function downloadStudentCertificate(token?: string) {
   return requestBlob("/student/certificate/download", undefined, token);
+}
+
+export function previewStudentCertificate(token?: string) {
+  return requestBlob("/student/certificate/preview", undefined, token);
 }
 
 export function updateMyProfile(payload: ProfileUpdatePayload): Promise<ApiUser> {

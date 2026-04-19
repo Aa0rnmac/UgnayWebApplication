@@ -20,7 +20,7 @@ const TEACHER_NAV_ITEMS = [
 const ADMIN_NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", short: "D" },
   { href: "/admin/accounts", label: "Accounts", short: "A" },
-  { href: "/admin/sections", label: "Sections", short: "S" },
+  { href: "/admin/sections", label: "Batches", short: "B" },
   { href: "/admin/reports", label: "Reports", short: "R" }
 ] as const;
 
@@ -32,9 +32,9 @@ export function AppNav({ role }: { role: "student" | "teacher" | "admin" }) {
     role === "admin" ? ADMIN_NAV_ITEMS : role === "teacher" ? TEACHER_NAV_ITEMS : STUDENT_NAV_ITEMS;
   const dailyGoal =
     role === "admin"
-      ? "Create accounts, organize sections, and monitor system activity."
+      ? "Create accounts, organize batches, and monitor system activity."
       : role === "teacher"
-      ? "Publish section modules, check reports, and guide learners in the signing lab."
+      ? "Publish batch modules, check reports, and guide learners in the signing lab."
       : "Practice at least one module and one gesture set.";
 
   return (
