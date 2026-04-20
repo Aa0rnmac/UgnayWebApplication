@@ -1604,7 +1604,7 @@ export default function TeacherSectionsPage() {
       return (
         <div className="vstack gap-2">
           <p className="mb-0 rounded-3 bg-brandOffWhite px-3 py-3 text-sm text-slate-700">
-            {item.instructions || "Students answer each question in this item before submitting."}
+            {item.instructions || "Students answer each question in this topic before submitting."}
           </p>
           {sharedPromptMedia && !hasPerQuestionPrompt ? (
             <div className="card border-brandBorder">
@@ -2119,9 +2119,9 @@ export default function TeacherSectionsPage() {
         );
       }
       clearItemBuilder();
-      setMessage(isEditingItem ? "Module item updated." : "Module item created.");
+      setMessage(isEditingItem ? "Module topic updated." : "Module topic created.");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to save module item.");
+      setError(requestError instanceof Error ? requestError.message : "Unable to save module topic.");
     } finally {
       setIsSavingItem(false);
     }
@@ -2147,9 +2147,9 @@ export default function TeacherSectionsPage() {
       if (editingItemId === item.id) {
         clearItemBuilder();
       }
-      setMessage("Module item deleted.");
+      setMessage("Module topic deleted.");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to delete module item.");
+      setError(requestError instanceof Error ? requestError.message : "Unable to delete module topic.");
     } finally {
       setDeletingItemId(null);
     }
@@ -2161,7 +2161,7 @@ export default function TeacherSectionsPage() {
       return;
     }
     const confirmed = window.confirm(
-      `Delete "${module.title}" and all of its items/submissions? This cannot be undone.`
+      `Delete "${module.title}" and all of its topics/submissions? This cannot be undone.`
     );
     if (!confirmed) {
       return;
@@ -2457,7 +2457,7 @@ export default function TeacherSectionsPage() {
         <p className="text-xs fw-semibold text-uppercase tracking-[0.2em] text-brandBlue">Teacher Modules</p>
         <h2 className="mt-2 text-3xl fw-bold title-gradient">Module Builder</h2>
         <p className="mt-2 text-sm text-slate-700">
-          Build modules, edit module items, and publish lessons.
+          Build modules, edit module topics, and publish lessons.
         </p>
       </div>
 
@@ -2542,7 +2542,7 @@ export default function TeacherSectionsPage() {
                           onClick={() => openEditItemsView(module.id)}
                           type="button"
                         >
-                          {canManageModule(module) ? "Edit Items" : "View Items"}
+                          {canManageModule(module) ? "Edit Topics" : "View Topics"}
                         </button>
                         {canManageModule(module) ? (
                           <button
@@ -2582,7 +2582,7 @@ export default function TeacherSectionsPage() {
                 </div>
                 {!canEditSelectedModule ? (
                   <div className="alert alert-info mt-3 mb-0">
-                    View only. Only the teacher who created this module can edit items or publish changes.
+                    View only. Only the teacher who created this module can edit topics or publish changes.
                   </div>
                 ) : null}
               </div>
@@ -2590,11 +2590,11 @@ export default function TeacherSectionsPage() {
               <div className="col-xl-5">
                 <div className="panel h-100">
                   <h3 className="h5 fw-bold mb-3">
-                    {isEditingItem ? `Edit Item in ${selectedModule.title}` : `Add Item to ${selectedModule.title}`}
+                    {isEditingItem ? `Edit Topic in ${selectedModule.title}` : `Add Topic to ${selectedModule.title}`}
                   </h3>
                   <form className="vstack gap-3" onSubmit={onSaveItem}>
                     <div>
-                      <label className="form-label fw-semibold">Item Type</label>
+                      <label className="form-label fw-semibold">Topic Type</label>
                       <select
                         className="form-select"
                         onChange={(event) => setItemType(event.target.value as BuilderItemType)}
@@ -2608,7 +2608,7 @@ export default function TeacherSectionsPage() {
                         ))}
                       </select>
                       {isEditingItem ? (
-                        <div className="form-text">Item type cannot be changed while editing. Delete and recreate if needed.</div>
+                        <div className="form-text">Topic type cannot be changed while editing. Delete and recreate if needed.</div>
                       ) : null}
                     </div>
 
@@ -2878,7 +2878,7 @@ export default function TeacherSectionsPage() {
                             );
                           })}
                           <p className="mb-0 text-xs text-slate-600">
-                            One item can contain multiple questions. Students must answer all before submission.
+                            One topic can contain multiple questions. Students must answer all before submission.
                           </p>
                         </div>
                       </>
@@ -3323,7 +3323,7 @@ export default function TeacherSectionsPage() {
 
                     <div className="d-flex flex-wrap gap-2">
                       <button className="btn btn-primary" disabled={isSavingItem} type="submit">
-                        {isSavingItem ? "Saving..." : isEditingItem ? "Update Item" : "Add Item"}
+                        {isSavingItem ? "Saving..." : isEditingItem ? "Update Topic" : "Add Topic"}
                       </button>
                       {isEditingItem ? (
                         <button
@@ -3342,12 +3342,13 @@ export default function TeacherSectionsPage() {
 
               <div className={canEditSelectedModule ? "col-xl-7" : "col-12"}>
                 <div className="panel h-100">
-                  <h3 className="h5 fw-bold mb-3">Module Items</h3>
+                  <h3 className="h5 fw-bold mb-3">Module Topics</h3>
                   <div className="vstack gap-3">
                     {selectedModule.items.map((item) => {
                       const attachments = getItemAttachments(item);
                       const promptMedia = getPromptMedia(item);
                       const signingConfig = getSigningLabConfig(item);
+                      const effectiveItemStatus = selectedModule.is_published ? "published" : "unpublished";
                       return (
                         <article className="card border-brandBorder shadow-sm" key={item.id}>
                           <div className="card-body">
@@ -3363,13 +3364,15 @@ export default function TeacherSectionsPage() {
                               </div>
                               <span
                                 className={`badge rounded-pill border d-inline-flex align-items-center justify-content-center px-2 py-1 fw-semibold text-nowrap ${
-                                  item.is_published
+                                  effectiveItemStatus === "published"
                                     ? "bg-success-subtle text-success border-success-subtle"
-                                    : "bg-light text-secondary"
+                                    : "bg-warning-subtle text-warning-emphasis border-warning-subtle"
                                 }`}
                                 style={{ fontSize: "0.68rem", minWidth: "74px" }}
                               >
-                                {item.is_published ? "Published" : "Draft"}
+                                {effectiveItemStatus === "published"
+                                  ? "Published"
+                                  : "Unpublished"}
                               </span>
                             </div>
 
@@ -3436,7 +3439,7 @@ export default function TeacherSectionsPage() {
                             {item.item_type === "upload_assessment" ? (
                               <div className="mt-2 text-sm text-slate-700">
                                 <p className="mb-1">
-                                  Rubric items:{" "}
+                                  Rubric criteria:{" "}
                                   <span className="fw-semibold">
                                     {(() => {
                                       const rawItems = item.config.rubric_items;
@@ -3522,8 +3525,8 @@ export default function TeacherSectionsPage() {
                     {selectedModule.items.length === 0 ? (
                       <p className="mb-0 text-sm text-slate-600">
                         {canEditSelectedModule
-                          ? "No items yet. Add your first item."
-                          : "No items available in this module yet."}
+                          ? "No topics yet. Add your first topic."
+                          : "No topics available in this module yet."}
                       </p>
                     ) : null}
                   </div>
@@ -3533,7 +3536,7 @@ export default function TeacherSectionsPage() {
           ) : (
             <div className="panel">
               <p className="mb-0 text-sm text-slate-700">
-                Click Edit Items or View Items on a module to open the module details.
+                Click Edit Topics or View Topics on a module to open the module details.
               </p>
             </div>
           )}
@@ -3626,7 +3629,7 @@ export default function TeacherSectionsPage() {
                       <p className="mb-0 text-sm text-slate-700">Loading upload assessments...</p>
                     ) : submissionAssessments.length === 0 ? (
                       <p className="mb-0 text-sm text-slate-700">
-                        No upload assessment items found in this module yet.
+                        No upload assessment topics found in this module yet.
                       </p>
                     ) : (
                       <div className="table-responsive">
