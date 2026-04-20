@@ -166,7 +166,7 @@ export default function AdminDashboardPage() {
               Bulk create student, teacher, and admin accounts
             </Link>
             <Link className="rounded-xl border border-brandBorder bg-white px-4 py-4 font-semibold text-brandBlue transition hover:bg-brandBlueLight" href="/admin/sections">
-              Create batches and assign students
+              Create batches, assign students and upload E-certificate Template
             </Link>
             <Link className="rounded-xl border border-brandBorder bg-white px-4 py-4 font-semibold text-brandBlue transition hover:bg-brandBlueLight" href="/admin/reports">
               View system audit logs

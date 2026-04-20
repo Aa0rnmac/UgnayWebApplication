@@ -20,7 +20,7 @@ const TEACHER_NAV_ITEMS = [
 const ADMIN_NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", short: "D" },
   { href: "/admin/accounts", label: "Accounts", short: "A" },
-  { href: "/admin/sections", label: "Batches", short: "B" },
+  { href: "/admin/sections", label: "Batches & E-certificate", short: "B" },
   { href: "/admin/reports", label: "Reports", short: "R" }
 ] as const;
 

@@ -332,7 +332,7 @@ export default function AdminSectionsPage() {
       <div className="panel">
         <p className="text-xs font-semibold uppercase tracking-[0.25em] label-accent">E-Certificate Template</p>
         <p className="mt-2 text-sm text-slate-700">
-          This template is global for all students. Name and date auto-change per student account.
+        Name and date auto-change per student account.
         </p>
 
         <form className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]" onSubmit={onSaveCertificateTemplate}>

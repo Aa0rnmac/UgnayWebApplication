@@ -126,13 +126,13 @@ html {
 @media (min-width: 992px) {
   .lms-lab-screen-fit .lms-sign-video.lms-sign-video-screen-fit {
     aspect-ratio: auto;
-    height: clamp(220px, calc(100vh - 430px), 420px);
+    height: clamp(300px, calc(100vh - 340px), 560px);
   }
 }
 
 @media (min-width: 992px) {
   .lms-lab-screen-fit .lms-sign-video.lms-sign-video-screen-fit.lms-sign-video-student {
-    height: clamp(300px, calc(100vh - 345px), 560px);
+    height: clamp(360px, calc(100vh - 300px), 640px);
   }
 }
 
