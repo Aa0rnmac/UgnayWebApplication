@@ -1,0 +1,244 @@
+%%{init: {"theme":"neutral"}}%%
+erDiagram
+    USERS {
+        int id PK
+        string username UK
+        string password_hash
+        string role
+        string first_name
+        string middle_name
+        string last_name
+        string company_name
+        string email
+        boolean must_change_password
+        datetime archived_at
+        datetime created_at
+    }
+
+    USER_SESSIONS {
+        int id PK
+        int user_id FK
+        string token UK
+        datetime created_at
+        datetime expires_at
+    }
+
+    PASSWORD_RESET_OTPS {
+        int id PK
+        int user_id FK
+        string otp_hash
+        int attempt_count
+        datetime created_at
+        datetime expires_at
+        datetime verified_at
+        string reset_token_hash
+        datetime consumed_at
+    }
+
+    TEACHER_INVITES {
+        int id PK
+        string invite_code UK
+        string label
+        string passkey_hash
+        string status
+        int use_count
+        int max_use_count
+        datetime expires_at
+        datetime last_used_at
+        datetime revoked_at
+        int revoked_by_user_id FK
+        string revoked_reason
+    }
+
+    ARCHIVED_STUDENT_ACCOUNTS {
+        int id PK
+        int original_user_id FK
+        string original_username
+        string original_email
+        string role
+        int enrollment_id
+        int registration_id
+        int batch_id
+        string archive_reason
+        datetime archived_at
+    }
+
+    REGISTRATIONS {
+        int id PK
+        string first_name
+        string middle_name
+        string last_name
+        string email
+        string phone_number
+        string reference_number
+        string status
+        int linked_user_id FK
+        string issued_username
+        datetime created_at
+    }
+
+    BATCHES {
+        int id PK
+        string code UK
+        string name UK
+        string status
+        date start_date
+        date end_date
+        int capacity
+        int created_by_user_id FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    ENROLLMENTS {
+        int id PK
+        int registration_id FK
+        int user_id FK
+        int batch_id FK
+        string status
+        string payment_review_status
+        int approved_by_user_id FK
+        int rejected_by_user_id FK
+        datetime approved_at
+        datetime rejected_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    SECTIONS {
+        int id PK
+        string code UK
+        string name UK
+        string status
+        int created_by_user_id FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    SECTION_TEACHER_ASSIGNMENTS {
+        int id PK
+        int section_id FK
+        int teacher_id FK
+        datetime assigned_at
+    }
+
+    SECTION_STUDENT_ASSIGNMENTS {
+        int id PK
+        int section_id FK
+        int student_id FK
+        datetime assigned_at
+        datetime course_completed_at
+        datetime auto_archive_due_at
+    }
+
+    SECTION_MODULES {
+        int id PK
+        int section_id FK
+        string title
+        int order_index
+        boolean is_published
+        int created_by_teacher_id FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    SECTION_MODULE_ITEMS {
+        int id PK
+        int section_module_id FK
+        string title
+        string item_type
+        int order_index
+        json config
+        boolean is_required
+        boolean is_published
+        datetime created_at
+        datetime updated_at
+    }
+
+    SECTION_MODULE_PROGRESS {
+        int id PK
+        int student_id FK
+        int section_module_id FK
+        string status
+        int progress_percent
+        int completed_items
+        int total_items
+        datetime updated_at
+    }
+
+    SECTION_MODULE_ITEM_PROGRESS {
+        int id PK
+        int student_id FK
+        int section_module_id FK
+        int section_module_item_id FK
+        string status
+        string response_text
+        boolean is_correct
+        float score_percent
+        int attempt_count
+        int duration_seconds
+        json submitted_payload
+        datetime completed_at
+        datetime updated_at
+    }
+
+    CERTIFICATE_TEMPLATES {
+        int id PK
+        int section_id FK
+        int uploaded_by_teacher_id FK
+        string original_file_name
+        string file_path
+        string status
+        int approved_by_user_id FK
+        datetime approved_at
+        datetime created_at
+    }
+
+    ISSUED_CERTIFICATES {
+        int id PK
+        int template_id FK
+        int section_id FK
+        int student_id FK
+        datetime issued_at
+    }
+
+    ADMIN_AUDIT_LOGS {
+        int id PK
+        int admin_user_id FK
+        string action_type
+        string target_type
+        int target_id
+        json details
+        datetime created_at
+    }
+
+    USERS ||--o{ USER_SESSIONS : has
+    USERS ||--o{ PASSWORD_RESET_OTPS : has
+    USERS ||--o{ TEACHER_INVITES : revokes
+    USERS ||--o| ARCHIVED_STUDENT_ACCOUNTS : archives_to
+    USERS ||--o{ REGISTRATIONS : linked_to
+    USERS ||--o{ ENROLLMENTS : assigned_to
+    USERS ||--o{ BATCHES : creates
+    USERS ||--o{ SECTION_TEACHER_ASSIGNMENTS : teacher_in
+    USERS ||--o{ SECTION_STUDENT_ASSIGNMENTS : student_in
+    USERS ||--o{ SECTION_MODULE_PROGRESS : tracks
+    USERS ||--o{ SECTION_MODULE_ITEM_PROGRESS : tracks
+    USERS ||--o{ CERTIFICATE_TEMPLATES : uploads
+    USERS ||--o{ ISSUED_CERTIFICATES : receives
+    USERS ||--o{ ADMIN_AUDIT_LOGS : performs
+
+    REGISTRATIONS ||--o| ENROLLMENTS : becomes
+    BATCHES ||--o{ ENROLLMENTS : contains
+
+    SECTIONS ||--o{ SECTION_TEACHER_ASSIGNMENTS : has
+    SECTIONS ||--o{ SECTION_STUDENT_ASSIGNMENTS : has
+    SECTIONS ||--o{ SECTION_MODULES : has
+    SECTIONS ||--o{ CERTIFICATE_TEMPLATES : has
+    SECTIONS ||--o{ ISSUED_CERTIFICATES : scope
+
+    SECTION_MODULES ||--o{ SECTION_MODULE_ITEMS : contains
+    SECTION_MODULES ||--o{ SECTION_MODULE_PROGRESS : tracks
+    SECTION_MODULES ||--o{ SECTION_MODULE_ITEM_PROGRESS : parent
+    SECTION_MODULE_ITEMS ||--o{ SECTION_MODULE_ITEM_PROGRESS : item_progress
+
+    CERTIFICATE_TEMPLATES ||--o{ ISSUED_CERTIFICATES : issues

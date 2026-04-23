@@ -4,12 +4,34 @@ Monorepo scaffold for:
 - `backend/` FastAPI + PostgreSQL
 - `frontend/` Next.js + TypeScript + Tailwind
 
+## New Machine Setup
+Use the bootstrap script to prepare machine-specific files and install dependencies:
+- `.\setup-machine.cmd`
+- or `powershell -ExecutionPolicy Bypass -File .\setup-machine.ps1`
+
+Helpful options:
+- `-BackendOnly`
+- `-FrontendOnly`
+- `-ForceEnvCopy`
+- `-SkipInstalls`
+- `-DryRun`
+
+What it does:
+- creates `backend/.env` from `backend/.env.example` if missing
+- creates `frontend/.env.local` from `frontend/.env.local.example` if missing
+- creates `backend/.venv` if missing
+- installs `backend/requirements.txt`
+- runs `npm install` in `frontend/`
+
 ## Backend quick start
 1. Open terminal in `backend`.
 2. Create `.env` from `.env.example`.
-3. Install dependencies and run:
-   - `pip install -r requirements.txt`
-   - `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+3. Create a local virtual environment and install dependencies:
+   - `py -m venv .venv`
+   - `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`
+4. Run the backend without relying on PowerShell activation:
+   - `.\.venv\Scripts\python.exe -m alembic upgrade head`
+   - `.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 
 ## Frontend quick start
 1. Open terminal in `frontend`.
@@ -17,24 +39,58 @@ Monorepo scaffold for:
 3. Install dependencies and run:
    - `npm install`
    - `npm run dev`
+   - If the Next.js cache is acting up, use `npm run dev:clean`
 
 ## VS Code One-Click Run
 1. Open `Run and Debug` in VS Code.
-2. Select `Run Full Stack`.
-3. Press `F5`.
+2. Select `Backend: FastAPI (Reload)` or `Run Full Stack (Reload)`.
+3. Press `Ctrl+F5`.
+
+Notes:
+- The backend launch profile now runs `uvicorn` directly under VS Code debug.
+- Before backend startup, the prelaunch flow stops any old listener on port `8000`, ensures the repo-specific PostgreSQL DB exists, and runs migrations.
+- `Activate.ps1` is optional. If PowerShell blocks script activation on your machine, the VS Code launch still works because it calls `backend/.venv/Scripts/python.exe` directly.
+- The supported backend run path is the checked-in launch profile plus its prelaunch tasks.
 
 Available launch profiles:
+- `Backend: FastAPI (Reload)`
 - `Backend: FastAPI`
-- `Frontend: Next.js`
+- `Frontend: Next.js Dev`
+- `Run Full Stack (Reload)` (starts both)
 - `Run Full Stack` (starts both)
 
-## Local database (already provided)
-- Host: `localhost`
-- Port: `5432`
-- Database: `fsl_learning_hub`
-- User: `fsl_app`
-- Password: `admin123`
+## Local database (default)
+- `backend/.env` uses PostgreSQL only.
+- Use a repo-specific DB name to avoid collisions when switching repos.
+- Default for this repo: `fsl_learning_hub_ugnaywebapplication`
+- Startup helper (create DB if missing + migrate): `powershell -ExecutionPolicy Bypass -File .\scripts\dev-db-init.ps1`
+- Template for other repos: `backend/.env.repo-template.example`
 
-## Student Mode
-- The app is configured for student-side flow without login/logout in the UI.
-- Backend uses a default `student_demo` account when no auth token is sent.
+## Debug Troubleshooting
+- Error: `Can't locate revision identified by '2026....'`
+  - Cause: your `DATABASE_URL` points to a shared PostgreSQL DB used by a different repo/branch.
+  - Fix:
+    - Set a repo-specific DB name in `backend/.env` (example: `fsl_learning_hub_ugnaywebapplication`).
+    - Run `powershell -ExecutionPolicy Bypass -File .\scripts\dev-db-init.ps1` to create/migrate.
+
+- Error: `Cannot find module ... node_modules\\next\\dist\\bin\\next`
+  - Cause: incomplete or stale frontend install after switching repos/branches.
+  - Fix: run `npm ci` inside `frontend/` once, then start debug again.
+
+## Local ML storage
+- `backend/.env` now points datasets to `D:\MEGA\datasets`
+- `backend/.env` now points trained model artifacts to `D:\MEGA\artifacts`
+
+## Demo Access
+- Student-facing pages still work in guest mode without login.
+- The login screen includes demo account switching for:
+  - `student_demo` / `student123`
+  - `teacher_demo` / `teacher123`
+- Backend still falls back to `student_demo` when no auth token is sent to student endpoints.
+
+## Teacher Backend Guardrails
+- Teacher UI exploration happens on `tim`, but real backend contracts must come from `upstream/main`
+- Use `docs/teacher-backend-workflow.md` before adding teacher features that need backend support
+- Define new teacher backend work with `docs/templates/teacher-backend-contract.md`
+- Run the backend drift check before review:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\check-teacher-backend-alignment.ps1`

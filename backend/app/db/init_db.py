@@ -1,10 +1,26 @@
-from sqlalchemy import inspect, text
-from sqlalchemy.orm import Session
+import json
+from datetime import datetime
 
+from sqlalchemy import func, inspect
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.sql import text
+
+from app.core.config import settings
+from app.core.datetime_utils import utc_now
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.activity_attempt import ActivityAttempt, ActivityAttemptItem
+from app.models.admin_audit_log import AdminAuditLog
 from app.models.module import Module
+from app.models.module_activity import ModuleActivity
+from app.models.assessment_report import AssessmentReport
+from app.models.certificate import CertificateTemplate, IssuedCertificate
+from app.models.enrollment import Enrollment
+from app.models.lms_progress import SectionModuleItemProgress, SectionModuleProgress
+from app.models.registration import Registration
+from app.models.section import Section, SectionStudentAssignment, SectionTeacherAssignment
+from app.models.section_module import SectionModule, SectionModuleItem
 from app.models.user import User
 
 SEED_MODULES = [
@@ -603,6 +619,451 @@ SEED_MODULES = [
         ],
     },
 ]
+SEED_MODULES.extend(
+    [
+        {
+            "slug": "module-9-draft",
+            "title": "Module 9: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 9,
+            "lessons": [
+                {
+                    "id": "m9-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 9 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+        {
+            "slug": "module-10-draft",
+            "title": "Module 10: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 10,
+            "lessons": [
+                {
+                    "id": "m10-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 10 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+        {
+            "slug": "module-11-draft",
+            "title": "Module 11: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 11,
+            "lessons": [
+                {
+                    "id": "m11-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 11 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+        {
+            "slug": "module-12-draft",
+            "title": "Module 12: Draft Curriculum Slot",
+            "description": (
+                "Reserved backend slot for the next Hand and Heart curriculum module. "
+                "Keep this unpublished until the final lesson media and activity set are approved."
+            ),
+            "order_index": 12,
+            "lessons": [
+                {
+                    "id": "m12-l1",
+                    "title": "Pending Content Review",
+                    "content": "Curriculum content for Module 12 is still being finalized.",
+                }
+            ],
+            "assessments": [],
+            "is_published": False,
+        },
+    ]
+)
+
+
+def _seed_module_by_slug(slug: str) -> dict:
+    return next(item for item in SEED_MODULES if item["slug"] == slug)
+
+
+def _multiple_choice_definition(slug: str) -> dict:
+    module = _seed_module_by_slug(slug)
+    return {
+        "items": [
+            {
+                "item_key": item["id"],
+                "prompt": item["question"],
+                "choices": list(item["choices"]),
+                "expected_answer": item["answer"],
+            }
+            for item in module["assessments"]
+        ]
+    }
+
+
+MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG: dict[str, list[dict]] = {
+    "fsl-alphabets": [
+        {
+            "activity_key": "m1-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the full alphabet review quiz.",
+            "definition": _multiple_choice_definition("fsl-alphabets"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m1-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "identification",
+            "order_index": 2,
+            "instructions": "Identify the hand sign shown in each image prompt.",
+            "definition": {
+                "items": [
+                    {"item_key": "m1-i1", "prompt": "Alphabet image A", "expected_answer": "A"},
+                    {"item_key": "m1-i2", "prompt": "Alphabet image J", "expected_answer": "J"},
+                    {"item_key": "m1-i3", "prompt": "Alphabet image M", "expected_answer": "M"},
+                    {"item_key": "m1-i4", "prompt": "Alphabet image T", "expected_answer": "T"},
+                    {"item_key": "m1-i5", "prompt": "Alphabet image Z", "expected_answer": "Z"},
+                ]
+            },
+            "is_published": True,
+        },
+        {
+            "activity_key": "m1-assessment-3",
+            "title": "Assessment 3",
+            "activity_type": "practical_camera",
+            "order_index": 3,
+            "instructions": "Use the AI camera flow to sign the target letters.",
+            "definition": {
+                "ai_mode": "alphabet",
+                "min_required": 5,
+                "targets": ["A", "B", "C", "J", "Z"],
+            },
+            "is_published": True,
+        },
+    ],
+    "numbers": [
+        {
+            "activity_key": "m2-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the numbers module quiz.",
+            "definition": _multiple_choice_definition("numbers"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign numbers from 1 to 10 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "0-10", "targets": ["1", "2", "3", "4", "5"]},
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-3",
+            "title": "Assessment 3",
+            "activity_type": "practical_camera",
+            "order_index": 3,
+            "instructions": "Sign numbers from 11 to 20 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "11-20", "targets": ["11", "12", "13", "14", "15"]},
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-4",
+            "title": "Assessment 4",
+            "activity_type": "practical_camera",
+            "order_index": 4,
+            "instructions": "Sign numbers from 31 to 40 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "31-40", "targets": ["31", "32", "33", "34", "35"]},
+            "is_published": True,
+        },
+        {
+            "activity_key": "m2-assessment-5",
+            "title": "Assessment 5",
+            "activity_type": "practical_camera",
+            "order_index": 5,
+            "instructions": "Sign numbers from 91 to 100 using the AI camera flow.",
+            "definition": {"ai_mode": "numbers", "number_group": "91-100", "targets": ["91", "92", "93", "94", "95"]},
+            "is_published": True,
+        },
+    ],
+    "common-words": [
+        {
+            "activity_key": "m3-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the greetings quiz.",
+            "definition": _multiple_choice_definition("common-words"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m3-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign greeting expressions using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "greeting",
+                "targets": ["GOOD MORNING", "HELLO", "THANK YOU", "SEE YOU TOMORROW"],
+            },
+            "is_published": True,
+        },
+    ],
+    "family-members": [
+        {
+            "activity_key": "m4-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the family members quiz.",
+            "definition": _multiple_choice_definition("family-members"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m4-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign at least five family-member gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "family",
+                "targets": ["FATHER", "MOTHER", "SON", "DAUGHTER", "COUSIN"],
+            },
+            "is_published": True,
+        },
+    ],
+    "people-description": [
+        {
+            "activity_key": "m5-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the people-description quiz.",
+            "definition": _multiple_choice_definition("people-description"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m5-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign at least five people-description gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "relationship",
+                "targets": ["BOY", "GIRL", "DEAF", "BLIND", "MARRIED"],
+            },
+            "is_published": True,
+        },
+    ],
+    "days": [
+        {
+            "activity_key": "m6-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the days and time-reference quiz.",
+            "definition": _multiple_choice_definition("days"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m6-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign weekday and time-reference gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "date",
+                "targets": ["MONDAY", "FRIDAY", "TODAY", "TOMORROW", "YESTERDAY"],
+            },
+            "is_published": True,
+        },
+    ],
+    "colors-descriptions": [
+        {
+            "activity_key": "m7-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the colors and descriptions quiz.",
+            "definition": _multiple_choice_definition("colors-descriptions"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m7-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "identification",
+            "order_index": 2,
+            "instructions": "Identify the target color sign shown in each prompt.",
+            "definition": {
+                "items": [
+                    {"item_key": "m7-i1", "prompt": "Color prompt BLUE", "expected_answer": "BLUE"},
+                    {"item_key": "m7-i2", "prompt": "Color prompt RED", "expected_answer": "RED"},
+                    {"item_key": "m7-i3", "prompt": "Color prompt YELLOW", "expected_answer": "YELLOW"},
+                    {"item_key": "m7-i4", "prompt": "Color prompt PINK", "expected_answer": "PINK"},
+                    {"item_key": "m7-i5", "prompt": "Color prompt VIOLET", "expected_answer": "VIOLET"},
+                ]
+            },
+            "is_published": True,
+        },
+        {
+            "activity_key": "m7-assessment-3",
+            "title": "Assessment 3",
+            "activity_type": "practical_camera",
+            "order_index": 3,
+            "instructions": "Sign at least five color or descriptive gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "color",
+                "targets": ["BLUE", "GREEN", "RED", "LIGHT", "DARK"],
+            },
+            "is_published": True,
+        },
+    ],
+    "basic-conversations": [
+        {
+            "activity_key": "m8-assessment-1",
+            "title": "Assessment 1",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Answer the basic-conversations quiz.",
+            "definition": _multiple_choice_definition("basic-conversations"),
+            "is_published": True,
+        },
+        {
+            "activity_key": "m8-assessment-2",
+            "title": "Assessment 2",
+            "activity_type": "practical_camera",
+            "order_index": 2,
+            "instructions": "Sign at least five response gestures using the AI camera flow.",
+            "definition": {
+                "ai_mode": "words",
+                "word_group": "responses",
+                "targets": ["YES", "NO", "UNDERSTAND", "DON'T KNOW", "SLOW"],
+            },
+            "is_published": True,
+        },
+    ],
+    "module-9-draft": [
+        {
+            "activity_key": "m9-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m9-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+    "module-10-draft": [
+        {
+            "activity_key": "m10-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m10-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+    "module-11-draft": [
+        {
+            "activity_key": "m11-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m11-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+    "module-12-draft": [
+        {
+            "activity_key": "m12-assessment-1",
+            "title": "Draft Activity",
+            "activity_type": "multiple_choice",
+            "order_index": 1,
+            "instructions": "Draft placeholder activity until the final module content is approved.",
+            "definition": {"items": [{"item_key": "m12-d1", "prompt": "Draft placeholder question", "choices": ["Pending"], "expected_answer": "Pending"}]},
+            "is_published": False,
+        }
+    ],
+}
+
+REQUIRED_TABLES = {
+    "admin_audit_logs",
+    "activity_attempt_items",
+    "activity_attempts",
+    "archived_student_accounts",
+    "assessment_reports",
+    "batches",
+    "certificate_templates",
+    "enrollments",
+    "issued_certificates",
+    "module_activities",
+    "modules",
+    "password_reset_otps",
+    "registrations",
+    "section_module_item_progress",
+    "section_module_items",
+    "section_module_progress",
+    "section_modules",
+    "section_student_assignments",
+    "section_teacher_assignments",
+    "sections",
+    "teacher_invites",
+    "user_module_progress",
+    "user_sessions",
+    "users",
+}
+
+
+def _table_exists(table_name: str) -> bool:
+    inspector = inspect(engine)
+    return table_name in set(inspector.get_table_names())
+
+
+def _column_exists(table_name: str, column_name: str) -> bool:
+    if not _table_exists(table_name):
+        return False
+    inspector = inspect(engine)
+    return column_name in {column["name"] for column in inspector.get_columns(table_name)}
+
+
+def _add_column_if_missing(table_name: str, column_name: str, ddl: str) -> None:
+    if _column_exists(table_name, column_name):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(ddl))
+
+
+def _create_table_if_missing(table_name: str, ddl: str) -> None:
+    if _table_exists(table_name):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(ddl))
 
 
 def seed_modules(db: Session) -> None:
@@ -617,35 +1078,716 @@ def seed_modules(db: Session) -> None:
         existing.description = item["description"]
         existing.lessons = item["lessons"]
         existing.assessments = item["assessments"]
-        existing.is_published = True
+        existing.is_published = item.get("is_published", True)
     db.commit()
+
+
+def seed_module_activities(db: Session) -> None:
+    modules_by_slug = {module.slug: module for module in db.query(Module).all()}
+    for slug, activities in MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.items():
+        module = modules_by_slug.get(slug)
+        if not module:
+            continue
+
+        existing_by_key = {
+            activity.activity_key: activity
+            for activity in db.query(ModuleActivity).filter(ModuleActivity.module_id == module.id).all()
+        }
+
+        for activity in activities:
+            existing = existing_by_key.get(activity["activity_key"])
+            if existing is None:
+                db.add(
+                    ModuleActivity(
+                        module_id=module.id,
+                        activity_key=activity["activity_key"],
+                        title=activity["title"],
+                        activity_type=activity["activity_type"],
+                        order_index=activity["order_index"],
+                        instructions=activity.get("instructions"),
+                        definition=activity.get("definition", {}),
+                        is_published=activity.get("is_published", True),
+                    )
+                )
+                continue
+
+            existing.title = activity["title"]
+            existing.activity_type = activity["activity_type"]
+            existing.order_index = activity["order_index"]
+            existing.instructions = activity.get("instructions")
+            existing.definition = activity.get("definition", {})
+            existing.is_published = activity.get("is_published", True)
+            db.add(existing)
+
+    db.commit()
+
+
+def _seed_module_for_order(order_index: int) -> dict | None:
+    for item in SEED_MODULES:
+        if item.get("order_index") == order_index:
+            return item
+    return None
+
+
+def _normalize_seed_question_key(value: str, fallback: str) -> str:
+    normalized = "".join(char.lower() if char.isalnum() else "-" for char in value.strip())
+    normalized = normalized.strip("-")
+    while "--" in normalized:
+        normalized = normalized.replace("--", "-")
+    return normalized or fallback
+
+
+def _parse_positive_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        parsed = value.strip()
+        if parsed.isdigit():
+            as_int = int(parsed)
+            return as_int if as_int > 0 else None
+    return None
+
+
+def _item_seed_key(item: SectionModuleItem) -> str:
+    if not isinstance(item.config, dict):
+        return ""
+    return str(item.config.get("seed_key") or "").strip()
+
+
+def _seeded_assessment_payload(order_index: int, blueprint: dict) -> dict | None:
+    activity_key = str(blueprint.get("activity_key") or "").strip()
+    if not activity_key:
+        return None
+
+    item_title = str(blueprint.get("title") or "Assessment").strip() or "Assessment"
+    instructions = str(blueprint.get("instructions") or "").strip() or None
+    activity_type = str(blueprint.get("activity_type") or "").strip().lower()
+    definition = blueprint.get("definition") if isinstance(blueprint.get("definition"), dict) else {}
+    seed_key = f"alpha-{activity_key}"
+
+    if activity_type == "multiple_choice":
+        raw_items = definition.get("items") if isinstance(definition.get("items"), list) else []
+        questions: list[dict] = []
+        for index, entry in enumerate(raw_items, start=1):
+            if not isinstance(entry, dict):
+                continue
+            prompt = str(entry.get("prompt") or "").strip()
+            raw_choices = entry.get("choices") if isinstance(entry.get("choices"), list) else []
+            choices = [str(choice).strip() for choice in raw_choices if str(choice).strip()]
+            correct_answer = str(entry.get("expected_answer") or "").strip()
+            if not prompt or len(choices) < 2 or not correct_answer:
+                continue
+            raw_item_key = str(entry.get("item_key") or f"q{index}").strip()
+            question_key = _normalize_seed_question_key(raw_item_key, f"q{index}")
+            questions.append(
+                {
+                    "question_key": question_key,
+                    "question": prompt,
+                    "choices": choices,
+                    "correct_answer": correct_answer,
+                }
+            )
+
+        if not questions:
+            return None
+        first_question = questions[0]
+        return {
+            "seed_key": seed_key,
+            "title": item_title,
+            "item_type": "multiple_choice_assessment",
+            "instructions": instructions or "Answer all questions.",
+            "config": {
+                "seed_key": seed_key,
+                "question": first_question["question"],
+                "choices": first_question["choices"],
+                "correct_answer": first_question["correct_answer"],
+                "questions": questions,
+            },
+        }
+
+    if activity_type == "identification":
+        raw_items = definition.get("items") if isinstance(definition.get("items"), list) else []
+        questions: list[dict] = []
+        for index, entry in enumerate(raw_items, start=1):
+            if not isinstance(entry, dict):
+                continue
+            prompt = str(entry.get("prompt") or "").strip()
+            correct_answer = str(entry.get("expected_answer") or "").strip()
+            if not prompt or not correct_answer:
+                continue
+            raw_item_key = str(entry.get("item_key") or f"q{index}").strip()
+            question_key = _normalize_seed_question_key(raw_item_key, f"q{index}")
+            accepted_answers = [correct_answer]
+            questions.append(
+                {
+                    "question_key": question_key,
+                    "question": prompt,
+                    "correct_answer": correct_answer,
+                    "accepted_answers": accepted_answers,
+                }
+            )
+
+        if not questions:
+            return None
+        first_question = questions[0]
+        return {
+            "seed_key": seed_key,
+            "title": item_title,
+            "item_type": "identification_assessment",
+            "instructions": instructions or "Type the correct answer for each prompt.",
+            "config": {
+                "seed_key": seed_key,
+                "question": first_question["question"],
+                "correct_answer": first_question["correct_answer"],
+                "accepted_answers": first_question["accepted_answers"],
+                "questions": questions,
+            },
+        }
+
+    if activity_type == "practical_camera":
+        raw_targets = definition.get("targets") if isinstance(definition.get("targets"), list) else []
+        targets = [str(target).strip() for target in raw_targets if str(target).strip()]
+        if not targets:
+            return None
+
+        lab_mode = str(definition.get("ai_mode") or "").strip().lower()
+        if lab_mode not in {"alphabet", "numbers", "words"}:
+            lab_mode = "alphabet"
+
+        question_set: list[dict] = []
+        for index, target in enumerate(targets, start=1):
+            question_set.append(
+                {
+                    "question_key": f"q{index}",
+                    "question": f"Sign: {target}",
+                    "correct_answer": target,
+                }
+            )
+
+        requested_required_count = _parse_positive_int(definition.get("min_required"))
+        max_entries = len(question_set)
+        required_count = requested_required_count if requested_required_count is not None else max_entries
+        required_count = max(1, min(required_count, max_entries))
+        require_all = required_count >= max_entries
+
+        numbers_category = None
+        words_category = None
+        if lab_mode == "numbers":
+            candidate = str(definition.get("number_group") or "").strip()
+            if candidate in {
+                "0-10",
+                "11-20",
+                "21-30",
+                "31-40",
+                "41-50",
+                "51-60",
+                "61-70",
+                "71-80",
+                "81-90",
+                "91-100",
+            }:
+                numbers_category = candidate
+        if lab_mode == "words":
+            candidate = str(definition.get("word_group") or "").strip()
+            if candidate in {"greeting", "responses", "date", "family", "relationship", "color"}:
+                words_category = candidate
+
+        helper_text = "Open the camera interface, analyze your sign, and submit the detected result."
+        if lab_mode == "numbers":
+            helper_text = "Choose the range first, then sign each target inside the camera box."
+        elif lab_mode == "words":
+            helper_text = "Choose the words category first, then sign each target inside the camera box."
+
+        first_question = question_set[0]
+        return {
+            "seed_key": seed_key,
+            "title": item_title,
+            "item_type": "signing_lab_assessment",
+            "instructions": instructions or "Complete the camera interface tasks.",
+            "config": {
+                "seed_key": seed_key,
+                "question": first_question["question"],
+                "expected_answer": first_question["correct_answer"],
+                "helper_text": helper_text,
+                "lab_mode": lab_mode,
+                "numbers_category": numbers_category,
+                "words_category": words_category,
+                "questions": question_set,
+                "require_all": require_all,
+                "required_count": required_count,
+            },
+        }
+
+    return None
+
+
+def sync_alpha_section_assessment_one_items(db: Session) -> None:
+    alpha_section = (
+        db.query(Section)
+        .options(joinedload(Section.modules).joinedload(SectionModule.items))
+        .filter(func.lower(Section.code) == "alpha")
+        .first()
+    )
+    if alpha_section is None:
+        alpha_section = (
+            db.query(Section)
+            .options(joinedload(Section.modules).joinedload(SectionModule.items))
+            .filter(func.lower(Section.name) == "alpha")
+            .first()
+        )
+    if alpha_section is None:
+        return
+
+    teacher = (
+        db.query(User)
+        .filter(User.role == "teacher", User.archived_at.is_(None))
+        .order_by(User.id.asc())
+        .first()
+    )
+    teacher_id = teacher.id if teacher else None
+
+    changed = False
+    modules_by_order = {module.order_index: module for module in alpha_section.modules}
+    for order_index in range(1, 9):
+        seed_module = _seed_module_for_order(order_index)
+        if seed_module is None:
+            continue
+        module_slug = str(seed_module.get("slug") or "").strip()
+
+        section_module = modules_by_order.get(order_index)
+        if section_module is None:
+            section_module = SectionModule(
+                section_id=alpha_section.id,
+                title=seed_module["title"],
+                description=seed_module["description"],
+                order_index=order_index,
+                is_published=True,
+                created_by_teacher_id=teacher_id,
+            )
+            db.add(section_module)
+            db.flush()
+            modules_by_order[order_index] = section_module
+            changed = True
+
+        raw_blueprints = MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.get(module_slug) or []
+        target_assessments = []
+        for blueprint in raw_blueprints:
+            if not isinstance(blueprint, dict):
+                continue
+            payload = _seeded_assessment_payload(order_index, blueprint)
+            if payload:
+                target_assessments.append(payload)
+        if not target_assessments:
+            continue
+
+        target_seed_keys = {str(payload["seed_key"]) for payload in target_assessments}
+        module_seed_prefix = f"alpha-m{order_index}-"
+
+        # Remove stale seeded assessment rows for this module.
+        for item in list(section_module.items):
+            seed_key = _item_seed_key(item)
+            if seed_key.startswith(module_seed_prefix) and seed_key not in target_seed_keys:
+                db.delete(item)
+                changed = True
+        db.flush()
+
+        current_items = (
+            db.query(SectionModuleItem)
+            .filter(SectionModuleItem.section_module_id == section_module.id)
+            .order_by(SectionModuleItem.order_index.asc(), SectionModuleItem.id.asc())
+            .all()
+        )
+        existing_by_seed_key = {key: item for item in current_items if (key := _item_seed_key(item))}
+
+        for payload in target_assessments:
+            seed_key = str(payload["seed_key"])
+            target_title = str(payload["title"])
+            target_item_type = str(payload["item_type"])
+            target_instructions = payload["instructions"]
+            target_config = payload["config"]
+
+            item = existing_by_seed_key.get(seed_key)
+            if item is None:
+                normalized_title = target_title.strip().lower()
+                item = next(
+                    (
+                        candidate
+                        for candidate in current_items
+                        if candidate.item_type == target_item_type
+                        and candidate.title.strip().lower() == normalized_title
+                        and not _item_seed_key(candidate)
+                    ),
+                    None,
+                )
+
+            if item is None:
+                item = SectionModuleItem(
+                    section_module_id=section_module.id,
+                    title=target_title,
+                    item_type=target_item_type,
+                    order_index=max((row.order_index for row in current_items), default=0) + 1,
+                    instructions=target_instructions,
+                    content_text=None,
+                    config=target_config,
+                    is_required=True,
+                    is_published=True,
+                )
+                db.add(item)
+                db.flush()
+                current_items.append(item)
+                existing_by_seed_key[seed_key] = item
+                changed = True
+                continue
+
+            item_changed = False
+            if item.title != target_title:
+                item.title = target_title
+                item_changed = True
+            if item.item_type != target_item_type:
+                item.item_type = target_item_type
+                item_changed = True
+            if item.instructions != target_instructions:
+                item.instructions = target_instructions
+                item_changed = True
+            if item.content_text is not None:
+                item.content_text = None
+                item_changed = True
+            if item.config != target_config:
+                item.config = target_config
+                item_changed = True
+            if not item.is_required:
+                item.is_required = True
+                item_changed = True
+            if not item.is_published:
+                item.is_published = True
+                item_changed = True
+            if item_changed:
+                db.add(item)
+                changed = True
+            existing_by_seed_key[seed_key] = item
+
+        # Keep existing readable/custom items first, then place seeded assessments in blueprint order.
+        refreshed_items = (
+            db.query(SectionModuleItem)
+            .filter(SectionModuleItem.section_module_id == section_module.id)
+            .order_by(SectionModuleItem.order_index.asc(), SectionModuleItem.id.asc())
+            .all()
+        )
+        refreshed_seeded_keys = {_item_seed_key(item) for item in refreshed_items if _item_seed_key(item)}
+        non_seeded_items = [
+            item for item in refreshed_items if _item_seed_key(item) not in target_seed_keys
+        ]
+        ordered_items = list(non_seeded_items)
+        for payload in target_assessments:
+            key = str(payload["seed_key"])
+            if key not in refreshed_seeded_keys:
+                continue
+            seeded_item = next((item for item in refreshed_items if _item_seed_key(item) == key), None)
+            if seeded_item:
+                ordered_items.append(seeded_item)
+
+        for new_index, item in enumerate(ordered_items, start=1):
+            if item.order_index != new_index:
+                item.order_index = new_index
+                db.add(item)
+                changed = True
+
+    if changed:
+        db.commit()
 
 
 def seed_demo_user(db: Session) -> None:
     existing_user = db.query(User).filter(User.username == "student_demo").first()
     if existing_user:
         return
-    db.add(User(username="student_demo", password_hash=hash_password("student123")))
+    db.add(
+        User(
+            username="student_demo",
+            password_hash=hash_password("student123"),
+            role="student",
+        )
+    )
     db.commit()
 
 
-def _add_column_if_missing(table_name: str, column_name: str, ddl_sql: str) -> None:
+def seed_admin_user(db: Session) -> None:
+    existing_admin = db.query(User).filter(User.role == "admin", User.archived_at.is_(None)).first()
+    if existing_admin:
+        return
+    db.add(
+        User(
+            username="admin_demo",
+            email="admin@ugnay.local",
+            password_hash=hash_password("Admin123!"),
+            role="admin",
+            first_name="System",
+            last_name="Admin",
+            must_change_password=False,
+        )
+    )
+    db.commit()
+
+
+def backfill_enrollments(db: Session) -> None:
+    registrations = (
+        db.query(Registration)
+        .outerjoin(Enrollment, Enrollment.registration_id == Registration.id)
+        .filter(Enrollment.id.is_(None))
+        .all()
+    )
+    for registration in registrations:
+        normalized_status = registration.status
+        if normalized_status == "validated":
+            normalized_status = "approved"
+
+        payment_review_status = "submitted"
+        if normalized_status == "approved":
+            payment_review_status = "approved"
+        elif normalized_status == "rejected":
+            payment_review_status = "rejected"
+
+        enrollment = Enrollment(
+            registration_id=registration.id,
+            user_id=registration.linked_user_id,
+            status=normalized_status,
+            payment_review_status=payment_review_status,
+            review_notes=registration.notes,
+            reviewed_at=registration.validated_at,
+            approved_at=registration.validated_at if normalized_status == "approved" else None,
+        )
+        db.add(enrollment)
+
+    db.commit()
+
+
+def _coerce_json_value(raw_value):
+    if raw_value in (None, ""):
+        return []
+    if isinstance(raw_value, (list, dict)):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+    return raw_value
+
+
+def _coerce_datetime_value(raw_value) -> datetime | None:
+    if raw_value in (None, ""):
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value
+    value = str(raw_value).replace("Z", "+00:00")
+    return datetime.fromisoformat(value)
+
+
+def _ensure_module_activity(
+    db: Session,
+    *,
+    module_id: int,
+    activity_key: str,
+    activity_title: str,
+    activity_type: str,
+) -> ModuleActivity:
+    activity = (
+        db.query(ModuleActivity)
+        .filter(ModuleActivity.module_id == module_id, ModuleActivity.activity_key == activity_key)
+        .first()
+    )
+    if activity:
+        return activity
+
+    next_order = (
+        db.query(ModuleActivity)
+        .filter(ModuleActivity.module_id == module_id)
+        .count()
+        + 1
+    )
+    activity = ModuleActivity(
+        module_id=module_id,
+        activity_key=activity_key,
+        title=activity_title,
+        activity_type=activity_type or "legacy_import",
+        order_index=next_order,
+        instructions="Legacy activity imported during database bootstrap.",
+        definition={"items": []},
+        is_published=True,
+    )
+    db.add(activity)
+    db.flush()
+    return activity
+
+
+def backfill_legacy_activity_attempts(db: Session) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
-    if table_name not in existing_tables:
+    if "activity_attempts" not in existing_tables or "module_activities" not in existing_tables:
         return
-    existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
-    if column_name in existing_columns:
-        return
-    with engine.begin() as connection:
-        connection.execute(text(ddl_sql))
+
+    detailed_import_keys: set[tuple[int, int, str]] = set()
+    if "user_assessment_attempts" in existing_tables:
+        legacy_rows = db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    module_id,
+                    assessment_id,
+                    assessment_title,
+                    assessment_type,
+                    score_percent,
+                    score_correct,
+                    score_total,
+                    answers,
+                    snapshots,
+                    submitted_at
+                FROM user_assessment_attempts
+                ORDER BY id ASC
+                """
+            )
+        ).mappings()
+
+        for row in legacy_rows:
+            note_token = f"legacy_attempt_id={row['id']}"
+            if (
+                db.query(ActivityAttempt)
+                .filter(ActivityAttempt.source == "legacy_import", ActivityAttempt.notes == note_token)
+                .first()
+            ):
+                detailed_import_keys.add((row["user_id"], row["module_id"], str(row["assessment_id"])))
+                continue
+
+            activity = _ensure_module_activity(
+                db,
+                module_id=row["module_id"],
+                activity_key=str(row["assessment_id"]),
+                activity_title=str(row["assessment_title"] or row["assessment_id"]),
+                activity_type=str(row["assessment_type"] or "legacy_import"),
+            )
+            answers = list(_coerce_json_value(row["answers"]) or [])
+            snapshots = list(_coerce_json_value(row["snapshots"]) or [])
+            snapshots_by_item = {
+                str(snapshot.get("assessment_item_id") or "").strip(): snapshot
+                for snapshot in snapshots
+                if isinstance(snapshot, dict) and str(snapshot.get("assessment_item_id") or "").strip()
+            }
+
+            right_count = int(row["score_correct"] or 0)
+            total_items = int(row["score_total"] or 0)
+            attempt = ActivityAttempt(
+                user_id=row["user_id"],
+                module_id=row["module_id"],
+                module_activity_id=activity.id,
+                activity_key=activity.activity_key,
+                activity_title=activity.title,
+                activity_type=activity.activity_type,
+                right_count=right_count,
+                wrong_count=max(total_items - right_count, 0),
+                total_items=total_items,
+                score_percent=float(row["score_percent"] or 0),
+                improvement_areas=[],
+                ai_metadata={"legacy_snapshot_count": len(snapshots)},
+                source="legacy_import",
+                notes=note_token,
+                submitted_at=_coerce_datetime_value(row["submitted_at"]) or utc_now(),
+            )
+            db.add(attempt)
+            db.flush()
+
+            for index, answer in enumerate(answers, start=1):
+                if not isinstance(answer, dict):
+                    continue
+                item_key = str(answer.get("assessment_item_id") or f"legacy-item-{index}").strip()
+                snapshot = snapshots_by_item.get(item_key)
+                item_ai_metadata = {}
+                if snapshot:
+                    item_ai_metadata = {
+                        key: value for key, value in snapshot.items() if key != "assessment_item_id"
+                    }
+                db.add(
+                    ActivityAttemptItem(
+                        attempt_id=attempt.id,
+                        item_key=item_key,
+                        prompt=answer.get("prompt"),
+                        expected_answer=answer.get("expected_response"),
+                        student_answer=answer.get("response_text"),
+                        is_correct=answer.get("is_correct"),
+                        confidence=answer.get("confidence"),
+                        ai_metadata=item_ai_metadata,
+                    )
+                )
+
+            detailed_import_keys.add((row["user_id"], row["module_id"], str(row["assessment_id"])))
+
+        db.commit()
+
+    report_rows = (
+        db.query(AssessmentReport)
+        .order_by(AssessmentReport.created_at.asc(), AssessmentReport.id.asc())
+        .all()
+    )
+    for report in report_rows:
+        report_key = (report.user_id, report.module_id, report.assessment_id)
+        if report_key in detailed_import_keys:
+            continue
+
+        note_token = f"legacy_report_id={report.id}"
+        if (
+            db.query(ActivityAttempt)
+            .filter(ActivityAttempt.source == "legacy_report_import", ActivityAttempt.notes == note_token)
+            .first()
+        ):
+            continue
+
+        activity = _ensure_module_activity(
+            db,
+            module_id=report.module_id,
+            activity_key=report.assessment_id,
+            activity_title=report.assessment_title,
+            activity_type="legacy_report",
+        )
+        db.add(
+            ActivityAttempt(
+                user_id=report.user_id,
+                module_id=report.module_id,
+                module_activity_id=activity.id,
+                activity_key=activity.activity_key,
+                activity_title=activity.title,
+                activity_type=activity.activity_type,
+                right_count=report.right_count,
+                wrong_count=report.wrong_count,
+                total_items=report.total_items,
+                score_percent=report.score_percent,
+                improvement_areas=list(report.improvement_areas or []),
+                ai_metadata={},
+                source="legacy_report_import",
+                notes=note_token,
+                submitted_at=report.created_at,
+            )
+        )
+
+    db.commit()
+
+
+def validate_seed_data() -> None:
+    published_slugs = {item["slug"] for item in SEED_MODULES if item.get("is_published", True)}
+    for item in SEED_MODULES:
+        if item.get("is_published", True) and not item.get("lessons"):
+            raise RuntimeError(f"Published module '{item['slug']}' is missing lessons.")
 
 
 def ensure_schema_updates() -> None:
+    published_slugs = {item["slug"] for item in SEED_MODULES if item.get("is_published", True)}
+
     # Users table profile/account lifecycle columns.
     _add_column_if_missing("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR(120)")
     _add_column_if_missing("users", "middle_name", "ALTER TABLE users ADD COLUMN middle_name VARCHAR(120)")
     _add_column_if_missing("users", "last_name", "ALTER TABLE users ADD COLUMN last_name VARCHAR(120)")
+    _add_column_if_missing(
+        "users", "company_name", "ALTER TABLE users ADD COLUMN company_name VARCHAR(200)"
+    )
     _add_column_if_missing("users", "email", "ALTER TABLE users ADD COLUMN email VARCHAR(255)")
     _add_column_if_missing(
         "users", "phone_number", "ALTER TABLE users ADD COLUMN phone_number VARCHAR(40)"
@@ -664,6 +1806,57 @@ def ensure_schema_updates() -> None:
         "users",
         "role",
         "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'",
+    )
+    _add_column_if_missing(
+        "users",
+        "archived_at",
+        "ALTER TABLE users ADD COLUMN archived_at TIMESTAMP",
+    )
+    _add_column_if_missing(
+        "enrollments",
+        "rejection_reason_code",
+        "ALTER TABLE enrollments ADD COLUMN rejection_reason_code VARCHAR(40)",
+    )
+    _add_column_if_missing(
+        "enrollments",
+        "rejection_reason_detail",
+        "ALTER TABLE enrollments ADD COLUMN rejection_reason_detail TEXT",
+    )
+    _create_table_if_missing(
+        "archived_student_accounts",
+        """
+        CREATE TABLE archived_student_accounts (
+            id INTEGER PRIMARY KEY,
+            original_user_id INTEGER NOT NULL UNIQUE,
+            original_username VARCHAR(120) NOT NULL,
+            original_email VARCHAR(255),
+            first_name VARCHAR(120),
+            middle_name VARCHAR(120),
+            last_name VARCHAR(120),
+            company_name VARCHAR(200),
+            phone_number VARCHAR(40),
+            address TEXT,
+            birth_date DATE,
+            profile_image_path VARCHAR(500),
+            role VARCHAR(20) NOT NULL DEFAULT 'student',
+            enrollment_id INTEGER,
+            registration_id INTEGER,
+            batch_id INTEGER,
+            archive_reason VARCHAR(120),
+            archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(original_user_id) REFERENCES users(id)
+        )
+        """,
+    )
+    _add_column_if_missing(
+        "archived_student_accounts",
+        "company_name",
+        "ALTER TABLE archived_student_accounts ADD COLUMN company_name VARCHAR(200)",
+    )
+    _add_column_if_missing(
+        "archived_student_accounts",
+        "company_name",
+        "ALTER TABLE archived_student_accounts ADD COLUMN company_name VARCHAR(200)",
     )
     _add_column_if_missing(
         "user_module_progress",
@@ -700,32 +1893,54 @@ def ensure_schema_updates() -> None:
         "report_sent_at",
         "ALTER TABLE user_module_progress ADD COLUMN report_sent_at TIMESTAMP",
     )
+    _add_column_if_missing(
+        "section_student_assignments",
+        "course_completed_at",
+        "ALTER TABLE section_student_assignments ADD COLUMN course_completed_at TIMESTAMP",
+    )
+    _add_column_if_missing(
+        "section_student_assignments",
+        "auto_archive_due_at",
+        "ALTER TABLE section_student_assignments ADD COLUMN auto_archive_due_at TIMESTAMP",
+    )
 
-    # Registration workflow columns for teacher validation.
-    _add_column_if_missing(
-        "registrations", "status", "ALTER TABLE registrations ADD COLUMN status VARCHAR(20) DEFAULT 'pending'"
+    missing_activity_blueprints = sorted(
+        slug for slug in published_slugs if not MODULE_ACTIVITY_BLUEPRINTS_BY_SLUG.get(slug)
     )
-    _add_column_if_missing(
-        "registrations", "validated_at", "ALTER TABLE registrations ADD COLUMN validated_at TIMESTAMP"
-    )
-    _add_column_if_missing(
-        "registrations", "validated_by", "ALTER TABLE registrations ADD COLUMN validated_by VARCHAR(120)"
-    )
-    _add_column_if_missing(
-        "registrations", "linked_user_id", "ALTER TABLE registrations ADD COLUMN linked_user_id INTEGER"
-    )
-    _add_column_if_missing(
-        "registrations", "issued_username", "ALTER TABLE registrations ADD COLUMN issued_username VARCHAR(120)"
-    )
-    _add_column_if_missing("registrations", "notes", "ALTER TABLE registrations ADD COLUMN notes TEXT")
+    if missing_activity_blueprints:
+        raise RuntimeError(
+            "Published modules are missing activity blueprints: "
+            + ", ".join(missing_activity_blueprints)
+        )
+
+
+def _verify_required_tables() -> None:
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    missing_tables = sorted(REQUIRED_TABLES - existing_tables)
+    if missing_tables:
+        raise RuntimeError(
+            "Database schema is missing required tables. "
+            "Run Alembic migrations (`alembic upgrade head`) or use SQLite local bootstrap. "
+            f"Missing: {', '.join(missing_tables)}"
+        )
 
 
 def init_db() -> None:
     # Import models before create_all so SQLAlchemy registers metadata.
     from app import models  # noqa: F401
 
+    validate_seed_data()
     Base.metadata.create_all(bind=engine)
     ensure_schema_updates()
+    if not settings.should_auto_bootstrap_schema:
+        _verify_required_tables()
+
     with SessionLocal() as db:
-        seed_modules(db)
         seed_demo_user(db)
+        seed_admin_user(db)
+        backfill_enrollments(db)
+        backfill_legacy_activity_attempts(db)
+        # Disabled to preserve teacher-authored module/assessment edits.
+        # This seeded sync overwrites alpha assessment content and question sets.
+        # sync_alpha_section_assessment_one_items(db)

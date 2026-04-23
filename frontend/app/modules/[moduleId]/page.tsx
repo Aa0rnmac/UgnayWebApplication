@@ -1,3116 +1,1636 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { SigningLab } from "@/components/lab/signing-lab";
 
 import {
-  detectOpenPalmFromImage,
-  getModules,
-  ModuleItem,
-  predictSignFromImage,
-  updateModuleProgress,
+  completeReadableItem,
+  getStudentCertificateDownloadStatus,
+  getStudentCourse,
+  type NumbersCategory,
+  type RecognitionMode,
+  type ModuleAsset,
+  resolveUploadsBase,
+  submitStudentItem,
+  uploadStudentItemSubmission,
+  type StudentCertificateDownloadStatus,
+  type StudentCourse,
+  type StudentCourseItem,
+  type StudentCourseModule,
+  type WordsCategory
 } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 
-type AssessmentReportPayload = {
-  assessmentId: string;
-  assessmentTitle: string;
-  right: number;
-  wrong: number;
-  total: number;
-  scorePercent: number;
-  improvementAreas: string[];
-};
+const CONTENT_ITEM_TYPES = new Set([
+  "readable",
+  "video_resource",
+  "document_resource",
+  "interactive_resource",
+  "external_link_resource"
+]);
 
-function loadSessionValue<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") {
-    return fallback;
+const NUMBER_CATEGORY_VALUES: NumbersCategory[] = [
+  "0-10",
+  "11-20",
+  "21-30",
+  "31-40",
+  "41-50",
+  "51-60",
+  "61-70",
+  "71-80",
+  "81-90",
+  "91-100",
+];
+
+const WORD_CATEGORY_VALUES: WordsCategory[] = [
+  "greeting",
+  "responses",
+  "date",
+  "family",
+  "relationship",
+  "color",
+];
+
+const SIGNING_ANSWER_NAV_KEYS = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "Tab",
+  "Shift",
+  "Control",
+  "Alt",
+  "Meta",
+  "Escape",
+]);
+
+function handleSigningAnswerKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  if (event.key === "Backspace" || event.key === " ") {
+    return;
   }
-  try {
-    const raw = window.sessionStorage.getItem(key);
-    if (!raw) {
-      return fallback;
-    }
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
+  if (event.key === "Delete" || SIGNING_ANSWER_NAV_KEYS.has(event.key)) {
+    return;
   }
+  if ((event.ctrlKey || event.metaKey) && ["a", "c", "x"].includes(event.key.toLowerCase())) {
+    return;
+  }
+  event.preventDefault();
 }
 
-function useSessionState<T>(key: string, initial: T) {
-  const initialRef = useRef(initial);
-  const [value, setValue] = useState<T>(() => loadSessionValue(key, initialRef.current));
-
-  useEffect(() => {
-    setValue(loadSessionValue(key, initialRef.current));
-  }, [key]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    try {
-      window.sessionStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // Ignore storage errors to keep UI functional.
-    }
-  }, [key, value]);
-
-  return [value, setValue] as const;
+function isContentItemType(itemType: StudentCourseItem["item_type"]) {
+  return CONTENT_ITEM_TYPES.has(itemType);
 }
 
-const MODULE1_AI_SIGN_IMAGES = [
-  { letter: "A", src: "/module-assets/m1/ai/a.png" },
-  { letter: "B", src: "/module-assets/m1/ai/b.png" },
-  { letter: "C", src: "/module-assets/m1/ai/c.png" },
-  { letter: "D", src: "/module-assets/m1/ai/d.png" },
-  { letter: "E", src: "/module-assets/m1/ai/e.png" },
-  { letter: "F", src: "/module-assets/m1/ai/f.png" },
-  { letter: "G", src: "/module-assets/m1/ai/g.png" },
-  { letter: "H", src: "/module-assets/m1/ai/h.png" },
-  { letter: "I", src: "/module-assets/m1/ai/i.png" }
-] as const;
+type ReadablePresentationMode = "auto" | "cards" | "slideshow";
 
-const MODULE1_J_MOTION_VIDEO = "/module-assets/m1/motion/j.mp4";
-const MODULE1_Z_MOTION_VIDEO = "/module-assets/m1/motion/z.mp4";
-
-const MODULE1_JR_SIGN_IMAGES = [
-  { letter: "J", src: "/module-assets/m1/ai/j.png" },
-  { letter: "K", src: "/module-assets/m1/ai/k.png" },
-  { letter: "L", src: "/module-assets/m1/ai/l.png" },
-  { letter: "M", src: "/module-assets/m1/ai/m.png" },
-  { letter: "N", src: "/module-assets/m1/ai/n.png" },
-  { letter: "O", src: "/module-assets/m1/ai/o.png" },
-  { letter: "P", src: "/module-assets/m1/ai/p.png" },
-  { letter: "Q", src: "/module-assets/m1/ai/q.png" },
-  { letter: "R", src: "/module-assets/m1/ai/r.png" }
-] as const;
-
-const MODULE1_SZ_SIGN_IMAGES = [
-  { letter: "S", src: "/module-assets/m1/ai/s.png" },
-  { letter: "T", src: "/module-assets/m1/ai/t.png" },
-  { letter: "U", src: "/module-assets/m1/ai/u.png" },
-  { letter: "V", src: "/module-assets/m1/ai/v.png" },
-  { letter: "W", src: "/module-assets/m1/ai/w.png" },
-  { letter: "X", src: "/module-assets/m1/ai/x.png" },
-  { letter: "Y", src: "/module-assets/m1/ai/y.png" },
-  { letter: "Z", src: "/module-assets/m1/ai/z.png" }
-] as const;
-
-const MODULE2_LESSON_VIDEOS: Record<string, { title: string; src: string }> = {
-  "m2-l1": {
-    title: "Numbers 1-10 Demo",
-    src: "/module-assets/m2/videos/1-10.mp4"
-  },
-  "m2-l2": {
-    title: "Numbers 11-20 Demo",
-    src: "/module-assets/m2/videos/11-20.mp4"
-  },
-  "m2-l3": {
-    title: "Numbers 21-30 Demo",
-    src: "/module-assets/m2/videos/21-30.mp4"
-  },
-  "m2-l4": {
-    title: "Numbers 31-40 Demo",
-    src: "/module-assets/m2/videos/31-40.mp4"
-  },
-  "m2-l5": {
-    title: "Numbers 41-50 Demo",
-    src: "/module-assets/m2/videos/41-50.mp4"
-  },
-  "m2-l6": {
-    title: "Shortcuts: 60, 70, 80, 90, 100",
-    src: "/module-assets/m2/videos/60-70-80-90-100.mp4"
+function parseReadablePresentationMode(value: unknown): ReadablePresentationMode {
+  if (value === "cards" || value === "slideshow") {
+    return value;
   }
-};
-
-const MODULE3_LESSON_VIDEOS: Record<string, { title: string; src: string }> = {
-  "m3-l1": { title: "Daily Greetings Demo", src: "/module-assets/m3/videos/greetings.mp4" },
-  "m3-l2": { title: "Check-In and Introduction Demo", src: "/module-assets/m3/videos/check-in.mp4" },
-  "m3-l3": { title: "Courtesy and Parting Demo", src: "/module-assets/m3/videos/courtesy.mp4" }
-};
-
-const MODULE4_LESSON_VIDEOS: Record<string, { title: string; src: string }> = {
-  "m4-l1": { title: "FATHER Demo", src: "/module-assets/m4/videos/father.mov" },
-  "m4-l2": { title: "MOTHER Demo", src: "/module-assets/m4/videos/mother.mov" },
-  "m4-l3": { title: "SON Demo", src: "/module-assets/m4/videos/son.mov" },
-  "m4-l4": { title: "DAUGHTER Demo", src: "/module-assets/m4/videos/daughter.mov" },
-  "m4-l5": { title: "GRANDFATHER Demo", src: "/module-assets/m4/videos/grandfather.mov" },
-  "m4-l6": { title: "GRANDMOTHER Demo", src: "/module-assets/m4/videos/grandmother.mov" },
-  "m4-l7": { title: "UNCLE Demo", src: "/module-assets/m4/videos/uncle.mov" },
-  "m4-l8": { title: "AUNTIE Demo", src: "/module-assets/m4/videos/auntie.mov" },
-  "m4-l9": { title: "COUSIN Demo", src: "/module-assets/m4/videos/cousin.mov" },
-  "m4-l10": { title: "PARENTS Demo", src: "/module-assets/m4/videos/parents.mov" }
-};
-
-const MODULE5_LESSON_VIDEOS: Record<string, { title: string; src: string }> = {
-  "m5-l1": { title: "BOY Demo", src: "/module-assets/m5/videos/boy.mov" },
-  "m5-l2": { title: "GIRL Demo", src: "/module-assets/m5/videos/girl.mov" },
-  "m5-l3": { title: "MAN Demo", src: "/module-assets/m5/videos/man.mov" },
-  "m5-l4": { title: "WOMAN Demo", src: "/module-assets/m5/videos/woman.mov" },
-  "m5-l5": { title: "DEAF Demo", src: "/module-assets/m5/videos/deaf.mov" },
-  "m5-l6": { title: "HARD OF HEARING Demo", src: "/module-assets/m5/videos/hard-of-hearing.mov" },
-  "m5-l7": { title: "WEELCHAIR PERSON Demo", src: "/module-assets/m5/videos/wheelchair-person.mov" },
-  "m5-l8": { title: "BLIND Demo", src: "/module-assets/m5/videos/blind.mov" },
-  "m5-l9": { title: "DEAF BLIND Demo", src: "/module-assets/m5/videos/deaf-blind.mov" },
-  "m5-l10": { title: "MARRIED Demo", src: "/module-assets/m5/videos/married.mov" }
-};
-
-const MODULE6_LESSON_VIDEOS: Record<string, { title: string; src: string }> = {
-  "m6-l1": { title: "MONDAY Demo", src: "/module-assets/m6/videos/monday.mov" },
-  "m6-l2": { title: "TUESDAY Demo", src: "/module-assets/m6/videos/tuesday.mov" },
-  "m6-l3": { title: "WEDNESDAY Demo", src: "/module-assets/m6/videos/wednesday.mov" },
-  "m6-l4": { title: "THURSDAY Demo", src: "/module-assets/m6/videos/thursday.mov" },
-  "m6-l5": { title: "FRIDAY Demo", src: "/module-assets/m6/videos/friday.mov" },
-  "m6-l6": { title: "SATURDAY Demo", src: "/module-assets/m6/videos/saturday.mov" },
-  "m6-l7": { title: "SUNDAY Demo", src: "/module-assets/m6/videos/sunday.mov" },
-  "m6-l8": { title: "TODAY Demo", src: "/module-assets/m6/videos/today.mov" },
-  "m6-l9": { title: "TOMORROW Demo", src: "/module-assets/m6/videos/tomorrow.mov" },
-  "m6-l10": { title: "YESTERDAY Demo", src: "/module-assets/m6/videos/yesterday.mov" }
-};
-
-const MODULE7_LESSON_VIDEOS: Record<string, { title: string; src: string }> = {
-  "m7-l1": { title: "BLUE Demo", src: "/module-assets/m7/videos/blue.mov" },
-  "m7-l2": { title: "GREEN Demo", src: "/module-assets/m7/videos/green.mov" },
-  "m7-l3": { title: "RED Demo", src: "/module-assets/m7/videos/red.mov" },
-  "m7-l4": { title: "BROWN Demo", src: "/module-assets/m7/videos/brown.mov" },
-  "m7-l5": { title: "BLACK Demo", src: "/module-assets/m7/videos/black.mov" },
-  "m7-l6": { title: "WHITE Demo", src: "/module-assets/m7/videos/white.mov" },
-  "m7-l7": { title: "YELLOW Demo", src: "/module-assets/m7/videos/yellow.mov" },
-  "m7-l8": { title: "ORANGE Demo", src: "/module-assets/m7/videos/orange.mov" },
-  "m7-l9": { title: "GRAY Demo", src: "/module-assets/m7/videos/gray.mov" },
-  "m7-l10": { title: "PINK Demo", src: "/module-assets/m7/videos/pink.mov" },
-  "m7-l11": { title: "VIOLET Demo", src: "/module-assets/m7/videos/violet.mov" },
-  "m7-l12": { title: "LIGHT Demo", src: "/module-assets/m7/videos/light.mov" },
-  "m7-l13": { title: "DARK Demo", src: "/module-assets/m7/videos/dark.mov" }
-};
-
-const MODULE8_LESSON_VIDEOS: Record<string, { title: string; src: string }> = {
-  "m8-l1": { title: "UNDERSTAND Demo", src: "/module-assets/m8/videos/understand.mov" },
-  "m8-l2": { title: "DON'T UNDERSTAND Demo", src: "/module-assets/m8/videos/dont-understand.mov" },
-  "m8-l3": { title: "KNOW Demo", src: "/module-assets/m8/videos/know.mov" },
-  "m8-l4": { title: "DON'T KNOW Demo", src: "/module-assets/m8/videos/dont-know.mov" },
-  "m8-l5": { title: "NO Demo", src: "/module-assets/m8/videos/no.mov" },
-  "m8-l6": { title: "YES Demo", src: "/module-assets/m8/videos/yes.mov" },
-  "m8-l7": { title: "WRONG Demo", src: "/module-assets/m8/videos/wrong.mov" },
-  "m8-l8": { title: "CORRECT Demo", src: "/module-assets/m8/videos/correct.mov" },
-  "m8-l9": { title: "SLOW Demo", src: "/module-assets/m8/videos/slow.mov" },
-  "m8-l10": { title: "FAST Demo", src: "/module-assets/m8/videos/fast.mov" }
-};
-
-const LESSON_VIDEO_MAP: Record<string, { title: string; src: string }> = {
-  ...MODULE2_LESSON_VIDEOS,
-  ...MODULE3_LESSON_VIDEOS,
-  ...MODULE4_LESSON_VIDEOS,
-  ...MODULE5_LESSON_VIDEOS,
-  ...MODULE6_LESSON_VIDEOS,
-  ...MODULE7_LESSON_VIDEOS,
-  ...MODULE8_LESSON_VIDEOS
-};
-
-const MODULE1_ASSESSMENT_OPTIONS = [
-  {
-    id: "m1-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Full Module A-Z Multiple Choice"
-  },
-  {
-    id: "m1-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Label the Hand Sign (A-Z)"
-  },
-  {
-    id: "m1-assessment-3",
-    title: "Assessment 3",
-    subtitle: "Full Module Camera Challenge"
-  }
-] as const;
-
-const MODULE1_ASSESSMENT2_IMAGE_ORDER = [
-  "M",
-  "B",
-  "T",
-  "A",
-  "R",
-  "H",
-  "Z",
-  "D",
-  "Q",
-  "L",
-  "F",
-  "Y",
-  "C",
-  "N",
-  "I",
-  "W",
-  "E",
-  "U",
-  "K",
-  "P",
-  "G",
-  "S",
-  "X",
-  "J",
-  "O",
-  "V"
-] as const;
-
-const MODULE1_LABELING_ITEMS = MODULE1_ASSESSMENT2_IMAGE_ORDER.map((letter) => ({
-  id: `m1-label-${letter.toLowerCase()}`,
-  answer: letter,
-  src: `/module-assets/m1/assessment2/${letter.toLowerCase()}.png`
-}));
-
-const MODULE1_SIGNING_CHALLENGE_ITEMS = [
-  "CHURCH",
-  "MALL",
-  "ZOO",
-  "PARK",
-  "ALLYSSA",
-  "AARON",
-  "PRINCESS",
-  "JOHN",
-  "BOX",
-  "SCHOOL",
-  "TREE",
-  "CHAIR",
-  "FLOWER",
-  "CAT",
-  "DOG",
-  "RABBIT",
-  "SHARK"
-] as const;
-
-const MODULE1_SIGNING_CHALLENGE_STEPS = MODULE1_SIGNING_CHALLENGE_ITEMS.map((item, index) => ({
-  id: `m1-step-${index + 1}`,
-  title: `Task ${index + 1}`,
-  prompt: `Sign this word/name: ${item}`,
-  imageSrc: null
-}));
-
-const MODULE2_ASSESSMENT_OPTIONS = [
-  {
-    id: "m2-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Multiple Choice (5 items)"
-  },
-  {
-    id: "m2-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Camera: Sign 1-10"
-  },
-  {
-    id: "m2-assessment-3",
-    title: "Assessment 3",
-    subtitle: "Camera: Sign 11-20 (at least 5)"
-  },
-  {
-    id: "m2-assessment-4",
-    title: "Assessment 4",
-    subtitle: "Camera: Sign 31-40 (at least 5)"
-  },
-  {
-    id: "m2-assessment-5",
-    title: "Assessment 5",
-    subtitle: "Camera: Sign 91-100 (at least 5)"
-  }
-] as const;
-
-const MODULE2_SIGN_1_TO_10_STEPS = [
-  { id: "m2-a2-1", number: 1 },
-  { id: "m2-a2-2", number: 2 },
-  { id: "m2-a2-3", number: 3 },
-  { id: "m2-a2-4", number: 4 },
-  { id: "m2-a2-5", number: 5 },
-  { id: "m2-a2-6", number: 6 },
-  { id: "m2-a2-7", number: 7 },
-  { id: "m2-a2-8", number: 8 },
-  { id: "m2-a2-9", number: 9 },
-  { id: "m2-a2-10", number: 10 }
-] as const;
-
-const MODULE2_SIGN_11_TO_20_STEPS = [
-  { id: "m2-a3-11", number: 11 },
-  { id: "m2-a3-12", number: 12 },
-  { id: "m2-a3-13", number: 13 },
-  { id: "m2-a3-14", number: 14 },
-  { id: "m2-a3-15", number: 15 },
-  { id: "m2-a3-16", number: 16 },
-  { id: "m2-a3-17", number: 17 },
-  { id: "m2-a3-18", number: 18 },
-  { id: "m2-a3-19", number: 19 },
-  { id: "m2-a3-20", number: 20 }
-] as const;
-
-const MODULE2_SIGN_31_TO_40_STEPS = [
-  { id: "m2-a4-31", number: 31 },
-  { id: "m2-a4-32", number: 32 },
-  { id: "m2-a4-33", number: 33 },
-  { id: "m2-a4-34", number: 34 },
-  { id: "m2-a4-35", number: 35 },
-  { id: "m2-a4-36", number: 36 },
-  { id: "m2-a4-37", number: 37 },
-  { id: "m2-a4-38", number: 38 },
-  { id: "m2-a4-39", number: 39 },
-  { id: "m2-a4-40", number: 40 }
-] as const;
-
-const MODULE2_SIGN_91_TO_100_STEPS = [
-  { id: "m2-a5-91", number: 91 },
-  { id: "m2-a5-92", number: 92 },
-  { id: "m2-a5-93", number: 93 },
-  { id: "m2-a5-94", number: 94 },
-  { id: "m2-a5-95", number: 95 },
-  { id: "m2-a5-96", number: 96 },
-  { id: "m2-a5-97", number: 97 },
-  { id: "m2-a5-98", number: 98 },
-  { id: "m2-a5-99", number: 99 },
-  { id: "m2-a5-100", number: 100 }
-] as const;
-
-const MODULE3_ASSESSMENT_OPTIONS = [
-  {
-    id: "m3-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Multiple Choice (5 items)"
-  },
-  {
-    id: "m3-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Camera: Sign at least 7 gestures"
-  }
-] as const;
-
-const MODULE3_GESTURE_TARGETS = [
-  { id: "m3-g1", label: "GOOD MORNING" },
-  { id: "m3-g2", label: "GOOD AFTERNOON" },
-  { id: "m3-g3", label: "GOOD EVENING" },
-  { id: "m3-g4", label: "HELLO" },
-  { id: "m3-g5", label: "HOW ARE YOU" },
-  { id: "m3-g6", label: "I'M FINE" },
-  { id: "m3-g7", label: "NICE TO MEET YOU" },
-  { id: "m3-g8", label: "THANK YOU" },
-  { id: "m3-g9", label: "YOU'RE WELCOME" },
-  { id: "m3-g10", label: "SEE YOU TOMORROW" }
-] as const;
-
-const MODULE4_ASSESSMENT_OPTIONS = [
-  {
-    id: "m4-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Multiple Choice (5 items)"
-  },
-  {
-    id: "m4-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Camera: Sign at least 7 gestures"
-  }
-] as const;
-
-const MODULE4_GESTURE_TARGETS = [
-  { id: "m4-g1", label: "FATHER" },
-  { id: "m4-g2", label: "MOTHER" },
-  { id: "m4-g3", label: "SON" },
-  { id: "m4-g4", label: "DAUGHTER" },
-  { id: "m4-g5", label: "GRANDFATHER" },
-  { id: "m4-g6", label: "GRANDMOTHER" },
-  { id: "m4-g7", label: "UNCLE" },
-  { id: "m4-g8", label: "AUNTIE" },
-  { id: "m4-g9", label: "COUSIN" },
-  { id: "m4-g10", label: "PARENTS" }
-] as const;
-
-const MODULE5_ASSESSMENT_OPTIONS = [
-  {
-    id: "m5-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Multiple Choice (5 items)"
-  },
-  {
-    id: "m5-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Camera: Sign at least 7 gestures"
-  }
-] as const;
-
-const MODULE5_GESTURE_TARGETS = [
-  { id: "m5-g1", label: "BOY" },
-  { id: "m5-g2", label: "GIRL" },
-  { id: "m5-g3", label: "MAN" },
-  { id: "m5-g4", label: "WOMAN" },
-  { id: "m5-g5", label: "DEAF" },
-  { id: "m5-g6", label: "HARD OF HEARING" },
-  { id: "m5-g7", label: "WEELCHAIR PERSON" },
-  { id: "m5-g8", label: "BLIND" },
-  { id: "m5-g9", label: "DEAF BLIND" },
-  { id: "m5-g10", label: "MARRIED" }
-] as const;
-
-const MODULE6_ASSESSMENT_OPTIONS = [
-  {
-    id: "m6-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Multiple Choice (5 items)"
-  },
-  {
-    id: "m6-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Camera: Sign at least 7 gestures"
-  }
-] as const;
-
-const MODULE6_GESTURE_TARGETS = [
-  { id: "m6-g1", label: "MONDAY" },
-  { id: "m6-g2", label: "TUESDAY" },
-  { id: "m6-g3", label: "WEDNESDAY" },
-  { id: "m6-g4", label: "THURSDAY" },
-  { id: "m6-g5", label: "FRIDAY" },
-  { id: "m6-g6", label: "SATURDAY" },
-  { id: "m6-g7", label: "SUNDAY" },
-  { id: "m6-g8", label: "TODAY" },
-  { id: "m6-g9", label: "TOMORROW" },
-  { id: "m6-g10", label: "YESTERDAY" }
-] as const;
-
-const MODULE7_ASSESSMENT_OPTIONS = [
-  {
-    id: "m7-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Multiple Choice (5 items)"
-  },
-  {
-    id: "m7-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Camera: Sign displayed colors"
-  },
-  {
-    id: "m7-assessment-3",
-    title: "Assessment 3",
-    subtitle: "Camera: Sign at least 7 gestures"
-  }
-] as const;
-
-const MODULE7_COLOR_SIGN_TARGETS = [
-  { id: "m7-c1", label: "BLUE", colorHex: "#2563eb" },
-  { id: "m7-c2", label: "RED", colorHex: "#dc2626" },
-  { id: "m7-c3", label: "GREEN", colorHex: "#16a34a" },
-  { id: "m7-c4", label: "BROWN", colorHex: "#8b5e34" },
-  { id: "m7-c5", label: "BLACK", colorHex: "#111827" }
-] as const;
-
-const MODULE7_GESTURE_TARGETS = [
-  { id: "m7-g1", label: "BLUE" },
-  { id: "m7-g2", label: "GREEN" },
-  { id: "m7-g3", label: "RED" },
-  { id: "m7-g4", label: "BROWN" },
-  { id: "m7-g5", label: "BLACK" },
-  { id: "m7-g6", label: "WHITE" },
-  { id: "m7-g7", label: "YELLOW" },
-  { id: "m7-g8", label: "ORANGE" },
-  { id: "m7-g9", label: "GRAY" },
-  { id: "m7-g10", label: "PINK" },
-  { id: "m7-g11", label: "VIOLET" },
-  { id: "m7-g12", label: "LIGHT" },
-  { id: "m7-g13", label: "DARK" }
-] as const;
-
-const MODULE8_ASSESSMENT_OPTIONS = [
-  {
-    id: "m8-assessment-1",
-    title: "Assessment 1",
-    subtitle: "Multiple Choice (5 items)"
-  },
-  {
-    id: "m8-assessment-2",
-    title: "Assessment 2",
-    subtitle: "Camera: Sign at least 7 gestures"
-  }
-] as const;
-
-const MODULE8_GESTURE_TARGETS = [
-  { id: "m8-g1", label: "UNDERSTAND" },
-  { id: "m8-g2", label: "DON'T UNDERSTAND" },
-  { id: "m8-g3", label: "KNOW" },
-  { id: "m8-g4", label: "DON'T KNOW" },
-  { id: "m8-g5", label: "NO" },
-  { id: "m8-g6", label: "YES" },
-  { id: "m8-g7", label: "WRONG" },
-  { id: "m8-g8", label: "CORRECT" },
-  { id: "m8-g9", label: "SLOW" },
-  { id: "m8-g10", label: "FAST" }
-] as const;
-
-const CUSTOM_ASSESSMENT_IDS_BY_SLUG: Record<string, readonly string[]> = {
-  "fsl-alphabets": MODULE1_ASSESSMENT_OPTIONS.map((item) => item.id),
-  numbers: MODULE2_ASSESSMENT_OPTIONS.map((item) => item.id),
-  "common-words": MODULE3_ASSESSMENT_OPTIONS.map((item) => item.id),
-  "family-members": MODULE4_ASSESSMENT_OPTIONS.map((item) => item.id),
-  "people-description": MODULE5_ASSESSMENT_OPTIONS.map((item) => item.id),
-  days: MODULE6_ASSESSMENT_OPTIONS.map((item) => item.id),
-  "colors-descriptions": MODULE7_ASSESSMENT_OPTIONS.map((item) => item.id),
-  "basic-conversations": MODULE8_ASSESSMENT_OPTIONS.map((item) => item.id),
-};
-
-function getAvailableAssessmentIds(module: ModuleItem): string[] {
-  const customIds = CUSTOM_ASSESSMENT_IDS_BY_SLUG[module.slug];
-  if (customIds && customIds.length > 0) {
-    return [...customIds];
-  }
-  return module.assessments.map((assessment) => assessment.id);
+  return "auto";
 }
 
-function isValidPredictionToken(value: string) {
-  const token = value.trim();
-  return token.length > 0 && token !== "No prediction yet." && token !== "UNSURE";
+function parseRecognitionModeValue(value: unknown): RecognitionMode {
+  return value === "numbers" || value === "words" ? value : "alphabet";
 }
 
-async function captureVideoFrameAsFile(video: HTMLVideoElement | null): Promise<File | null> {
-  if (!video) {
-    return null;
-  }
-
-  const sourceWidth = video.videoWidth || 640;
-  const sourceHeight = video.videoHeight || 480;
-  if (sourceWidth <= 0 || sourceHeight <= 0) {
-    return null;
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = sourceWidth;
-  canvas.height = sourceHeight;
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return null;
-  }
-
-  context.drawImage(video, 0, 0, sourceWidth, sourceHeight);
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((value) => resolve(value), "image/jpeg", 0.92);
-  });
-  if (!blob) {
-    return null;
-  }
-
-  return new File([blob], "assessment-frame.jpg", { type: "image/jpeg" });
+function parseNumbersCategoryValue(value: unknown): NumbersCategory | undefined {
+  return NUMBER_CATEGORY_VALUES.includes(value as NumbersCategory)
+    ? (value as NumbersCategory)
+    : undefined;
 }
 
-function SignCardImage({ letter, src }: { letter: string; src: string }) {
-  const [available, setAvailable] = useState(true);
-
-  return (
-    <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      {available ? (
-        <img
-          alt={`Letter ${letter} hand sign`}
-          className="h-56 w-full bg-[#2f6a16] object-cover object-center"
-          loading="lazy"
-          onError={() => setAvailable(false)}
-          src={src}
-        />
-      ) : (
-        <div className="flex h-56 items-center justify-center bg-[#2f6a16]/15 px-4 text-center text-sm font-semibold text-slate-600">
-          Add cropped image for letter {letter}
-        </div>
-      )}
-      <div className="border-t border-slate-200 bg-white px-3 py-2 text-center text-sm font-semibold text-slate-700">
-        Letter {letter}
-      </div>
-    </article>
-  );
+function parseWordsCategoryValue(value: unknown): WordsCategory | undefined {
+  return WORD_CATEGORY_VALUES.includes(value as WordsCategory)
+    ? (value as WordsCategory)
+    : undefined;
 }
 
-function MotionVideoCard({ src, letter }: { src: string; letter: string }) {
-  const [available, setAvailable] = useState(true);
-
-  if (!available) {
-    return (
-      <div className="flex h-56 items-center justify-center rounded-xl border border-slate-200 bg-brandBlueLight px-4 text-center text-sm font-semibold text-slate-600">
-        Add `{letter.toLowerCase()}.mp4` to show the {letter} motion demo.
-      </div>
-    );
-  }
-
-  return (
-    <video
-      className="h-72 w-full rounded-xl border border-slate-200 bg-slate-900 object-cover"
-      controls
-      loop
-      muted
-      onError={() => setAvailable(false)}
-      playsInline
-      preload="metadata"
-      src={src}
-    />
-  );
-}
-
-function LessonVideoCard({ src, title }: { src: string; title: string }) {
-  const [available, setAvailable] = useState(true);
-
-  if (!available) {
-    return (
-      <div className="mt-5 rounded-xl border border-slate-200 bg-brandBlueLight p-4 text-sm font-semibold text-slate-700">
-        Missing video file for: {title}
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-5 rounded-xl border border-slate-200 bg-white p-3">
-      <p className="text-sm font-semibold text-slate-900">{title}</p>
-      <video
-        className="mt-2 h-72 w-full rounded-xl border border-slate-200 bg-slate-900 object-contain"
-        controls
-        loop
-        muted
-        onError={() => setAvailable(false)}
-        playsInline
-        preload="metadata"
-        src={src}
-      />
-    </div>
-  );
-}
-
-function Module1AssessmentOne({
-  questions,
-  onSubmitResult
-}: {
-  questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  const [selectedChoices, setSelectedChoices] = useSessionState<Record<string, string>>(
-    "module-detail:m1-assessment-1:selectedChoices",
-    {}
-  );
-  const [showResult, setShowResult] = useSessionState<boolean>(
-    "module-detail:m1-assessment-1:showResult",
-    false
-  );
-  const [reported, setReported] = useSessionState<boolean>(
-    "module-detail:m1-assessment-1:reported",
-    false
-  );
-
-  const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
-  const score = questions.reduce((total, question) => {
-    const picked = selectedChoices[question.id];
-    if (!picked) {
-      return total;
-    }
-    return total + (picked === question.answer ? 1 : 0);
-  }, 0);
-
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = questions.length;
-    const right = score;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = questions
-      .filter((question) => selectedChoices[question.id] !== question.answer)
-      .map((question) => question.question);
-    onSubmitResult?.({
-      assessmentId: "m1-assessment-1",
-      assessmentTitle: "Assessment 1",
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas
-    });
-    setReported(true);
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-xl font-semibold text-slate-900">Assessment 1</h3>
-      <p className="mt-2 text-sm text-slate-600">
-        Answer all five multiple-choice questions covering the full Module 1 alphabet lessons (A-Z).
-      </p>
-
-      <div className="mt-4 space-y-4">
-        {questions.map((question, index) => (
-          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3" key={question.id}>
-            <p className="text-sm font-semibold text-slate-900">
-              {index + 1}. {question.question}
-            </p>
-            <div className="mt-3 space-y-2">
-              {question.choices.map((choice) => {
-                const checked = selectedChoices[question.id] === choice;
-                return (
-                  <label
-                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
-                      checked
-                        ? "border-brandBlue bg-brandBlueLight text-slate-900"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                    }`}
-                    key={choice}
-                  >
-                    <input
-                      checked={checked}
-                      className="h-4 w-4 accent-brandBlue"
-                      name={question.id}
-                      onChange={() =>
-                        setSelectedChoices((previous) => ({
-                          ...previous,
-                          [question.id]: choice
-                        }))
-                      }
-                      type="radio"
-                    />
-                    {choice}
-                  </label>
-                );
-              })}
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button
-          className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => {
-            setShowResult(true);
-            submitAssessmentResult();
-          }}
-          type="button"
-        >
-          Check Answers
-        </button>
-        <span className="text-xs text-slate-500">
-          Answered {answeredCount}/{questions.length}
-        </span>
-      </div>
-
-      {showResult ? (
-        <p className="mt-3 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-          Score: {score}/{questions.length}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function Module1AssessmentTwo({
-  onSubmitResult
-}: {
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  const [answers, setAnswers] = useSessionState<Record<string, string>>(
-    "module-detail:m1-assessment-2:answers",
-    {}
-  );
-  const [showResult, setShowResult] = useSessionState<boolean>(
-    "module-detail:m1-assessment-2:showResult",
-    false
-  );
-  const [reported, setReported] = useSessionState<boolean>(
-    "module-detail:m1-assessment-2:reported",
-    false
-  );
-
-  const correctCount = MODULE1_LABELING_ITEMS.reduce((total, item) => {
-    const value = answers[item.id]?.trim().toUpperCase() ?? "";
-    return total + (value === item.answer ? 1 : 0);
-  }, 0);
-
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = MODULE1_LABELING_ITEMS.length;
-    const right = correctCount;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = MODULE1_LABELING_ITEMS.filter((item) => {
-      const value = answers[item.id]?.trim().toUpperCase() ?? "";
-      return value !== item.answer;
-    }).map((item) => `Hand sign item ${item.answer}`);
-    onSubmitResult?.({
-      assessmentId: "m1-assessment-2",
-      assessmentTitle: "Assessment 2",
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas
-    });
-    setReported(true);
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-xl font-semibold text-slate-900">Assessment 2</h3>
-      <p className="mt-2 text-sm text-slate-600">
-        Look at each hand sign image and type the correct alphabet letter. Images are mixed to cover the whole module.
-      </p>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {MODULE1_LABELING_ITEMS.map((item) => (
-          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3" key={item.id}>
-            <img
-              alt="Alphabet hand sign"
-              className="h-44 w-full rounded-lg border border-slate-200 bg-[#2f6a16] object-cover object-center"
-              loading="lazy"
-              src={item.src}
-            />
-            <label className="mt-3 block text-xs font-semibold uppercase tracking-wider text-muted" htmlFor={item.id}>
-              Your answer
-            </label>
-            <input
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              id={item.id}
-              maxLength={1}
-              onChange={(event) =>
-                setAnswers((previous) => ({
-                  ...previous,
-                  [item.id]: event.target.value
-                }))
-              }
-              placeholder="Type letter"
-              type="text"
-              value={answers[item.id] ?? ""}
-            />
-            {showResult ? (
-              <p className="mt-2 text-xs font-semibold text-slate-700">
-                {answers[item.id]?.trim().toUpperCase() === item.answer ? "Correct" : `Correct answer: ${item.answer}`}
-              </p>
-            ) : null}
-          </article>
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button
-          className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => {
-            setShowResult(true);
-            submitAssessmentResult();
-          }}
-          type="button"
-        >
-          Check Answers
-        </button>
-        {showResult ? (
-          <span className="rounded-lg border border-brandGreen/30 bg-brandGreen/10 px-3 py-1 text-sm font-semibold text-slate-800">
-            Score: {correctCount}/{MODULE1_LABELING_ITEMS.length}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function Module1AssessmentThree({
-  onSubmitResult
-}: {
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  const ALPHABET_PALM_COOLDOWN_MS = 900;
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const predictionInFlightRef = useRef(false);
-  const openPalmInFlightRef = useRef(false);
-  const palmRaisedRef = useRef(false);
-  const lastPalmCommitAtRef = useRef(0);
-  const hiddenPredictionRef = useRef("No prediction yet.");
-  const blockedTokenRef = useRef<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-  const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedTrail, setRecognizedTrail] = useState("");
-  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
-  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
-  const [predictionConfidence, setPredictionConfidence] = useState<number | null>(null);
-  const [predictionTopCandidates, setPredictionTopCandidates] = useState<string[]>([]);
-  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
-  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
-  const [reported, setReported] = useState(false);
-
-  const activeStep = MODULE1_SIGNING_CHALLENGE_STEPS[activeStepIndex];
-  const allDone = completedStepIds.length >= MODULE1_SIGNING_CHALLENGE_STEPS.length;
-
-  function currentDetectedGesture() {
-    const recognized = (recognizedByStep[activeStep.id] ?? "").trim();
-    if (recognized) {
-      return recognized;
-    }
+function readConfigLink(config: Record<string, unknown>, key: string): string {
+  const raw = config[key];
+  if (typeof raw !== "string") {
     return "";
   }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
 
-  useEffect(() => {
-    hiddenPredictionRef.current = hiddenPrediction;
-  }, [hiddenPrediction]);
-
-  useEffect(() => {
-    blockedTokenRef.current = blockedTokenAfterClear;
-  }, [blockedTokenAfterClear]);
-
-  useEffect(() => {
-    return () => {
-      palmRaisedRef.current = false;
-      lastPalmCommitAtRef.current = 0;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
+function parseAsset(value: unknown): ModuleAsset | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const kind = candidate.resource_kind;
+  const fileName = candidate.resource_file_name;
+  const filePath = candidate.resource_file_path;
+  if (
+    (kind === "video" || kind === "image" || kind === "document" || kind === "interactive") &&
+    typeof fileName === "string" &&
+    typeof filePath === "string"
+  ) {
+    return {
+      resource_kind: kind,
+      resource_file_name: fileName,
+      resource_file_path: filePath,
+      resource_mime_type:
+        typeof candidate.resource_mime_type === "string" ? candidate.resource_mime_type : null,
+      resource_url: typeof candidate.resource_url === "string" ? candidate.resource_url : null,
+      label: typeof candidate.label === "string" ? candidate.label : null
     };
-  }, []);
+  }
+  return null;
+}
 
-  async function startCamera() {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setRunning(true);
-    } catch {
-      setError("Unable to access camera. Check browser permission.");
+function inferAssetKind(item: StudentCourseItem, fileName: string, mimeType: string): ModuleAsset["resource_kind"] {
+  const lowerFileName = fileName.toLowerCase();
+  const lowerMimeType = mimeType.toLowerCase();
+
+  if (
+    item.item_type === "video_resource" ||
+    lowerMimeType.startsWith("video/") ||
+    [".mp4", ".webm", ".mov", ".avi", ".mkv"].some((suffix) => lowerFileName.endsWith(suffix))
+  ) {
+    return "video";
+  }
+  if (
+    lowerMimeType.startsWith("image/") ||
+    [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"].some((suffix) =>
+      lowerFileName.endsWith(suffix)
+    )
+  ) {
+    return "image";
+  }
+  if (item.item_type === "interactive_resource") {
+    return "interactive";
+  }
+  return "document";
+}
+
+function legacyResourceAsAsset(item: StudentCourseItem): ModuleAsset | null {
+  const resourcePath = typeof item.config.resource_file_path === "string" ? item.config.resource_file_path.trim() : "";
+  const resourceUrl = typeof item.config.resource_url === "string" ? item.config.resource_url.trim() : "";
+  if (!resourcePath && !resourceUrl) {
+    return null;
+  }
+  const resourceFileName =
+    (typeof item.config.resource_file_name === "string" && item.config.resource_file_name.trim()) ||
+    item.title ||
+    "Resource File";
+  const resourceMimeType =
+    typeof item.config.resource_mime_type === "string" ? item.config.resource_mime_type : "";
+  const pathFallback = resourcePath || resourceUrl.replace(/^https?:\/\/[^/]+\/?/i, "");
+
+  return {
+    resource_kind: inferAssetKind(item, resourceFileName, resourceMimeType),
+    resource_file_name: resourceFileName,
+    resource_file_path: pathFallback,
+    resource_mime_type: resourceMimeType || null,
+    resource_url: resourceUrl || null,
+    label: null
+  };
+}
+
+function getItemAttachments(item: StudentCourseItem): ModuleAsset[] {
+  const raw = item.config.attachments;
+  if (Array.isArray(raw)) {
+    const attachments = raw
+      .map((entry) => parseAsset(entry))
+      .filter((entry): entry is ModuleAsset => Boolean(entry));
+    if (attachments.length > 0) {
+      return attachments;
+    }
+  }
+  const legacyAsset = legacyResourceAsAsset(item);
+  return legacyAsset ? [legacyAsset] : [];
+}
+
+function getPromptMedia(item: StudentCourseItem): ModuleAsset | null {
+  return parseAsset(item.config.prompt_media);
+}
+
+function mcqQuestionAssetLabel(questionKey: string): string {
+  return `mcq-question:${questionKey}`;
+}
+
+function getMcqQuestionPromptAsset(
+  attachments: ModuleAsset[],
+  questionKey: string,
+  questionIndex: number
+): ModuleAsset | null {
+  return getQuestionPromptAsset(attachments, questionKey, questionIndex, "mcq");
+}
+
+function identificationQuestionAssetLabel(questionKey: string): string {
+  return `identification-question:${questionKey}`;
+}
+
+function getQuestionPromptAsset(
+  attachments: ModuleAsset[],
+  questionKey: string,
+  questionIndex: number,
+  type: "mcq" | "identification"
+): ModuleAsset | null {
+  const normalizedKey = questionKey.trim().toLowerCase();
+  const prefixes =
+    type === "mcq"
+      ? ["mcq-question:", "mcq_question:", "mcq:"]
+      : ["identification-question:", "identification_question:", "identification:", "id-question:", "id_question:"];
+  const exactTargets = new Set(prefixes.map((prefix) => `${prefix}${normalizedKey}`));
+
+  for (let index = attachments.length - 1; index >= 0; index -= 1) {
+    const label = (attachments[index]?.label ?? "").trim().toLowerCase();
+    if (label && (exactTargets.has(label) || label === normalizedKey)) {
+      return attachments[index] ?? null;
     }
   }
 
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setRunning(false);
+  const prefixedAttachments = attachments.filter((asset) => {
+    const label = (asset.label ?? "").trim().toLowerCase();
+    return label && prefixes.some((prefix) => label.startsWith(prefix));
+  });
+  if (prefixedAttachments[questionIndex]) {
+    return prefixedAttachments[questionIndex] ?? null;
   }
 
-  async function toggleCamera() {
-    if (running) {
-      stopCamera();
-      return;
-    }
-    await startCamera();
+  const unlabeledVisualAttachments = attachments.filter((asset) => {
+    const label = (asset.label ?? "").trim();
+    return !label && (asset.resource_kind === "image" || asset.resource_kind === "video");
+  });
+  return unlabeledVisualAttachments[questionIndex] ?? null;
+}
+
+function getIdentificationQuestionPromptAsset(
+  attachments: ModuleAsset[],
+  questionKey: string,
+  questionIndex: number
+): ModuleAsset | null {
+  return getQuestionPromptAsset(attachments, questionKey, questionIndex, "identification");
+}
+
+function resolveAssetUrl(asset: ModuleAsset): string {
+  if (asset.resource_url && /^https?:\/\//i.test(asset.resource_url)) {
+    return asset.resource_url;
   }
-
-  async function runHiddenPrediction() {
-    if (!running || predictionInFlightRef.current) {
-      return;
-    }
-    predictionInFlightRef.current = true;
-    try {
-      const frame = await captureVideoFrameAsFile(videoRef.current);
-      if (!frame) {
-        return;
-      }
-      const result = await predictSignFromImage(frame, "alphabet");
-      setHiddenPrediction(result.prediction);
-      setPredictionConfidence(result.confidence);
-      setPredictionTopCandidates(result.top_candidates);
-    } catch {
-      // Keep UI clean; hidden prediction should not block the assessment flow.
-    } finally {
-      predictionInFlightRef.current = false;
-    }
+  if (asset.resource_url && asset.resource_url.startsWith("/")) {
+    return `${resolveUploadsBase()}${asset.resource_url}`;
   }
+  const path = asset.resource_file_path.replace(/^\/+/, "");
+  return `${resolveUploadsBase()}/${path}`;
+}
 
-  useEffect(() => {
-    if (!running) {
-      setHiddenPrediction("No prediction yet.");
-      setPredictionConfidence(null);
-      setPredictionTopCandidates([]);
-      return;
-    }
+function resolveAssetLabel(asset: ModuleAsset): string {
+  const label = typeof asset.label === "string" ? asset.label.trim() : "";
+  if (label) {
+    return label;
+  }
+  const baseName = asset.resource_file_name.replace(/\.[^.]+$/, "").trim();
+  return baseName || asset.resource_file_name;
+}
 
-    void runHiddenPrediction();
-    const interval = window.setInterval(() => {
-      void runHiddenPrediction();
-    }, 1200);
+type McqQuestionConfig = {
+  question_key: string;
+  question: string;
+  choices: string[];
+};
 
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [running]);
+type IdentificationQuestionConfig = {
+  question_key: string;
+  question: string;
+};
 
-  useEffect(() => {
-    const token = hiddenPrediction.trim();
-    if (!isValidPredictionToken(token)) {
-      return;
-    }
-    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
-      setHiddenPrediction("No prediction yet.");
-      return;
-    }
-    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
-      setBlockedTokenAfterClear(null);
-    }
-  }, [hiddenPrediction, blockedTokenAfterClear]);
+type SigningLabEntryConfig = {
+  question_key: string;
+  question: string;
+  correct_answer: string;
+};
 
-  useEffect(() => {
-    if (!running) {
-      palmRaisedRef.current = false;
-      return;
-    }
+type AssessmentSubmissionState = {
+  scorePercent: number | null;
+  awaitingMarkDone: boolean;
+};
 
-    let cancelled = false;
-
-    async function checkOpenPalmSignal() {
-      if (cancelled || openPalmInFlightRef.current) {
-        return;
-      }
-      openPalmInFlightRef.current = true;
-      try {
-        const frame = await captureVideoFrameAsFile(videoRef.current);
-        if (!frame) {
-          return;
+function getMcqQuestionSet(item: StudentCourseItem): McqQuestionConfig[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
         }
-        const result = await detectOpenPalmFromImage(frame);
-        const openPalm = result.open_palm;
-        const now = Date.now();
-
-        if (
-          openPalm &&
-          !palmRaisedRef.current &&
-          now - lastPalmCommitAtRef.current >= ALPHABET_PALM_COOLDOWN_MS
-        ) {
-          const token = hiddenPredictionRef.current.trim();
-          const blockedToken = blockedTokenRef.current;
-          if (
-            isValidPredictionToken(token) &&
-            (!blockedToken || blockedToken !== token)
-          ) {
-            const isRapidDuplicate =
-              token === lastRecognizedToken &&
-              now - lastPalmCommitAtRef.current < ALPHABET_PALM_COOLDOWN_MS;
-            if (!isRapidDuplicate) {
-              setRecognizedByStep((previous) => ({
-                ...previous,
-                [activeStep.id]: token
-              }));
-              setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
-              setLastRecognizedToken(token);
-              lastPalmCommitAtRef.current = now;
-            }
-          }
+        const row = entry as Record<string, unknown>;
+        const question = typeof row.question === "string" ? row.question.trim() : "";
+        const choices = Array.isArray(row.choices)
+          ? (row.choices as unknown[]).map((choice) => String(choice).trim()).filter(Boolean)
+          : [];
+        const questionKey =
+          typeof row.question_key === "string" && row.question_key.trim()
+            ? row.question_key.trim()
+            : `q${index + 1}`;
+        if (!question || choices.length < 2) {
+          return null;
         }
-
-        palmRaisedRef.current = openPalm;
-      } catch {
-        // Keep silent to avoid noisy UI.
-      } finally {
-        openPalmInFlightRef.current = false;
-      }
+        return {
+          question_key: questionKey,
+          question,
+          choices,
+        };
+      })
+      .filter((entry): entry is McqQuestionConfig => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
     }
+  }
 
-    const interval = window.setInterval(() => {
-      void checkOpenPalmSignal();
-    }, 420);
-    void checkOpenPalmSignal();
+  const question = typeof item.config.question === "string" ? item.config.question.trim() : "";
+  const choices = Array.isArray(item.config.choices)
+    ? (item.config.choices as unknown[]).map((choice) => String(choice).trim()).filter(Boolean)
+    : [];
+  if (question && choices.length >= 2) {
+    return [{ question_key: "q1", question, choices }];
+  }
+  return [];
+}
 
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      palmRaisedRef.current = false;
+function getIdentificationQuestionSet(item: StudentCourseItem): IdentificationQuestionConfig[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const question = typeof row.question === "string" ? row.question.trim() : "";
+        const questionKey =
+          typeof row.question_key === "string" && row.question_key.trim()
+            ? row.question_key.trim()
+            : `q${index + 1}`;
+        if (!question) {
+          return null;
+        }
+        return {
+          question_key: questionKey,
+          question,
+        };
+      })
+      .filter((entry): entry is IdentificationQuestionConfig => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const question = typeof item.config.question === "string" ? item.config.question.trim() : "";
+  if (question) {
+    return [{ question_key: "q1", question }];
+  }
+  return [];
+}
+
+function parseRequiredCount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const asInt = Math.trunc(value);
+    return asInt > 0 ? asInt : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function parseBooleanFlag(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") {
+      return true;
+    }
+    if (normalized === "false") {
+      return false;
+    }
+  }
+  return null;
+}
+
+function getSigningLabEntrySet(item: StudentCourseItem): SigningLabEntryConfig[] {
+  const rawQuestionSet = item.config.questions;
+  if (Array.isArray(rawQuestionSet) && rawQuestionSet.length > 0) {
+    const parsed = rawQuestionSet
+      .map((entry, index) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const row = entry as Record<string, unknown>;
+        const question = typeof row.question === "string" ? row.question.trim() : "";
+        const correctAnswer = typeof row.correct_answer === "string" ? row.correct_answer.trim() : "";
+        const questionKey =
+          typeof row.question_key === "string" && row.question_key.trim()
+            ? row.question_key.trim()
+            : `q${index + 1}`;
+        if (!question && !correctAnswer) {
+          return null;
+        }
+        return {
+          question_key: questionKey,
+          question,
+          correct_answer: correctAnswer,
+        };
+      })
+      .filter((entry): entry is SigningLabEntryConfig => Boolean(entry));
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+  const legacyQuestion = typeof item.config.question === "string" ? item.config.question.trim() : "";
+  const legacyExpected =
+    typeof item.config.expected_answer === "string" ? item.config.expected_answer.trim() : "";
+  if (legacyQuestion || legacyExpected) {
+    return [{ question_key: "q1", question: legacyQuestion, correct_answer: legacyExpected }];
+  }
+  return [];
+}
+
+function getSigningLabRequirement(item: StudentCourseItem, totalEntries: number): {
+  requireAll: boolean;
+  requiredCount: number;
+} {
+  const defaultRequired = Math.max(1, totalEntries);
+  const requireAll = parseBooleanFlag(item.config.require_all) ?? true;
+  const parsedRequired = parseRequiredCount(item.config.required_count);
+  if (requireAll) {
+    return {
+      requireAll: true,
+      requiredCount: defaultRequired,
     };
-  }, [running, activeStep.id, lastRecognizedToken]);
-
-  function submitCurrentStep() {
-    const value = currentDetectedGesture();
-    if (!value) {
-      setError("Please wait for a recognized gesture before continuing.");
-      return;
-    }
-
-    setError(null);
-    setCompletedStepIds((previous) =>
-      previous.includes(activeStep.id) ? previous : [...previous, activeStep.id]
-    );
-
-    if (activeStepIndex < MODULE1_SIGNING_CHALLENGE_STEPS.length - 1) {
-      setActiveStepIndex((index) =>
-        Math.min(MODULE1_SIGNING_CHALLENGE_STEPS.length - 1, index + 1)
-      );
-      return;
-    }
-
-    if (!reported) {
-      const total = MODULE1_SIGNING_CHALLENGE_STEPS.length;
-      const right = completedStepIds.includes(activeStep.id)
-        ? completedStepIds.length
-        : completedStepIds.length + 1;
-      const wrong = Math.max(0, total - right);
-      const improvementAreas = MODULE1_SIGNING_CHALLENGE_STEPS.filter(
-        (step) => !(step.id === activeStep.id || completedStepIds.includes(step.id))
-      ).map((step) => step.prompt);
-      onSubmitResult?.({
-        assessmentId: "m1-assessment-3",
-        assessmentTitle: "Assessment 3",
-        right,
-        wrong,
-        total,
-        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-        improvementAreas,
-      });
-      setReported(true);
-    }
   }
-
-  function clearCurrentInput() {
-    const token = hiddenPrediction.trim();
-    if (isValidPredictionToken(token)) {
-      setBlockedTokenAfterClear(token);
-    } else {
-      setBlockedTokenAfterClear(null);
-    }
-    setRecognizedTrail("");
-    setRecognizedByStep((previous) => ({
-      ...previous,
-      [activeStep.id]: ""
-    }));
-    palmRaisedRef.current = false;
-    lastPalmCommitAtRef.current = 0;
-    setHiddenPrediction("No prediction yet.");
-    setPredictionConfidence(null);
-    setPredictionTopCandidates([]);
-    setLastRecognizedToken(null);
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-xl font-semibold text-slate-900">Assessment 3</h3>
-
-      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <video
-            autoPlay
-            className="h-[300px] w-full rounded-xl border border-slate-300 bg-slate-900 object-cover md:h-[420px]"
-            muted
-            playsInline
-            ref={videoRef}
-          />
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              className={`rounded px-3 py-2 text-xs font-semibold text-white transition ${
-                running ? "bg-brandRed hover:bg-brandRed/90" : "bg-brandBlue hover:bg-brandBlue/90"
-              }`}
-              onClick={() => {
-                void toggleCamera();
-              }}
-              type="button"
-            >
-              <span className="inline-grid min-w-[92px] place-items-center">
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"
-                  }`}
-                >
-                  Start Camera
-                </span>
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
-                  }`}
-                >
-                  Stop Camera
-                </span>
-              </span>
-            </button>
-            <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-              {running ? "Alphabet mode active (show open palm to enter)" : "Camera off"}
-            </span>
-          </div>
-          {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
-        </div>
-
-        <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs uppercase tracking-wider label-accent">Current Task</p>
-          <h4 className="mt-1 text-base font-semibold text-slate-900">{activeStep.title}</h4>
-          <p className="mt-2 text-sm text-slate-700">{activeStep.prompt}</p>
-
-          {activeStep.imageSrc ? (
-            <img
-              alt={activeStep.title}
-              className="mt-3 h-40 w-full rounded-lg border border-slate-200 bg-white object-contain p-2"
-              src={activeStep.imageSrc}
-            />
-          ) : null}
-
-          <div className="mt-3 rounded-lg border border-brandBorder bg-white p-3">
-            <p className="text-xs uppercase tracking-wider label-accent">Prediction Output</p>
-            <p className="mt-2 text-lg font-bold text-brandBlue">{hiddenPrediction}</p>
-            <p className="mt-1 text-xs text-slate-700">
-              Confidence:{" "}
-              {predictionConfidence !== null ? `${Math.round(predictionConfidence * 100)}%` : "N/A"}
-            </p>
-            <p className="mt-1 text-xs text-slate-600">
-              Top candidates:{" "}
-              {predictionTopCandidates.length > 0 ? predictionTopCandidates.join(" | ") : "N/A"}
-            </p>
-            <p className="mt-2 rounded-md border border-brandYellow/35 bg-brandYellowLight px-2 py-1 text-xs font-semibold text-slate-800">
-              Note: Show an open palm after the prediction appears to enter the letter.
-            </p>
-          </div>
-
-          <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
-            Recognized Gesture
-            <input
-              autoComplete="off"
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              readOnly
-              onDrop={(event) => event.preventDefault()}
-              onPaste={(event) => event.preventDefault()}
-              placeholder="Recognized gesture/phrase appears here..."
-              spellCheck={false}
-              type="text"
-              value={recognizedTrail}
-            />
-          </label>
-          <button
-            className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-            onClick={clearCurrentInput}
-            type="button"
-          >
-            Clear Input
-          </button>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-              disabled={activeStepIndex === 0}
-              onClick={() => setActiveStepIndex((index) => Math.max(0, index - 1))}
-              type="button"
-            >
-              Previous
-            </button>
-            <button
-              className="rounded bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-              onClick={submitCurrentStep}
-              type="button"
-            >
-              {activeStepIndex === MODULE1_SIGNING_CHALLENGE_STEPS.length - 1 ? "Submit" : "Next"}
-            </button>
-          </div>
-
-          <p className="mt-3 text-xs text-slate-600">
-            Completed: {completedStepIds.length}/{MODULE1_SIGNING_CHALLENGE_STEPS.length}
-          </p>
-
-          {allDone ? (
-            <p className="mt-2 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-              Assessment complete. All tasks submitted.
-            </p>
-          ) : null}
-
-          <Link
-            className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
-          >
-            Open Free Signing Lab
-          </Link>
-        </aside>
-      </div>
-    </div>
-  );
+  return {
+    requireAll: false,
+    requiredCount: Math.max(1, Math.min(parsedRequired ?? defaultRequired, defaultRequired)),
+  };
 }
 
-function Module2AssessmentOne({
-  questions,
-  moduleLabel,
-  assessmentId,
-  assessmentTitle = "Assessment 1",
-  onSubmitResult
-}: {
-  questions: Array<{ id: string; question: string; choices: string[]; answer: string }>;
-  moduleLabel: string;
-  assessmentId: string;
-  assessmentTitle?: string;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  const [selectedChoices, setSelectedChoices] = useSessionState<Record<string, string>>(
-    `module-detail:${assessmentId}:selectedChoices`,
-    {}
-  );
-  const [showResult, setShowResult] = useSessionState<boolean>(
-    `module-detail:${assessmentId}:showResult`,
-    false
-  );
-  const [reported, setReported] = useSessionState<boolean>(
-    `module-detail:${assessmentId}:reported`,
-    false
-  );
-
-  const answeredCount = questions.filter((question) => selectedChoices[question.id]).length;
-  const score = questions.reduce((total, question) => {
-    const picked = selectedChoices[question.id];
-    if (!picked) {
-      return total;
-    }
-    return total + (picked === question.answer ? 1 : 0);
-  }, 0);
-
-  function submitAssessmentResult() {
-    if (reported) {
-      return;
-    }
-    const total = questions.length;
-    const right = score;
-    const wrong = Math.max(0, total - right);
-    const improvementAreas = questions
-      .filter((question) => selectedChoices[question.id] !== question.answer)
-      .map((question) => question.question);
-    onSubmitResult?.({
-      assessmentId,
-      assessmentTitle,
-      right,
-      wrong,
-      total,
-      scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-      improvementAreas
-    });
-    setReported(true);
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-xl font-semibold text-slate-900">Assessment 1</h3>
-      <p className="mt-2 text-sm text-slate-600">
-        Answer all five multiple-choice questions for the {moduleLabel} module.
-      </p>
-
-      <div className="mt-4 space-y-4">
-        {questions.map((question, index) => (
-          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3" key={question.id}>
-            <p className="text-sm font-semibold text-slate-900">
-              {index + 1}. {question.question}
-            </p>
-            <div className="mt-3 space-y-2">
-              {question.choices.map((choice) => {
-                const checked = selectedChoices[question.id] === choice;
-                return (
-                  <label
-                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
-                      checked
-                        ? "border-brandBlue bg-brandBlueLight text-slate-900"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                    }`}
-                    key={choice}
-                  >
-                    <input
-                      checked={checked}
-                      className="h-4 w-4 accent-brandBlue"
-                      name={question.id}
-                      onChange={() =>
-                        setSelectedChoices((previous) => ({
-                          ...previous,
-                          [question.id]: choice
-                        }))
-                      }
-                      type="radio"
-                    />
-                    {choice}
-                  </label>
-                );
-              })}
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button
-          className="rounded bg-brandBlue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-          onClick={() => {
-            setShowResult(true);
-            submitAssessmentResult();
-          }}
-          type="button"
-        >
-          Check Answers
-        </button>
-        <span className="text-xs text-slate-500">
-          Answered {answeredCount}/{questions.length}
-        </span>
-      </div>
-
-      {showResult ? (
-        <p className="mt-3 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-          Score: {score}/{questions.length}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function NumbersCameraAssessment({
-  assessmentId,
-  title,
-  intro,
-  targets,
-  minimumRequired = targets.length,
-  onSubmitResult
-}: {
-  assessmentId: string;
-  title: string;
-  intro: string;
-  targets: readonly { id: string; number: number }[];
-  minimumRequired?: number;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const predictionInFlightRef = useRef(false);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-  const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedTrail, setRecognizedTrail] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
-  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
-  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
-  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
-  const [reported, setReported] = useState(false);
-
-  const activeStep = targets[activeStepIndex];
-  const reachedMinimum = completedStepIds.length >= minimumRequired;
-  const allDone = completedStepIds.length >= targets.length;
-  const currentDetectedGesture = (recognizedByStep[activeStep.id] ?? "").trim();
-
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-    };
-  }, []);
-
-  async function startCamera() {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setRunning(true);
-    } catch {
-      setError("Unable to access camera. Check browser permission.");
-    }
-  }
-
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setRunning(false);
-  }
-
-  async function toggleCamera() {
-    if (running) {
-      stopCamera();
-      return;
-    }
-    await startCamera();
-  }
-
-  async function runHiddenPrediction() {
-    if (!running || predictionInFlightRef.current) {
-      return;
-    }
-    predictionInFlightRef.current = true;
-    try {
-      const frame = await captureVideoFrameAsFile(videoRef.current);
-      if (!frame) {
-        return;
-      }
-      const result = await predictSignFromImage(frame, "numbers");
-      setHiddenPrediction(result.prediction);
-    } catch {
-      // Hidden prediction failures should not break the flow.
-    } finally {
-      predictionInFlightRef.current = false;
-    }
-  }
-
-  useEffect(() => {
-    const token = hiddenPrediction.trim();
-    if (!isValidPredictionToken(token)) {
-      return;
-    }
-    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
-      setHiddenPrediction("No prediction yet.");
-      return;
-    }
-    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
-      setBlockedTokenAfterClear(null);
-    }
-    if (token === lastRecognizedToken) {
-      setHiddenPrediction("No prediction yet.");
-      return;
-    }
-
-    setRecognizedByStep((previous) => ({
-      ...previous,
-      [activeStep.id]: token
-    }));
-    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
-    setLastRecognizedToken(token);
-    setHiddenPrediction("No prediction yet.");
-  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeStep.id]);
-
-  function submitCurrentStep() {
-    const value = currentDetectedGesture.trim();
-    if (!value) {
-      setError("Please wait for a recognized gesture before continuing.");
-      return;
-    }
-
-    setError(null);
-    setCompletedStepIds((previous) =>
-      previous.includes(activeStep.id) ? previous : [...previous, activeStep.id]
-    );
-
-    if (activeStepIndex < targets.length - 1) {
-      setActiveStepIndex((index) => Math.min(targets.length - 1, index + 1));
-    }
-  }
-
-  function finishAssessment() {
-    if (!reachedMinimum) {
-      setError(`Please complete at least ${minimumRequired} number signs before submitting.`);
-      return;
-    }
-    setError(null);
-    setSubmitted(true);
-    if (!reported) {
-      const total = targets.length;
-      const right = completedStepIds.length;
-      const wrong = Math.max(0, total - right);
-      const improvementAreas = targets
-        .filter((step) => !completedStepIds.includes(step.id))
-        .map((step) => `Practice number ${step.number}`);
-      onSubmitResult?.({
-        assessmentId,
-        assessmentTitle: title,
-        right,
-        wrong,
-        total,
-        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-        improvementAreas,
-      });
-      setReported(true);
-    }
-  }
-
-  function clearCurrentInput() {
-    const token = hiddenPrediction.trim();
-    if (isValidPredictionToken(token)) {
-      setBlockedTokenAfterClear(token);
-    } else {
-      setBlockedTokenAfterClear(null);
-    }
-    setRecognizedTrail("");
-    setRecognizedByStep((previous) => ({
-      ...previous,
-      [activeStep.id]: ""
-    }));
-    setHiddenPrediction("No prediction yet.");
-    setLastRecognizedToken(null);
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
-      <p className="sr-only">{intro}</p>
-
-      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <video
-            autoPlay
-            className="h-[300px] w-full rounded-xl border border-slate-300 bg-slate-900 object-cover md:h-[420px]"
-            muted
-            playsInline
-            ref={videoRef}
-          />
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              className={`rounded px-3 py-2 text-xs font-semibold text-white transition ${
-                running ? "bg-brandRed hover:bg-brandRed/90" : "bg-brandBlue hover:bg-brandBlue/90"
-              }`}
-              onClick={() => {
-                void toggleCamera();
-              }}
-              type="button"
-            >
-              <span className="inline-grid min-w-[92px] place-items-center">
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"
-                  }`}
-                >
-                  Start Camera
-                </span>
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
-                  }`}
-                >
-                  Stop Camera
-                </span>
-              </span>
-            </button>
-            <button
-              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!running}
-              onClick={() => {
-                void runHiddenPrediction();
-              }}
-              type="button"
-            >
-              Analyze Sign Now
-            </button>
-            <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-              {running ? "Camera active" : "Camera off"}
-            </span>
-          </div>
-          {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
-        </div>
-
-        <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs uppercase tracking-wider label-accent">Current Number</p>
-          <div className="mt-2 flex items-center justify-center rounded-xl border border-brandBlue/20 bg-brandBlueLight p-6">
-            <span className="text-5xl font-bold text-brandBlue">{activeStep.number}</span>
-          </div>
-          <p className="mt-3 text-sm text-slate-700">
-            Sign the number shown above. The recognized output appears automatically below.
-          </p>
-
-          <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
-            Recognized Gesture
-            <input
-              autoComplete="off"
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              readOnly
-              onDrop={(event) => event.preventDefault()}
-              onPaste={(event) => event.preventDefault()}
-              placeholder="Recognized gesture/phrase appears here..."
-              spellCheck={false}
-              type="text"
-              value={recognizedTrail}
-            />
-          </label>
-          <button
-            className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-            onClick={clearCurrentInput}
-            type="button"
-          >
-            Clear Input
-          </button>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-              disabled={activeStepIndex === 0}
-              onClick={() => setActiveStepIndex((index) => Math.max(0, index - 1))}
-              type="button"
-            >
-              Previous
-            </button>
-            <button
-              className="rounded bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-              onClick={submitCurrentStep}
-              type="button"
-            >
-              {activeStepIndex === targets.length - 1 ? "Mark Done" : "Next"}
-            </button>
-            {reachedMinimum ? (
-              <button
-                className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-                onClick={finishAssessment}
-                type="button"
-              >
-                Finish
-              </button>
-            ) : null}
-          </div>
-
-          <p className="mt-3 text-xs text-slate-600">
-            Completed: {completedStepIds.length}/{targets.length}
-          </p>
-          {minimumRequired < targets.length ? (
-            <p className="mt-1 text-xs text-slate-600">Minimum required: {minimumRequired}</p>
-          ) : null}
-
-          {submitted || allDone ? (
-            <p className="mt-2 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-              Assessment complete. All number tasks submitted.
-            </p>
-          ) : null}
-
-          <Link
-            className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
-          >
-            Open Free Signing Lab
-          </Link>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function GestureCameraAssessment({
-  assessmentId,
-  title,
-  intro,
-  targets,
-  minimumRequired,
-  onSubmitResult
-}: {
-  assessmentId: string;
-  title: string;
-  intro: string;
-  targets: readonly { id: string; label: string }[];
-  minimumRequired: number;
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const predictionInFlightRef = useRef(false);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-  const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedTrail, setRecognizedTrail] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
-  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
-  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
-  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
-  const [reported, setReported] = useState(false);
-  const activeStep = targets[activeStepIndex];
-  const reachedMinimum = completedStepIds.length >= minimumRequired;
-  const allDone = completedStepIds.length >= targets.length;
-  const currentDetectedGesture = (recognizedByStep[activeStep.id] ?? "").trim();
-
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-    };
-  }, []);
-
-  async function startCamera() {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setRunning(true);
-    } catch {
-      setError("Unable to access camera. Check browser permission.");
-    }
-  }
-
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setRunning(false);
-  }
-
-  async function toggleCamera() {
-    if (running) {
-      stopCamera();
-      return;
-    }
-    await startCamera();
-  }
-
-  async function runHiddenPrediction() {
-    if (!running || predictionInFlightRef.current) {
-      return;
-    }
-    predictionInFlightRef.current = true;
-    try {
-      const frame = await captureVideoFrameAsFile(videoRef.current);
-      if (!frame) {
-        return;
-      }
-      const result = await predictSignFromImage(frame, "words");
-      setHiddenPrediction(result.prediction);
-    } catch {
-      // Hidden prediction failures should not break the assessment flow.
-    } finally {
-      predictionInFlightRef.current = false;
-    }
-  }
-
-  useEffect(() => {
-    const token = hiddenPrediction.trim();
-    if (!isValidPredictionToken(token)) {
-      return;
-    }
-    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
-      setHiddenPrediction("No prediction yet.");
-      return;
-    }
-    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
-      setBlockedTokenAfterClear(null);
-    }
-    if (token === lastRecognizedToken) {
-      setHiddenPrediction("No prediction yet.");
-      return;
-    }
-
-    setRecognizedByStep((previous) => ({
-      ...previous,
-      [activeStep.id]: token
-    }));
-    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
-    setLastRecognizedToken(token);
-    setHiddenPrediction("No prediction yet.");
-  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeStep.id]);
-
-  function markCurrentStepDone() {
-    if (!currentDetectedGesture) {
-      setError("No recognized gesture detected yet. Keep your hand visible and try again.");
-      return;
-    }
-    setError(null);
-    setCompletedStepIds((previous) =>
-      previous.includes(activeStep.id) ? previous : [...previous, activeStep.id]
-    );
-  }
-
-  function goNextStep() {
-    setError(null);
-    setActiveStepIndex((index) => Math.min(targets.length - 1, index + 1));
-  }
-
-  function finishAssessment() {
-    if (!reachedMinimum) {
-      setError(`Please complete at least ${minimumRequired} gestures before submitting.`);
-      return;
-    }
-    setError(null);
-    setSubmitted(true);
-    if (!reported) {
-      const total = targets.length;
-      const right = completedStepIds.length;
-      const wrong = Math.max(0, total - right);
-      const improvementAreas = targets
-        .filter((step) => !completedStepIds.includes(step.id))
-        .map((step) => `Practice gesture: ${step.label}`);
-      onSubmitResult?.({
-        assessmentId,
-        assessmentTitle: title,
-        right,
-        wrong,
-        total,
-        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-        improvementAreas,
-      });
-      setReported(true);
-    }
-  }
-
-  function clearCurrentInput() {
-    const token = hiddenPrediction.trim();
-    if (isValidPredictionToken(token)) {
-      setBlockedTokenAfterClear(token);
-    } else {
-      setBlockedTokenAfterClear(null);
-    }
-    setRecognizedTrail("");
-    setRecognizedByStep((previous) => ({
-      ...previous,
-      [activeStep.id]: ""
-    }));
-    setHiddenPrediction("No prediction yet.");
-    setLastRecognizedToken(null);
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
-      <p className="sr-only">{intro}</p>
-
-      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <video
-            autoPlay
-            className="h-[300px] w-full rounded-xl border border-slate-300 bg-slate-900 object-cover md:h-[420px]"
-            muted
-            playsInline
-            ref={videoRef}
-          />
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              className={`rounded px-3 py-2 text-xs font-semibold text-white transition ${
-                running ? "bg-brandRed hover:bg-brandRed/90" : "bg-brandBlue hover:bg-brandBlue/90"
-              }`}
-              onClick={() => {
-                void toggleCamera();
-              }}
-              type="button"
-            >
-              <span className="inline-grid min-w-[92px] place-items-center">
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"
-                  }`}
-                >
-                  Start Camera
-                </span>
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
-                  }`}
-                >
-                  Stop Camera
-                </span>
-              </span>
-            </button>
-            <button
-              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!running}
-              onClick={() => {
-                void runHiddenPrediction();
-              }}
-              type="button"
-            >
-              Analyze Sign Now
-            </button>
-            <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-              {running ? "Camera active" : "Camera off"}
-            </span>
-          </div>
-          {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
-        </div>
-
-        <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs uppercase tracking-wider label-accent">Current Gesture</p>
-          <div className="mt-2 rounded-xl border border-brandBlue/20 bg-brandBlueLight p-4">
-            <p className="text-center text-lg font-bold text-brandBlue">{activeStep.label}</p>
-          </div>
-
-          <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
-            Recognized Gesture
-            <input
-              autoComplete="off"
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              readOnly
-              onDrop={(event) => event.preventDefault()}
-              onPaste={(event) => event.preventDefault()}
-              placeholder="Recognized gesture/phrase appears here..."
-              spellCheck={false}
-              type="text"
-              value={recognizedTrail}
-            />
-          </label>
-          <button
-            className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-            onClick={clearCurrentInput}
-            type="button"
-          >
-            Clear Input
-          </button>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-              disabled={activeStepIndex === 0}
-              onClick={() => setActiveStepIndex((index) => Math.max(0, index - 1))}
-              type="button"
-            >
-              Previous
-            </button>
-            <button
-              className="rounded bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-              disabled={activeStepIndex === targets.length - 1}
-              onClick={goNextStep}
-              type="button"
-            >
-              Next
-            </button>
-            <button
-              className="rounded border border-brandBlue bg-white px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-              onClick={markCurrentStepDone}
-              type="button"
-            >
-              Mark Done
-            </button>
-            {reachedMinimum ? (
-              <button
-                className="rounded bg-brandGreen px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandGreen/90"
-                onClick={finishAssessment}
-                type="button"
-              >
-                Finish / Submit
-              </button>
-            ) : null}
-          </div>
-
-          <p className="mt-3 text-xs text-slate-600">
-            Completed: {completedStepIds.length}/{targets.length}
-          </p>
-          <p className="mt-1 text-xs text-slate-600">Minimum required: {minimumRequired}</p>
-
-          {reachedMinimum ? (
-            <p className="mt-3 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-              Requirement reached. You completed at least 7 gestures.
-            </p>
-          ) : null}
-
-          {allDone ? (
-            <p className="mt-2 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-              Assessment complete. All gesture tasks submitted.
-            </p>
-          ) : null}
-
-          {submitted ? (
-            <p className="mt-2 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-              Submitted. Great work completing the gesture requirement.
-            </p>
-          ) : null}
-
-          <Link
-            className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
-          >
-            Open Free Signing Lab
-          </Link>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function Module3AssessmentTwo({
-  onSubmitResult
-}: {
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  return (
-    <GestureCameraAssessment
-      assessmentId="m3-assessment-2"
-      intro="Use the camera interface and sign at least 7 gestures from this module."
-      minimumRequired={7}
-      onSubmitResult={onSubmitResult}
-      targets={MODULE3_GESTURE_TARGETS}
-      title="Assessment 2"
-    />
-  );
-}
-
-function Module7ColorAssessmentTwo({
-  onSubmitResult
-}: {
-  onSubmitResult?: (payload: AssessmentReportPayload) => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const predictionInFlightRef = useRef(false);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-  const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
-  const [recognizedTrail, setRecognizedTrail] = useState("");
-  const [recognizedByStep, setRecognizedByStep] = useState<Record<string, string>>({});
-  const [hiddenPrediction, setHiddenPrediction] = useState("No prediction yet.");
-  const [lastRecognizedToken, setLastRecognizedToken] = useState<string | null>(null);
-  const [blockedTokenAfterClear, setBlockedTokenAfterClear] = useState<string | null>(null);
-  const [reported, setReported] = useState(false);
-
-  const activeColor = MODULE7_COLOR_SIGN_TARGETS[activeStepIndex];
-  const allDone = completedStepIds.length >= MODULE7_COLOR_SIGN_TARGETS.length;
-  const currentDetectedGesture = (recognizedByStep[activeColor.id] ?? "").trim();
-
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-    };
-  }, []);
-
-  async function startCamera() {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setRunning(true);
-    } catch {
-      setError("Unable to access camera. Check browser permission.");
-    }
-  }
-
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setRunning(false);
-  }
-
-  async function toggleCamera() {
-    if (running) {
-      stopCamera();
-      return;
-    }
-    await startCamera();
-  }
-
-  async function runHiddenPrediction() {
-    if (!running || predictionInFlightRef.current) {
-      return;
-    }
-    predictionInFlightRef.current = true;
-    try {
-      const frame = await captureVideoFrameAsFile(videoRef.current);
-      if (!frame) {
-        return;
-      }
-      const result = await predictSignFromImage(frame, "words");
-      setHiddenPrediction(result.prediction);
-    } catch {
-      // Hidden prediction failures should not block user actions.
-    } finally {
-      predictionInFlightRef.current = false;
-    }
-  }
-
-  useEffect(() => {
-    const token = hiddenPrediction.trim();
-    if (!isValidPredictionToken(token)) {
-      return;
-    }
-    if (blockedTokenAfterClear && token === blockedTokenAfterClear) {
-      setHiddenPrediction("No prediction yet.");
-      return;
-    }
-    if (blockedTokenAfterClear && token !== blockedTokenAfterClear) {
-      setBlockedTokenAfterClear(null);
-    }
-    if (token === lastRecognizedToken) {
-      setHiddenPrediction("No prediction yet.");
-      return;
-    }
-
-    setRecognizedByStep((previous) => ({
-      ...previous,
-      [activeColor.id]: token
-    }));
-    setRecognizedTrail((previous) => (previous ? `${previous} ${token}` : token));
-    setLastRecognizedToken(token);
-    setHiddenPrediction("No prediction yet.");
-  }, [hiddenPrediction, blockedTokenAfterClear, lastRecognizedToken, activeColor.id]);
-
-  function submitCurrentStep() {
-    const value = currentDetectedGesture;
-    if (!value) {
-      setError("Please wait for a recognized gesture before continuing.");
-      return;
-    }
-
-    setError(null);
-    const nextCompletedStepIds = completedStepIds.includes(activeColor.id)
-      ? completedStepIds
-      : [...completedStepIds, activeColor.id];
-    setCompletedStepIds(nextCompletedStepIds);
-
-    const isLastStep = activeStepIndex >= MODULE7_COLOR_SIGN_TARGETS.length - 1;
-    if (!isLastStep) {
-      setActiveStepIndex((index) =>
-        Math.min(MODULE7_COLOR_SIGN_TARGETS.length - 1, index + 1)
-      );
-      return;
-    }
-
-    if (!reported) {
-      const total = MODULE7_COLOR_SIGN_TARGETS.length;
-      const right = nextCompletedStepIds.length;
-      const wrong = Math.max(0, total - right);
-      const improvementAreas = MODULE7_COLOR_SIGN_TARGETS.filter(
-        (step) => !nextCompletedStepIds.includes(step.id)
-      ).map((step) => `Practice color: ${step.label}`);
-      onSubmitResult?.({
-        assessmentId: "m7-assessment-2",
-        assessmentTitle: "Assessment 2",
-        right,
-        wrong,
-        total,
-        scorePercent: total > 0 ? Math.round((right / total) * 100) : 0,
-        improvementAreas
-      });
-      setReported(true);
-    }
-  }
-
-  function clearCurrentInput() {
-    const token = hiddenPrediction.trim();
-    if (isValidPredictionToken(token)) {
-      setBlockedTokenAfterClear(token);
-    } else {
-      setBlockedTokenAfterClear(null);
-    }
-    setRecognizedTrail("");
-    setRecognizedByStep((previous) => ({
-      ...previous,
-      [activeColor.id]: ""
-    }));
-    setHiddenPrediction("No prediction yet.");
-    setLastRecognizedToken(null);
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-xl font-semibold text-slate-900">Assessment 2</h3>
-
-      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <video
-            autoPlay
-            className="h-[300px] w-full rounded-xl border border-slate-300 bg-slate-900 object-cover md:h-[420px]"
-            muted
-            playsInline
-            ref={videoRef}
-          />
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              className={`rounded px-3 py-2 text-xs font-semibold text-white transition ${
-                running ? "bg-brandRed hover:bg-brandRed/90" : "bg-brandBlue hover:bg-brandBlue/90"
-              }`}
-              onClick={() => {
-                void toggleCamera();
-              }}
-              type="button"
-            >
-              <span className="inline-grid min-w-[92px] place-items-center">
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"
-                  }`}
-                >
-                  Start Camera
-                </span>
-                <span
-                  className={`col-start-1 row-start-1 transition-all duration-300 ${
-                    running ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
-                  }`}
-                >
-                  Stop Camera
-                </span>
-              </span>
-            </button>
-            <button
-              className="rounded bg-brandRed px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandRed/90 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!running}
-              onClick={() => {
-                void runHiddenPrediction();
-              }}
-              type="button"
-            >
-              Analyze Sign Now
-            </button>
-            <span className="rounded bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-              {running ? "Camera active" : "Camera off"}
-            </span>
-          </div>
-          {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
-        </div>
-
-        <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs uppercase tracking-wider label-accent">Displayed Color</p>
-          <div
-            className="mt-2 flex h-28 items-center justify-center rounded-xl border border-slate-300"
-            style={{ backgroundColor: activeColor.colorHex }}
-          >
-            <span className="text-xl font-bold text-white">{activeColor.label}</span>
-          </div>
-
-          <p className="mt-3 text-sm text-slate-700">
-            Sign the color shown above. The recognized output appears automatically below.
-          </p>
-
-          <label className="mt-3 block text-xs font-semibold uppercase tracking-wider label-accent">
-            Recognized Gesture
-            <input
-              autoComplete="off"
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-              readOnly
-              onDrop={(event) => event.preventDefault()}
-              onPaste={(event) => event.preventDefault()}
-              placeholder="Recognized gesture/phrase appears here..."
-              spellCheck={false}
-              type="text"
-              value={recognizedTrail}
-            />
-          </label>
-          <button
-            className="mt-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-            onClick={clearCurrentInput}
-            type="button"
-          >
-            Clear Input
-          </button>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-              disabled={activeStepIndex === 0}
-              onClick={() => setActiveStepIndex((index) => Math.max(0, index - 1))}
-              type="button"
-            >
-              Previous
-            </button>
-            <button
-              className="rounded bg-brandBlue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-              onClick={submitCurrentStep}
-              type="button"
-            >
-              {activeStepIndex === MODULE7_COLOR_SIGN_TARGETS.length - 1 ? "Submit" : "Next"}
-            </button>
-          </div>
-
-          <p className="mt-3 text-xs text-slate-600">
-            Completed: {completedStepIds.length}/{MODULE7_COLOR_SIGN_TARGETS.length}
-          </p>
-
-          {allDone ? (
-            <p className="mt-3 rounded-lg border border-brandGreen/30 bg-brandGreenLight px-3 py-2 text-sm font-semibold text-slate-800">
-              Great work. You completed all displayed colors.
-            </p>
-          ) : null}
-
-          <Link
-            className="mt-3 inline-flex rounded border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
-            href="/lab"
-          >
-            Open Free Signing Lab
-          </Link>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-export default function ModuleDetailPage() {
+export default function StudentModulePlayerPage() {
   const params = useParams<{ moduleId: string }>();
-  const moduleId = Number(params.moduleId);
-  const moduleScopeKey = `module-detail:${Number.isNaN(moduleId) ? "unknown" : moduleId}`;
-
-  const [modules, setModules] = useState<ModuleItem[]>([]);
+  const router = useRouter();
+  const [course, setCourse] = useState<StudentCourse | null>(null);
+  const [certificateStatus, setCertificateStatus] = useState<StudentCertificateDownloadStatus | null>(null);
+  const [answerByItem, setAnswerByItem] = useState<Record<number, string>>({});
+  const [uploadFilesByItem, setUploadFilesByItem] = useState<Record<number, File[]>>({});
+  const [uploadNoteByItem, setUploadNoteByItem] = useState<Record<number, string>>({});
+  const [uploadingItemId, setUploadingItemId] = useState<number | null>(null);
+  const [mcqAnswersByItem, setMcqAnswersByItem] = useState<Record<number, Record<string, string>>>({});
+  const [identificationAnswersByItem, setIdentificationAnswersByItem] = useState<
+    Record<number, Record<string, string>>
+  >({});
+  const [signingLabAnswersByItem, setSigningLabAnswersByItem] = useState<
+    Record<number, Record<string, string>>
+  >({});
+  const [signingLabEntryIndexByItem, setSigningLabEntryIndexByItem] = useState<Record<number, number>>({});
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [slideshowIndexByItem, setSlideshowIndexByItem] = useState<Record<number, number>>({});
+  const [assessmentSubmissionStateByItem, setAssessmentSubmissionStateByItem] = useState<
+    Record<number, AssessmentSubmissionState>
+  >({});
+  const [submittingAssessmentItemId, setSubmittingAssessmentItemId] = useState<number | null>(null);
+  const [isCourseFlowCollapsed, setIsCourseFlowCollapsed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useSessionState<"module" | "assessment">(
-    `${moduleScopeKey}:activeTab`,
-    "module"
-  );
-  const [selectedLessonId, setSelectedLessonId] = useSessionState<string | null>(
-    `${moduleScopeKey}:selectedLessonId`,
-    null
-  );
-  const [selectedAssessmentId, setSelectedAssessmentId] = useSessionState<string | null>(
-    `${moduleScopeKey}:selectedAssessmentId`,
-    null
-  );
-  const [isSelectionCollapsed, setIsSelectionCollapsed] = useSessionState<boolean>(
-    `${moduleScopeKey}:isSelectionCollapsed`,
-    false
-  );
-  const [assessmentReportMessage, setAssessmentReportMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const itemPanelRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
+  async function refresh(options?: { tolerateCertificateError?: boolean }) {
+    const tolerateCertificateError = options?.tolerateCertificateError ?? false;
+    const courseData = await getStudentCourse();
+    setCourse(courseData);
+
+    try {
+      const certificateData = await getStudentCertificateDownloadStatus();
+      setCertificateStatus(certificateData);
+    } catch (certificateError) {
+      setCertificateStatus(null);
+      if (!tolerateCertificateError) {
+        throw certificateError;
+      }
+    }
+
     setError(null);
-    if (Number.isNaN(moduleId)) {
-      setError("Invalid module id.");
+  }
+
+  useEffect(() => {
+    void refresh().catch((requestError: Error) => setError(requestError.message));
+  }, []);
+
+  const moduleId = Number(params.moduleId);
+  const currentModule = useMemo(
+    () => course?.modules.find((module) => module.id === moduleId) ?? null,
+    [course, moduleId]
+  );
+  const fallbackItemId = useMemo(() => {
+    if (!currentModule) {
+      return null;
+    }
+    const preferred =
+      currentModule.items.find((item) => !item.is_locked && item.status !== "completed") ??
+      currentModule.items.find((item) => !item.is_locked) ??
+      currentModule.items[0];
+    return preferred?.id ?? null;
+  }, [currentModule]);
+
+  useEffect(() => {
+    if (!currentModule) {
+      setSelectedItemId(null);
       return;
     }
+    setSelectedItemId((current) => {
+      if (current !== null) {
+        const existingItem = currentModule.items.find((item) => item.id === current);
+        if (existingItem && !existingItem.is_locked) {
+          return current;
+        }
+      }
+      return fallbackItemId;
+    });
+  }, [currentModule, fallbackItemId]);
 
-    setLoading(true);
-    getModules()
-      .then(setModules)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [moduleId]);
+  const currentItem = useMemo(
+    () =>
+      currentModule?.items.find((item) => item.id === selectedItemId && !item.is_locked) ??
+      currentModule?.items.find((item) => !item.is_locked && item.status !== "completed") ??
+      currentModule?.items.find((item) => !item.is_locked) ??
+      currentModule?.items[0] ??
+      null,
+    [currentModule, selectedItemId]
+  );
+  const navigableItems = useMemo(
+    () => currentModule?.items.filter((item) => !item.is_locked) ?? [],
+    [currentModule]
+  );
+  const currentItemIndex = useMemo(
+    () => (currentItem ? navigableItems.findIndex((item) => item.id === currentItem.id) : -1),
+    [currentItem, navigableItems]
+  );
+  const previousItem = currentItemIndex > 0 ? navigableItems[currentItemIndex - 1] : null;
+  const nextItem =
+    currentItemIndex >= 0 && currentItemIndex < navigableItems.length - 1
+      ? navigableItems[currentItemIndex + 1]
+      : null;
+  const isAwaitingAssessmentMarkDone = Boolean(
+    currentItem && assessmentSubmissionStateByItem[currentItem.id]?.awaitingMarkDone
+  );
+  const isCurrentModuleFinished = Boolean(
+    currentModule &&
+      currentModule.items.length > 0 &&
+      currentModule.items.every((item) => item.status === "completed")
+  );
 
-  const selected = useMemo(
-    () => modules.find((module) => module.id === moduleId) ?? null,
-    [modules, moduleId]
+  const showCompleteAction = Boolean(
+    currentItem &&
+      !currentItem.is_locked &&
+      currentItem.status !== "completed" &&
+      isContentItemType(currentItem.item_type)
   );
 
   useEffect(() => {
-    if (!selected) {
-      setSelectedLessonId(null);
-      setSelectedAssessmentId(null);
+    if (!currentItem) {
       return;
     }
+    const timer = window.setTimeout(() => {
+      itemPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [currentItem?.id]);
 
-    const lessonExists = selectedLessonId
-      ? selected.lessons.some((lesson) => lesson.id === selectedLessonId)
-      : false;
-    if (!lessonExists) {
-      setSelectedLessonId(selected.lessons[0]?.id ?? null);
+  useEffect(() => {
+    if (!message) {
+      return;
     }
+    notifySuccess(message);
+    setMessage(null);
+  }, [message]);
 
-    const availableAssessmentIds = getAvailableAssessmentIds(selected);
-    const assessmentExists = selectedAssessmentId
-      ? availableAssessmentIds.includes(selectedAssessmentId)
-      : false;
-    if (!assessmentExists) {
-      setSelectedAssessmentId(availableAssessmentIds[0] ?? null);
-    }
-  }, [selected, selectedLessonId, selectedAssessmentId, setSelectedLessonId, setSelectedAssessmentId]);
-
-  const selectedLesson = useMemo(
-    () => selected?.lessons.find((lesson) => lesson.id === selectedLessonId) ?? null,
-    [selected, selectedLessonId]
-  );
-
-  const selectedAssessment = useMemo(
-    () => selected?.assessments.find((assessment) => assessment.id === selectedAssessmentId) ?? null,
-    [selected, selectedAssessmentId]
-  );
-
-  const isModule1 = selected?.slug === "fsl-alphabets";
-  const isModule2 = selected?.slug === "numbers";
-  const isModule3 = selected?.slug === "common-words";
-  const isModule4 = selected?.slug === "family-members";
-  const isModule5 = selected?.slug === "people-description";
-  const isModule6 = selected?.slug === "days";
-  const isModule7 = selected?.slug === "colors-descriptions";
-  const isModule8 = selected?.slug === "basic-conversations";
-  const module1AssessmentQuestions = useMemo(() => {
-    if (!isModule1 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule1, selected]);
-  const module2AssessmentQuestions = useMemo(() => {
-    if (!isModule2 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule2, selected]);
-  const module3AssessmentQuestions = useMemo(() => {
-    if (!isModule3 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule3, selected]);
-  const module4AssessmentQuestions = useMemo(() => {
-    if (!isModule4 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule4, selected]);
-  const module5AssessmentQuestions = useMemo(() => {
-    if (!isModule5 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule5, selected]);
-  const module6AssessmentQuestions = useMemo(() => {
-    if (!isModule6 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule6, selected]);
-  const module7AssessmentQuestions = useMemo(() => {
-    if (!isModule7 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule7, selected]);
-  const module8AssessmentQuestions = useMemo(() => {
-    if (!isModule8 || !selected) {
-      return [];
-    }
-    return selected.assessments.slice(0, 5);
-  }, [isModule8, selected]);
-
-  function openModuleTab() {
-    setActiveTab("module");
-    if (!selectedLessonId && selected?.lessons.length) {
-      setSelectedLessonId(selected.lessons[0].id);
+  async function onCompleteReadable(item: StudentCourseItem) {
+    try {
+      setError(null);
+      await completeReadableItem(item.id, 30);
+      setMessage("Item completed. The next item is now available.");
+      setSelectedItemId(null);
+      await refresh({ tolerateCertificateError: true });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to complete item.");
     }
   }
 
-  function openAssessmentTab() {
-    setActiveTab("assessment");
-    if (isModule1) {
-      setSelectedAssessmentId("m1-assessment-1");
-      return;
-    }
-    if (isModule2) {
-      setSelectedAssessmentId("m2-assessment-1");
-      return;
-    }
-    if (isModule3) {
-      setSelectedAssessmentId("m3-assessment-1");
-      return;
-    }
-    if (isModule4) {
-      setSelectedAssessmentId("m4-assessment-1");
-      return;
-    }
-    if (isModule5) {
-      setSelectedAssessmentId("m5-assessment-1");
-      return;
-    }
-    if (isModule6) {
-      setSelectedAssessmentId("m6-assessment-1");
-      return;
-    }
-    if (isModule7) {
-      setSelectedAssessmentId("m7-assessment-1");
-      return;
-    }
-    if (isModule8) {
-      setSelectedAssessmentId("m8-assessment-1");
-      return;
-    }
-    if (!selectedAssessmentId && selected?.assessments.length) {
-      setSelectedAssessmentId(selected.assessments[0].id);
+  async function onSubmitItem(event: FormEvent<HTMLFormElement>, item: StudentCourseItem) {
+    event.preventDefault();
+    try {
+      setError(null);
+      setSubmittingAssessmentItemId(item.id);
+      let responseText = answerByItem[item.id] ?? "";
+      const extraPayload: Record<string, unknown> = { helper: "student-module-player" };
+      if (item.item_type === "multiple_choice_assessment") {
+        const questionSet = getMcqQuestionSet(item);
+        if (questionSet.length > 1) {
+          const questionAnswers = mcqAnswersByItem[item.id] ?? {};
+          const hasMissingAnswer = questionSet.some(
+            (question) => !(questionAnswers[question.question_key] ?? "").trim()
+          );
+          if (hasMissingAnswer) {
+            setError("Please answer all questions before submitting.");
+            return;
+          }
+          responseText = "multi-question-submission";
+          extraPayload.question_answers = questionAnswers;
+          extraPayload.question_total = questionSet.length;
+        }
+      }
+      if (item.item_type === "identification_assessment") {
+        const questionSet = getIdentificationQuestionSet(item);
+        if (questionSet.length > 1) {
+          const questionAnswers = identificationAnswersByItem[item.id] ?? {};
+          const hasMissingAnswer = questionSet.some(
+            (question) => !(questionAnswers[question.question_key] ?? "").trim()
+          );
+          if (hasMissingAnswer) {
+            setError("Please type an answer for all identification questions before submitting.");
+            return;
+          }
+          responseText = "multi-identification-submission";
+          extraPayload.question_answers = questionAnswers;
+          extraPayload.question_total = questionSet.length;
+        }
+      }
+      if (item.item_type === "signing_lab_assessment") {
+        const entrySet = getSigningLabEntrySet(item);
+        if (entrySet.length > 1) {
+          const answerMap = signingLabAnswersByItem[item.id] ?? {};
+          const { requiredCount } = getSigningLabRequirement(item, entrySet.length);
+          const answeredCount = entrySet.reduce((total, entry) => {
+            return (answerMap[entry.question_key] ?? "").trim() ? total + 1 : total;
+          }, 0);
+          if (answeredCount < requiredCount) {
+            setError(
+              `Please answer at least ${requiredCount} camera entries before submitting.`
+            );
+            return;
+          }
+          responseText = "multi-signing-submission";
+          extraPayload.question_answers = answerMap;
+          extraPayload.question_total = entrySet.length;
+          extraPayload.required_count = requiredCount;
+        }
+      }
+      if (!responseText.trim()) {
+        setError("Please provide an answer before submitting.");
+        return;
+      }
+      const submission = await submitStudentItem(item.id, {
+        response_text: responseText,
+        duration_seconds: 60,
+        score_percent: undefined,
+        extra_payload: extraPayload
+      });
+      setAssessmentSubmissionStateByItem((current) => ({
+        ...current,
+        [item.id]: {
+          scorePercent:
+            typeof submission.score_percent === "number" ? submission.score_percent : null,
+          awaitingMarkDone: true,
+        },
+      }));
+      setMessage("Answer submitted. Review your score, retake if needed, then click Mark as Done.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to submit item.");
+    } finally {
+      setSubmittingAssessmentItemId((current) => (current === item.id ? null : current));
     }
   }
 
-  async function handleAssessmentResult(payload: AssessmentReportPayload) {
-    if (!selected) {
+  async function onMarkAssessmentDone(item: StudentCourseItem) {
+    try {
+      setError(null);
+      await refresh({ tolerateCertificateError: true });
+      setAssessmentSubmissionStateByItem((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setMessage("Marked as done. You can now proceed to the next item.");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : "Unable to mark assessment as done."
+      );
+    }
+  }
+
+  function onFinishModule() {
+    if (!course || !currentModule) {
+      return;
+    }
+    const nextUnlockedModule = course.modules.find(
+      (module) => module.order_index > currentModule.order_index && !module.is_locked
+    );
+    if (nextUnlockedModule) {
+      router.push(`/modules/${nextUnlockedModule.id}`);
+      return;
+    }
+    router.push("/modules");
+  }
+
+  async function onUploadSubmission(event: FormEvent<HTMLFormElement>, item: StudentCourseItem) {
+    event.preventDefault();
+    const files = uploadFilesByItem[item.id] ?? [];
+    if (files.length === 0) {
+      setError("Please add at least one file or video before submitting.");
       return;
     }
     try {
-      const updatedModule = await updateModuleProgress(selected.id, {
-        assessment_id: payload.assessmentId,
-        assessment_score: payload.scorePercent,
-        assessment_right: payload.right,
-        assessment_wrong: payload.wrong,
-        assessment_total: payload.total,
-        assessment_title: payload.assessmentTitle,
-        improvement_areas: payload.improvementAreas
+      setError(null);
+      setUploadingItemId(item.id);
+      await uploadStudentItemSubmission(item.id, {
+        files,
+        note: uploadNoteByItem[item.id] ?? "",
+        duration_seconds: 60,
       });
-      setModules((previous) =>
-        previous.map((module) => (module.id === updatedModule.id ? updatedModule : module))
+      setMessage("Your work was uploaded. Teacher can now review and score it.");
+      setUploadFilesByItem((current) => ({ ...current, [item.id]: [] }));
+      setSelectedItemId(null);
+      await refresh({ tolerateCertificateError: true });
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : "Unable to upload your submission."
       );
-      setAssessmentReportMessage(
-        `${payload.assessmentTitle} saved. Report is queued for teacher-side review.`
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save assessment report.");
+    } finally {
+      setUploadingItemId(null);
     }
   }
 
-  return (
-    <section className="space-y-4">
-      <div className="panel">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-2xl font-semibold title-gradient">Learning Module</h2>
-          <Link
-            className="rounded border border-brandBlue bg-brandBlue px-3 py-1 text-sm font-semibold text-white transition hover:bg-brandBlue/90"
-            href="/modules"
+  function renderItem(item: StudentCourseItem) {
+    function renderReadableAsset(asset: ModuleAsset) {
+      const url = resolveAssetUrl(asset);
+      if (asset.resource_kind === "image") {
+        return (
+          <div
+            className="flex items-center justify-center rounded-xl border border-brandBorder bg-brandOffWhite p-2"
+            style={{ minHeight: "220px" }}
           >
-            Back To Module Cards
-          </Link>
-        </div>
-      </div>
-
-      {loading ? <p className="text-sm text-muted">Loading module...</p> : null}
-
-      {!loading && !selected ? (
-        <div className="panel">
-          <p className="text-sm text-red-600">Module not found.</p>
-        </div>
-      ) : null}
-
-      {selected ? (
-        <article className="panel">
-          <div className="mb-3 flex justify-start">
-            <button
-              className="rounded border border-brandBlue bg-brandBlue px-3 py-1 text-xs font-semibold text-white transition hover:bg-brandBlue/90"
-              onClick={() => setIsSelectionCollapsed((value) => !value)}
-              type="button"
-            >
-              {isSelectionCollapsed ? "Show Module/Assessment List" : "Hide Module/Assessment List"}
-            </button>
+            <img
+              alt={asset.resource_file_name}
+              className="w-full rounded-xl object-contain"
+              loading="lazy"
+              src={url}
+              style={{ maxHeight: "320px" }}
+            />
           </div>
-          <div className={`grid gap-4 ${isSelectionCollapsed ? "lg:grid-cols-1" : "lg:grid-cols-[20rem_1fr]"}`}>
-            {!isSelectionCollapsed ? (
-            <aside className="rounded-xl border border-brandBorder bg-brandMutedSurface p-3">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                    activeTab === "module"
-                      ? "border-brandBlue bg-brandBlueLight text-brandBlue"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                  }`}
-                  onClick={openModuleTab}
-                  type="button"
-                >
-                  Module
-                </button>
-                <button
-                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                    activeTab === "assessment"
-                      ? "border-brandRed bg-brandRedLight text-brandRed"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                  }`}
-                  onClick={openAssessmentTab}
-                  type="button"
-                >
-                  Assessment
-                </button>
-              </div>
+        );
+      }
+      if (asset.resource_kind === "video") {
+        return <video className="w-full rounded-xl" controls preload="metadata" src={url} />;
+      }
+      return (
+        <a
+          className="inline-flex rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+          href={url}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Open {asset.resource_file_name}
+        </a>
+      );
+    }
 
-              <p className="mt-3 text-xs uppercase tracking-wider label-accent">
-                {activeTab === "module" ? "Select a lesson" : "Select an assessment"}
-              </p>
-
-              <div className="mt-2 space-y-2">
-                {activeTab === "module" ? (
-                  selected.lessons.length > 0 ? (
-                    selected.lessons.map((lesson) => (
-                      <button
-                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                          selectedLessonId === lesson.id
-                            ? "border-brandGreen bg-brandGreenLight text-slate-900"
-                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                        }`}
-                        key={lesson.id}
-                        onClick={() => setSelectedLessonId(lesson.id)}
-                        type="button"
-                      >
-                        <p className="font-semibold">{lesson.title}</p>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
-                      No lessons found for this module.
-                    </p>
-                  )
-                ) : isModule1 ? (
-                  MODULE1_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : isModule2 ? (
-                  MODULE2_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : isModule3 ? (
-                  MODULE3_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : isModule4 ? (
-                  MODULE4_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : isModule5 ? (
-                  MODULE5_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : isModule6 ? (
-                  MODULE6_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : isModule7 ? (
-                  MODULE7_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : isModule8 ? (
-                  MODULE8_ASSESSMENT_OPTIONS.map((assessment) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">{assessment.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.subtitle}</p>
-                    </button>
-                  ))
-                ) : selected.assessments.length > 0 ? (
-                  selected.assessments.map((assessment, index) => (
-                    <button
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selectedAssessmentId === assessment.id
-                          ? "border-brandRed bg-brandRedLight text-slate-900"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                      }`}
-                      key={assessment.id}
-                      onClick={() => setSelectedAssessmentId(assessment.id)}
-                      type="button"
-                    >
-                      <p className="font-semibold">Question {index + 1}</p>
-                      <p className="mt-1 text-xs text-slate-500">{assessment.question}</p>
-                    </button>
-                  ))
-                ) : (
-                  <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
-                    No assessment available yet.
-                  </p>
-                )}
-              </div>
-            </aside>
-            ) : null}
-
-            <div className="rounded-xl border border-brandBorder bg-white p-4">
-              {activeTab === "module" ? (
-                <>
-                  <p className="text-sm font-extrabold uppercase tracking-wide text-slate-900">{selected.title}</p>
-                  <p className="mt-2 text-lg leading-8 text-slate-900">{selected.description}</p>
-                  {selectedLesson ? (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                    <h3 className="text-xl font-semibold text-slate-900">{selectedLesson.title}</h3>
-                    <p className="mt-3 whitespace-pre-line text-base leading-8 text-slate-900">
-                      {selectedLesson.content}
-                    </p>
-
-                    {selected.slug === "fsl-alphabets" && selectedLesson.id === "m1-l1" ? (
-                      <div className="mt-5">
-                        <p className="text-xs uppercase tracking-wider label-accent">A-I Sign Cards</p>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          {MODULE1_AI_SIGN_IMAGES.map((card) => (
-                            <SignCardImage key={card.letter} letter={card.letter} src={card.src} />
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {selected.slug === "fsl-alphabets" && selectedLesson.id === "m1-l2" ? (
-                      <div className="mt-5 space-y-5">
-                        <div>
-                          <p className="text-xs uppercase tracking-wider label-accent">Special Motion Gesture</p>
-                          <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-                            <p className="text-sm font-semibold text-slate-900">Letter J Motion Demo</p>
-                            <p className="text-sm text-slate-600">
-                              J is a moving sign. Follow the short curved motion while keeping the handshape clear.
-                            </p>
-                            <MotionVideoCard letter="J" src={MODULE1_J_MOTION_VIDEO} />
-                          </div>
-                        </div>
-
-                        <div>
-                          <p className="text-xs uppercase tracking-wider label-accent">J-R Sign Cards</p>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                            {MODULE1_JR_SIGN_IMAGES.map((card) => (
-                              <SignCardImage key={card.letter} letter={card.letter} src={card.src} />
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {selected.slug === "fsl-alphabets" && selectedLesson.id === "m1-l3" ? (
-                      <div className="mt-5 space-y-5">
-                        <div>
-                          <p className="text-xs uppercase tracking-wider label-accent">S-Z Sign Cards</p>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                            {MODULE1_SZ_SIGN_IMAGES.map((card) => (
-                              <SignCardImage key={card.letter} letter={card.letter} src={card.src} />
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <p className="text-xs uppercase tracking-wider label-accent">Special Motion Gesture</p>
-                          <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-                            <p className="text-sm font-semibold text-slate-900">Letter Z Motion Demo</p>
-                            <p className="text-sm text-slate-600">
-                              Z is a moving sign. Trace the Z path clearly and keep hand orientation consistent.
-                            </p>
-                            <MotionVideoCard letter="Z" src={MODULE1_Z_MOTION_VIDEO} />
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {LESSON_VIDEO_MAP[selectedLesson.id] ? (
-                      <LessonVideoCard
-                        src={LESSON_VIDEO_MAP[selectedLesson.id].src}
-                        title={LESSON_VIDEO_MAP[selectedLesson.id].title}
-                      />
-                    ) : null}
+    if (isContentItemType(item.item_type)) {
+      const attachments = getItemAttachments(item);
+      const resourceLink = readConfigLink(item.config, "resource_link");
+      const presentationMode = parseReadablePresentationMode(item.config.presentation_mode);
+      const videoAttachments = attachments.filter((asset) => asset.resource_kind === "video");
+      const nonVideoAttachments = attachments.filter((asset) => asset.resource_kind !== "video");
+      const currentSlideIndex =
+        attachments.length > 0
+          ? Math.min(
+              Math.max(slideshowIndexByItem[item.id] ?? 0, 0),
+              attachments.length - 1
+            )
+          : 0;
+      const slideAsset = attachments[currentSlideIndex];
+      return (
+        <div className="space-y-4">
+          <p className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm leading-7 text-slate-700">
+            {item.content_text || "No reading content yet."}
+          </p>
+          {resourceLink ? (
+            <div className="rounded-xl border border-brandBlue/25 bg-white px-4 py-3 text-sm">
+              <p className="mb-1 font-semibold text-slate-800">Reference Link</p>
+              <a
+                className="font-semibold text-brandBlue text-decoration-underline"
+                href={resourceLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open link
+              </a>
+            </div>
+          ) : null}
+          {attachments.length > 0 && presentationMode !== "slideshow" ? (
+            <div className="space-y-4">
+              {videoAttachments.map((asset) => (
+                <div className="rounded-2xl border border-brandBorder bg-white p-3" key={`${asset.resource_file_path}-${asset.resource_file_name}`}>
+                  {renderReadableAsset(asset)}
+                  <p className="mt-2 text-center text-sm font-semibold text-slate-700">{resolveAssetLabel(asset)}</p>
+                </div>
+              ))}
+              {nonVideoAttachments.length > 0 ? (
+                <div className="grid gap-3 md:grid-cols-3">
+                  {nonVideoAttachments.map((asset) => (
+                    <div className="rounded-2xl border border-brandBorder bg-white p-3" key={`${asset.resource_file_path}-${asset.resource_file_name}`}>
+                      {renderReadableAsset(asset)}
+                      <p className="mt-2 text-center text-sm font-semibold text-slate-700">{resolveAssetLabel(asset)}</p>
                     </div>
-                  ) : (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                      Pick a lesson from the left panel to view its content.
-                    </div>
-                  )}
-                </>
-              ) : selectedAssessment ? (
-                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                  <h3 className="text-xl font-semibold text-slate-900">{selectedAssessment.question}</h3>
-                  <p className="mt-3 text-xs uppercase tracking-wider label-accent">Choices</p>
-                  <ul className="mt-2 space-y-2">
-                    {selectedAssessment.choices.map((choice) => (
-                      <li className="rounded-lg border border-brandBlue/25 bg-brandBlueLight px-3 py-2 text-sm text-slate-700" key={choice}>
-                        {choice}
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {attachments.length > 0 && presentationMode === "slideshow" ? (
+            <div className="rounded-2xl border border-brandBorder bg-white p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="mb-0 text-sm font-semibold text-slate-700">
+                  Slide {currentSlideIndex + 1} of {attachments.length}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                    disabled={currentSlideIndex <= 0}
+                    onClick={() =>
+                      setSlideshowIndexByItem((current) => ({
+                        ...current,
+                        [item.id]: Math.max((current[item.id] ?? 0) - 1, 0)
+                      }))
+                    }
+                    type="button"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                    disabled={currentSlideIndex >= attachments.length - 1}
+                    onClick={() =>
+                      setSlideshowIndexByItem((current) => ({
+                        ...current,
+                        [item.id]: Math.min(
+                          (current[item.id] ?? 0) + 1,
+                          attachments.length - 1
+                        )
+                      }))
+                    }
+                    type="button"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+              {slideAsset ? renderReadableAsset(slideAsset) : null}
+              {slideAsset ? (
+                <p className="mt-2 text-center text-sm font-semibold text-slate-700">{resolveAssetLabel(slideAsset)}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {attachments.length === 0 ? (
+            <p className="rounded-xl border border-brandBorder bg-white px-4 py-3 text-sm text-slate-600">
+              No uploaded files for this topic yet.
+            </p>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (item.item_type === "upload_assessment") {
+      const selectedFiles = uploadFilesByItem[item.id] ?? [];
+      const referenceLink = readConfigLink(item.config, "reference_link");
+      const maxPointsRaw = item.config.max_points;
+      const maxPoints =
+        typeof maxPointsRaw === "number"
+          ? maxPointsRaw
+          : typeof maxPointsRaw === "string"
+            ? Number.parseFloat(maxPointsRaw)
+            : 100;
+      const rubric =
+        typeof item.config.rubric_text === "string" && item.config.rubric_text.trim()
+          ? item.config.rubric_text
+          : "No rubric provided yet.";
+      const teacherFeedback = typeof item.teacher_feedback === "string" ? item.teacher_feedback.trim() : "";
+      const teacherScore =
+        typeof item.teacher_score_percent === "number"
+          ? item.teacher_score_percent
+          : typeof item.score_percent === "number"
+            ? item.score_percent
+            : null;
+      const hasTeacherReview = Boolean(teacherFeedback || teacherScore !== null || item.teacher_returned_at);
+      return (
+        <form className="space-y-4" onSubmit={(event) => void onUploadSubmission(event, item)}>
+          <p className="rounded-xl bg-brandOffWhite px-4 py-4 text-sm leading-7 text-slate-700">
+            {item.instructions ||
+              "Upload your video or file output for this assessment. Your teacher will score it manually."}
+          </p>
+          {referenceLink ? (
+            <div className="rounded-xl border border-brandBlue/25 bg-white px-4 py-3 text-sm">
+              <p className="mb-1 font-semibold text-slate-800">Reference Link</p>
+              <a
+                className="font-semibold text-brandBlue text-decoration-underline"
+                href={referenceLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open guide link
+              </a>
+            </div>
+          ) : null}
+          <div className="rounded-2xl border border-brandBorder bg-white p-4">
+            <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-800">
+                  Add Your Work (video/file)
+                </label>
+                <input
+                  accept="video/*,image/*,.pdf,.ppt,.pptx,.doc,.docx,.txt"
+                  className="form-control"
+                  multiple
+                  onChange={(event) =>
+                    setUploadFilesByItem((current) => ({
+                      ...current,
+                      [item.id]: Array.from(event.target.files ?? []),
+                    }))
+                  }
+                  type="file"
+                />
+                {selectedFiles.length > 0 ? (
+                  <ul className="mt-3 mb-0 list-unstyled small text-slate-700">
+                    {selectedFiles.map((file, index) => (
+                      <li key={`${file.name}-${file.size}-${index}`}>
+                        {index + 1}. {file.name}
                       </li>
                     ))}
                   </ul>
-                </div>
-              ) : isModule1 && selectedAssessmentId === "m1-assessment-1" ? (
-                <Module1AssessmentOne onSubmitResult={handleAssessmentResult} questions={module1AssessmentQuestions} />
-              ) : isModule1 && selectedAssessmentId === "m1-assessment-2" ? (
-                <Module1AssessmentTwo onSubmitResult={handleAssessmentResult} />
-              ) : isModule1 && selectedAssessmentId === "m1-assessment-3" ? (
-                <Module1AssessmentThree onSubmitResult={handleAssessmentResult} />
-              ) : isModule2 && selectedAssessmentId === "m2-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m2-assessment-1"
-                  moduleLabel="Numbers"
-                  onSubmitResult={handleAssessmentResult}
-                  questions={module2AssessmentQuestions}
-                />
-              ) : isModule2 && selectedAssessmentId === "m2-assessment-2" ? (
-                <NumbersCameraAssessment
-                  assessmentId="m2-assessment-2"
-                  intro="Use the camera interface and sign each number from 1 to 10."
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE2_SIGN_1_TO_10_STEPS}
-                  title="Assessment 2"
-                />
-              ) : isModule2 && selectedAssessmentId === "m2-assessment-3" ? (
-                <NumbersCameraAssessment
-                  assessmentId="m2-assessment-3"
-                  intro="Use the camera interface and sign numbers from 11 to 20. Complete at least 5."
-                  minimumRequired={5}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE2_SIGN_11_TO_20_STEPS}
-                  title="Assessment 3"
-                />
-              ) : isModule2 && selectedAssessmentId === "m2-assessment-4" ? (
-                <NumbersCameraAssessment
-                  assessmentId="m2-assessment-4"
-                  intro="Use the camera interface and sign numbers from 31 to 40. Complete at least 5."
-                  minimumRequired={5}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE2_SIGN_31_TO_40_STEPS}
-                  title="Assessment 4"
-                />
-              ) : isModule2 && selectedAssessmentId === "m2-assessment-5" ? (
-                <NumbersCameraAssessment
-                  assessmentId="m2-assessment-5"
-                  intro="Use the camera interface and sign numbers from 91 to 100. Complete at least 5."
-                  minimumRequired={5}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE2_SIGN_91_TO_100_STEPS}
-                  title="Assessment 5"
-                />
-              ) : isModule3 && selectedAssessmentId === "m3-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m3-assessment-1"
-                  moduleLabel="Greetings & Basic Expressions"
-                  onSubmitResult={handleAssessmentResult}
-                  questions={module3AssessmentQuestions}
-                />
-              ) : isModule3 && selectedAssessmentId === "m3-assessment-2" ? (
-                <Module3AssessmentTwo onSubmitResult={handleAssessmentResult} />
-              ) : isModule4 && selectedAssessmentId === "m4-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m4-assessment-1"
-                  moduleLabel="Family Members"
-                  onSubmitResult={handleAssessmentResult}
-                  questions={module4AssessmentQuestions}
-                />
-              ) : isModule4 && selectedAssessmentId === "m4-assessment-2" ? (
-                <GestureCameraAssessment
-                  assessmentId="m4-assessment-2"
-                  intro="Use the camera interface and sign at least 7 gestures from this module."
-                  minimumRequired={7}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE4_GESTURE_TARGETS}
-                  title="Assessment 2"
-                />
-              ) : isModule5 && selectedAssessmentId === "m5-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m5-assessment-1"
-                  moduleLabel="People Description"
-                  onSubmitResult={handleAssessmentResult}
-                  questions={module5AssessmentQuestions}
-                />
-              ) : isModule5 && selectedAssessmentId === "m5-assessment-2" ? (
-                <GestureCameraAssessment
-                  assessmentId="m5-assessment-2"
-                  intro="Use the camera interface and sign at least 7 gestures from this module."
-                  minimumRequired={7}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE5_GESTURE_TARGETS}
-                  title="Assessment 2"
-                />
-              ) : isModule6 && selectedAssessmentId === "m6-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m6-assessment-1"
-                  moduleLabel="Days"
-                  onSubmitResult={handleAssessmentResult}
-                  questions={module6AssessmentQuestions}
-                />
-              ) : isModule6 && selectedAssessmentId === "m6-assessment-2" ? (
-                <GestureCameraAssessment
-                  assessmentId="m6-assessment-2"
-                  intro="Use the camera interface and sign at least 7 gestures from this module."
-                  minimumRequired={7}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE6_GESTURE_TARGETS}
-                  title="Assessment 2"
-                />
-              ) : isModule7 && selectedAssessmentId === "m7-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m7-assessment-1"
-                  moduleLabel="Colors & Descriptions"
-                  onSubmitResult={handleAssessmentResult}
-                  questions={module7AssessmentQuestions}
-                />
-              ) : isModule7 && selectedAssessmentId === "m7-assessment-2" ? (
-                <Module7ColorAssessmentTwo onSubmitResult={handleAssessmentResult} />
-              ) : isModule7 && selectedAssessmentId === "m7-assessment-3" ? (
-                <GestureCameraAssessment
-                  assessmentId="m7-assessment-3"
-                  intro="Use the camera interface and sign at least 7 gestures from this module."
-                  minimumRequired={7}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE7_GESTURE_TARGETS}
-                  title="Assessment 3"
-                />
-              ) : isModule8 && selectedAssessmentId === "m8-assessment-1" ? (
-                <Module2AssessmentOne
-                  assessmentId="m8-assessment-1"
-                  moduleLabel="Basic Conversations"
-                  onSubmitResult={handleAssessmentResult}
-                  questions={module8AssessmentQuestions}
-                />
-              ) : isModule8 && selectedAssessmentId === "m8-assessment-2" ? (
-                <GestureCameraAssessment
-                  assessmentId="m8-assessment-2"
-                  intro="Use the camera interface and sign at least 7 gestures from this module."
-                  minimumRequired={7}
-                  onSubmitResult={handleAssessmentResult}
-                  targets={MODULE8_GESTURE_TARGETS}
-                  title="Assessment 2"
-                />
-              ) : (
-                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                  Pick an assessment item from the left panel to view the question and choices.
-                </div>
-              )}
+                ) : (
+                  <p className="mt-2 mb-0 small text-slate-600">No file selected yet.</p>
+                )}
+              </div>
+              <aside className="rounded-2xl border border-brandBorder bg-brandOffWhite p-3">
+                <p className="mb-1 text-xs uppercase tracking-[0.16em] text-slate-500">Rubrics</p>
+                <p className="mb-3 text-sm text-slate-700">{rubric}</p>
+                <p className="mb-0 text-sm text-slate-700">
+                  Max Points: <span className="font-semibold">{Number.isFinite(maxPoints) ? maxPoints : 100}</span>
+                </p>
+              </aside>
+            </div>
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-semibold text-slate-800">
+                Private Note to Teacher (optional)
+              </label>
+              <textarea
+                className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                onChange={(event) =>
+                  setUploadNoteByItem((current) => ({
+                    ...current,
+                    [item.id]: event.target.value,
+                  }))
+                }
+                rows={3}
+                value={uploadNoteByItem[item.id] ?? ""}
+              />
             </div>
           </div>
-        </article>
-      ) : null}
+          {hasTeacherReview ? (
+            <div className="rounded-2xl border border-brandBlue/35 bg-brandBlueLight/40 p-4">
+              <p className="mb-2 text-xs uppercase tracking-[0.16em] text-brandBlue fw-semibold">
+                Teacher Feedback
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-sm fw-semibold text-slate-800">
+                    Score: {teacherScore !== null ? `${teacherScore.toFixed(1)}%` : "Pending"}
+                  </p>
+                  <p className="mb-0 text-xs text-slate-600">
+                    {item.teacher_returned_at
+                      ? `Returned: ${new Date(item.teacher_returned_at).toLocaleString()}`
+                      : "Score not returned yet."}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-brandBorder bg-white px-3 py-2 text-sm text-slate-700">
+                  {teacherFeedback || "No feedback note yet."}
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <button
+            className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={uploadingItemId === item.id}
+            type="submit"
+          >
+            {uploadingItemId === item.id ? "Uploading..." : item.status === "completed" ? "Resubmit Work" : "Submit Work"}
+          </button>
+        </form>
+      );
+    }
 
-      {assessmentReportMessage ? (
-        <p className="text-sm text-brandGreen">{assessmentReportMessage}</p>
+    const question =
+      (item.config.question as string | undefined) ||
+      (item.config.helper_text as string | undefined) ||
+      item.instructions ||
+      "Answer this activity.";
+    const choices = Array.isArray(item.config.choices) ? (item.config.choices as string[]) : [];
+    const attachments = getItemAttachments(item);
+    const promptMedia = getPromptMedia(item);
+    const mcqQuestionSet =
+      item.item_type === "multiple_choice_assessment" ? getMcqQuestionSet(item) : [];
+    const identificationQuestionSet =
+      item.item_type === "identification_assessment" ? getIdentificationQuestionSet(item) : [];
+    const signingLabEntrySet =
+      item.item_type === "signing_lab_assessment" ? getSigningLabEntrySet(item) : [];
+    const signingLabRequirement =
+      item.item_type === "signing_lab_assessment"
+        ? getSigningLabRequirement(item, signingLabEntrySet.length)
+        : null;
+    const signingLabRequirementText =
+      signingLabRequirement && signingLabEntrySet.length > 0
+        ? signingLabRequirement.requireAll
+          ? `You must answer all ${signingLabEntrySet.length} entries before submitting.`
+          : `You must answer at least ${signingLabRequirement.requiredCount} of ${signingLabEntrySet.length} entries before submitting.`
+        : undefined;
+    const isMultiQuestionMcq =
+      item.item_type === "multiple_choice_assessment" && mcqQuestionSet.length > 1;
+    const isMultiQuestionIdentification =
+      item.item_type === "identification_assessment" && identificationQuestionSet.length > 1;
+    const isMultiEntrySigningLab =
+      item.item_type === "signing_lab_assessment" && signingLabEntrySet.length > 1;
+    const multiAnswers = mcqAnswersByItem[item.id] ?? {};
+    const identificationAnswers = identificationAnswersByItem[item.id] ?? {};
+    const signingLabAnswers = signingLabAnswersByItem[item.id] ?? {};
+    const rawSigningEntryIndex = signingLabEntryIndexByItem[item.id] ?? 0;
+    const currentSigningEntryIndex =
+      signingLabEntrySet.length > 0
+        ? Math.min(Math.max(rawSigningEntryIndex, 0), signingLabEntrySet.length - 1)
+        : 0;
+    const currentSigningEntry = signingLabEntrySet[currentSigningEntryIndex] ?? null;
+    const answeredSigningEntries = signingLabEntrySet.reduce((total, entry) => {
+      return (signingLabAnswers[entry.question_key] ?? "").trim() ? total + 1 : total;
+    }, 0);
+    const singleSigningEntry = signingLabEntrySet[0] ?? null;
+    const hasQuestionPrompt =
+      item.item_type === "multiple_choice_assessment" &&
+      mcqQuestionSet.some((entry, index) =>
+        Boolean(getMcqQuestionPromptAsset(attachments, entry.question_key, index))
+      );
+    const hasIdentificationQuestionPrompt =
+      item.item_type === "identification_assessment" &&
+      identificationQuestionSet.some((entry, index) =>
+        Boolean(getIdentificationQuestionPromptAsset(attachments, entry.question_key, index))
+      );
+    const singleQuestionPrompt =
+      item.item_type === "multiple_choice_assessment"
+        ? getMcqQuestionPromptAsset(
+            attachments,
+            mcqQuestionSet[0]?.question_key ?? "q1",
+            0
+          ) || promptMedia
+        : null;
+    const singleIdentificationPrompt =
+      item.item_type === "identification_assessment"
+        ? getIdentificationQuestionPromptAsset(
+            attachments,
+            identificationQuestionSet[0]?.question_key ?? "q1",
+            0
+          ) || promptMedia
+        : null;
+    const preferredLabMode =
+      item.item_type === "signing_lab_assessment"
+        ? parseRecognitionModeValue(item.config.lab_mode)
+        : "alphabet";
+    const preferredNumbersCategory =
+      item.item_type === "signing_lab_assessment"
+        ? parseNumbersCategoryValue(item.config.numbers_category)
+        : undefined;
+    const preferredWordsCategory =
+      item.item_type === "signing_lab_assessment"
+        ? parseWordsCategoryValue(item.config.words_category)
+        : undefined;
+    const signingLabPanelContent =
+      item.item_type === "signing_lab_assessment" ? (
+        <div className="space-y-3">
+          {isMultiEntrySigningLab ? (
+            <div className="rounded-3 border border-brandBorder bg-brandOffWhite p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="mb-0 text-sm font-semibold text-slate-800">
+                  Entry {currentSigningEntryIndex + 1} of {signingLabEntrySet.length}
+                </p>
+                <span className="rounded-full bg-brandBlueLight px-2 py-1 text-xs font-semibold text-brandBlue">
+                  Answered {answeredSigningEntries}/{signingLabEntrySet.length}
+                </span>
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button
+                  className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  disabled={currentSigningEntryIndex <= 0}
+                  onClick={() =>
+                    setSigningLabEntryIndexByItem((current) => ({
+                      ...current,
+                      [item.id]: Math.max((current[item.id] ?? 0) - 1, 0),
+                    }))
+                  }
+                  type="button"
+                >
+                  Previous
+                </button>
+                <button
+                  className="rounded-lg border border-brandBorder bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  disabled={currentSigningEntryIndex >= signingLabEntrySet.length - 1}
+                  onClick={() =>
+                    setSigningLabEntryIndexByItem((current) => ({
+                      ...current,
+                      [item.id]: Math.min(
+                        (current[item.id] ?? 0) + 1,
+                        signingLabEntrySet.length - 1
+                      ),
+                    }))
+                  }
+                  type="button"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {(isMultiEntrySigningLab && currentSigningEntry) || (!isMultiEntrySigningLab) ? (
+            <div className="rounded-3 border border-brandBorder bg-white p-3">
+              <p className="mb-2 text-sm font-semibold text-slate-800">
+                {isMultiEntrySigningLab
+                  ? currentSigningEntry?.question || "No prompt for this entry yet."
+                  : singleSigningEntry?.question || "Type your detected sign result below."}
+              </p>
+              <input
+                className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                onChange={(event) => {
+                  if (isMultiEntrySigningLab && currentSigningEntry) {
+                    setSigningLabAnswersByItem((current) => ({
+                      ...current,
+                      [item.id]: {
+                        ...(current[item.id] ?? {}),
+                        [currentSigningEntry.question_key]: event.target.value,
+                      },
+                    }));
+                    return;
+                  }
+                  setAnswerByItem((current) => ({ ...current, [item.id]: event.target.value }));
+                }}
+                onDrop={(event) => event.preventDefault()}
+                onKeyDown={handleSigningAnswerKeyDown}
+                onPaste={(event) => event.preventDefault()}
+                placeholder="Type the detected sign result here."
+                value={
+                  isMultiEntrySigningLab && currentSigningEntry
+                    ? signingLabAnswers[currentSigningEntry.question_key] ?? ""
+                    : answerByItem[item.id] ?? ""
+                }
+              />
+            </div>
+          ) : null}
+
+          <p className="mb-0 rounded-xl border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed">
+            Click <span className="font-semibold">Start Camera</span> first, then click{" "}
+            <span className="font-semibold">Analyze Sign Now</span> to analyze the gesture.
+          </p>
+        </div>
+      ) : null;
+    const embeddedSigningLab =
+      item.item_type === "signing_lab_assessment" ? (
+        <div className="rounded-2xl border border-brandBorder bg-white p-3">
+          <p className="mb-2 text-sm font-semibold text-slate-800">Camera Interface</p>
+          <SigningLab
+            embedded
+            embeddedPanelContent={signingLabPanelContent}
+            key={`${item.id}-${preferredLabMode}-${preferredNumbersCategory ?? ""}-${preferredWordsCategory ?? ""}`}
+            statusOverride={signingLabRequirementText}
+            onPredictionDetected={(detectedValue) => {
+              if (isMultiEntrySigningLab && currentSigningEntry) {
+                setSigningLabAnswersByItem((current) => ({
+                  ...current,
+                  [item.id]: {
+                    ...(current[item.id] ?? {}),
+                    [currentSigningEntry.question_key]: detectedValue,
+                  },
+                }));
+                return;
+              }
+              setAnswerByItem((current) => ({ ...current, [item.id]: detectedValue }));
+            }}
+            preferredMode={preferredLabMode}
+            preferredNumbersCategory={preferredNumbersCategory}
+            preferredWordsCategory={preferredWordsCategory}
+            variant="student"
+          />
+        </div>
+      ) : null;
+    const submissionState = assessmentSubmissionStateByItem[item.id];
+    const awaitingMarkDone = submissionState?.awaitingMarkDone ?? false;
+    const latestScorePercent =
+      typeof submissionState?.scorePercent === "number"
+        ? submissionState.scorePercent
+        : typeof item.score_percent === "number"
+          ? item.score_percent
+          : null;
+
+    return (
+      <form className="space-y-4" onSubmit={(event) => void onSubmitItem(event, item)}>
+        {item.item_type === "multiple_choice_assessment" && isMultiQuestionMcq ? (
+          <div className="space-y-3">
+            {promptMedia && !hasQuestionPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(promptMedia)}
+              </div>
+            ) : null}
+            {mcqQuestionSet.map((entry, questionIndex) => {
+              const questionPrompt = getMcqQuestionPromptAsset(
+                attachments,
+                entry.question_key,
+                questionIndex
+              );
+              return (
+                <div className="rounded-xl border border-brandBorder bg-white px-3 py-3" key={entry.question_key}>
+                  <p className="mb-2 text-sm font-semibold text-slate-800">
+                    {questionIndex + 1}. {entry.question}
+                  </p>
+                  {questionPrompt ? (
+                    <div className="mb-3 rounded-lg border border-brandBorder bg-brandOffWhite p-2">
+                      {renderReadableAsset(questionPrompt)}
+                    </div>
+                  ) : null}
+                  <div className="grid gap-2">
+                    {entry.choices.map((choice) => (
+                      <button
+                        className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold ${multiAnswers[entry.question_key] === choice ? "border-brandBlue bg-brandBlueLight text-brandBlue" : "border-brandBorder bg-white text-slate-700"}`}
+                        key={`${entry.question_key}-${choice}`}
+                        onClick={() =>
+                          setMcqAnswersByItem((current) => ({
+                            ...current,
+                            [item.id]: {
+                              ...(current[item.id] ?? {}),
+                              [entry.question_key]: choice
+                            }
+                          }))
+                        }
+                        type="button"
+                      >
+                        {choice}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : item.item_type === "identification_assessment" && isMultiQuestionIdentification ? (
+          <div className="space-y-3">
+            {promptMedia && !hasIdentificationQuestionPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(promptMedia)}
+              </div>
+            ) : null}
+            {identificationQuestionSet.map((entry, questionIndex) => {
+              const questionPrompt = getIdentificationQuestionPromptAsset(
+                attachments,
+                entry.question_key,
+                questionIndex
+              );
+              return (
+                <div className="rounded-xl border border-brandBorder bg-white px-3 py-3" key={entry.question_key}>
+                  <p className="mb-2 text-sm font-semibold text-slate-800">
+                    {questionIndex + 1}. {entry.question}
+                  </p>
+                  {questionPrompt ? (
+                    <div className="mb-3 rounded-lg border border-brandBorder bg-brandOffWhite p-2">
+                      {renderReadableAsset(questionPrompt)}
+                    </div>
+                  ) : null}
+                  <input
+                    className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) =>
+                      setIdentificationAnswersByItem((current) => ({
+                        ...current,
+                        [item.id]: {
+                          ...(current[item.id] ?? {}),
+                          [entry.question_key]: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="Type your answer here."
+                    value={identificationAnswers[entry.question_key] ?? ""}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : item.item_type === "signing_lab_assessment" && isMultiEntrySigningLab ? (
+          <div className="space-y-3">
+            {embeddedSigningLab}
+          </div>
+        ) : item.item_type === "multiple_choice_assessment" && choices.length > 0 ? (
+          <div className="space-y-3">
+            {singleQuestionPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(singleQuestionPrompt)}
+              </div>
+            ) : null}
+            <div className="grid gap-2">
+              {choices.map((choice) => (
+                <button
+                  className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold ${answerByItem[item.id] === choice ? "border-brandBlue bg-brandBlueLight text-brandBlue" : "border-brandBorder bg-white text-slate-700"}`}
+                  key={choice}
+                  onClick={() => setAnswerByItem((current) => ({ ...current, [item.id]: choice }))}
+                  type="button"
+                >
+                  {choice}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : item.item_type === "identification_assessment" ? (
+          <div className="space-y-3">
+            {singleIdentificationPrompt ? (
+              <div className="rounded-xl border border-brandBorder bg-white p-3">
+                {renderReadableAsset(singleIdentificationPrompt)}
+              </div>
+            ) : null}
+            <input
+              className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+              onChange={(event) => setAnswerByItem((current) => ({ ...current, [item.id]: event.target.value }))}
+              placeholder="Type your answer here."
+              value={answerByItem[item.id] ?? ""}
+            />
+          </div>
+        ) : item.item_type === "signing_lab_assessment" ? (
+          <div className="space-y-3">
+            {embeddedSigningLab}
+          </div>
+        ) : (
+          <input
+            className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+            onChange={(event) => setAnswerByItem((current) => ({ ...current, [item.id]: event.target.value }))}
+            placeholder="Type your answer here."
+            value={answerByItem[item.id] ?? ""}
+          />
+        )}
+        {item.item_type === "signing_lab_assessment" ? (
+          <div className="space-y-2">
+            {String(item.config.lab_mode || "").toLowerCase() === "words" ? (
+              <p className="mb-0 rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm font-semibold text-brandRed">
+                Use English answers for words assessment.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={submittingAssessmentItemId === item.id}
+            type="submit"
+          >
+            {submittingAssessmentItemId === item.id
+              ? "Submitting..."
+              : awaitingMarkDone
+                ? "Submit Retake"
+                : "Submit Answer"}
+          </button>
+          {awaitingMarkDone ? (
+            <>
+              <button
+                className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                onClick={() =>
+                  setMessage("You can change your answer and click Submit Retake.")
+                }
+                type="button"
+              >
+                Retake
+              </button>
+              <button
+                className="rounded-lg bg-brandGreen px-4 py-2 text-sm font-semibold text-white"
+                onClick={() => void onMarkAssessmentDone(item)}
+                type="button"
+              >
+                Mark as Done
+              </button>
+            </>
+          ) : null}
+        </div>
+        {(awaitingMarkDone || latestScorePercent !== null) ? (
+          <div className="rounded-xl border border-brandGreen/35 bg-brandGreenLight px-4 py-3 text-sm text-slate-800">
+            <p className="mb-1 font-semibold">
+              Score: {latestScorePercent !== null ? `${latestScorePercent.toFixed(1)}%` : "Pending"}
+            </p>
+            {awaitingMarkDone ? (
+              <p className="mb-0">Retake if needed, then click Mark as Done to continue.</p>
+            ) : (
+              <p className="mb-0">Latest submitted score.</p>
+            )}
+          </div>
+        ) : null}
+      </form>
+    );
+  }
+
+  return (
+    <section className="space-y-6">
+      <div className="panel">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Student LMS</p>
+            <h2 className="mt-3 text-3xl font-bold title-gradient">{currentModule?.title ?? "Module Player"}</h2>
+            <p className="mt-2 text-xs text-slate-600">
+              Instructor:{" "}
+              <span className="font-semibold">
+                {currentModule?.instructor_name?.trim() || "Unknown Instructor"}
+              </span>
+            </p>
+            <p className="mt-2 text-sm text-slate-700">
+              Finish each item in order. Locked items open automatically after you complete the current one.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+              onClick={() => setIsCourseFlowCollapsed((current) => !current)}
+              type="button"
+            >
+              {isCourseFlowCollapsed ? "Show Course Flow" : "Hide Course Flow"}
+            </button>
+            <Link className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-brandBlue" href="/modules">
+              Back to Modules
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {error ? <p className="rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm text-brandRed">{error}</p> : null}
+      {currentModule ? (
+        <div className={`grid gap-4 ${isCourseFlowCollapsed ? "grid-cols-1" : "xl:grid-cols-[0.36fr_0.64fr]"}`}>
+          {!isCourseFlowCollapsed ? (
+            <aside className="panel">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] label-accent">Course Flow</p>
+              <div className="mt-4 space-y-3">
+                {(course?.modules ?? []).map((module) => (
+                  <div
+                    className={`rounded-2xl border p-3 transition ${
+                      module.id === currentModule.id
+                        ? "border-brandBlue bg-brandBlueLight/60"
+                        : module.is_locked
+                          ? "border-brandBorder bg-white"
+                          : "border-brandBorder bg-white hover:border-brandBlue/60 cursor-pointer"
+                    }`}
+                    key={module.id}
+                    onClick={() => {
+                      if (module.id !== currentModule.id && !module.is_locked) {
+                        router.push(`/modules/${module.id}`);
+                      }
+                    }}
+                    role={module.id !== currentModule.id && !module.is_locked ? "button" : undefined}
+                    tabIndex={module.id !== currentModule.id && !module.is_locked ? 0 : undefined}
+                    onKeyDown={(event) => {
+                      if (module.id !== currentModule.id && !module.is_locked && (event.key === "Enter" || event.key === " ")) {
+                        event.preventDefault();
+                        router.push(`/modules/${module.id}`);
+                      }
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Module {module.order_index}</p>
+                        <p className={`mt-1 font-semibold ${module.id !== currentModule.id && !module.is_locked ? "text-brandBlue" : "text-slate-900"}`}>
+                          {module.title}
+                        </p>
+                        <p className="mt-1 mb-0 text-[11px] text-slate-600">
+                          Instructor:{" "}
+                          <span className="font-semibold">
+                            {module.instructor_name?.trim() || "Unknown Instructor"}
+                          </span>
+                        </p>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${module.is_locked ? "bg-brandRedLight text-brandRed" : "bg-brandGreenLight text-brandGreen"}`}>
+                        {module.is_locked ? "Locked" : `${module.progress_percent}%`}
+                      </span>
+                    </div>
+                    {module.id === currentModule.id ? (
+                      <div className="mt-3 space-y-2">
+                        {module.items.map((item) => (
+                          <button
+                            className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
+                              item.is_locked || (isAwaitingAssessmentMarkDone && currentItem && item.order_index > currentItem.order_index)
+                                ? "cursor-not-allowed border-brandBorder bg-brandMutedSurface text-slate-500"
+                                : item.status === "completed"
+                                  ? "border-brandGreen/30 bg-brandGreenLight text-slate-800 hover:border-brandGreen/60"
+                                  : "border-brandBlue/25 bg-white text-slate-800 hover:border-brandBlue/60"
+                            } ${currentItem?.id === item.id ? "ring-2 ring-brandBlue/30" : ""}`}
+                            disabled={item.is_locked || (isAwaitingAssessmentMarkDone && currentItem ? item.order_index > currentItem.order_index : false)}
+                            key={item.id}
+                            onClick={() => setSelectedItemId(item.id)}
+                            type="button"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span>{item.order_index}. {item.title}</span>
+                              <span className="text-xs uppercase tracking-[0.15em]">
+                                {item.is_locked ? "Locked" : item.status}
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </aside>
+          ) : null}
+
+          <div className="panel" ref={itemPanelRef}>
+            {currentItem ? (
+              <>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] label-accent">
+                  Item {currentItem.order_index} - {currentItem.item_type.replaceAll("_", " ")}
+                </p>
+                <h3 className="mt-2 text-2xl font-bold text-slate-900">{currentItem.title}</h3>
+                <p className="mt-2 text-sm text-slate-700">
+                  {currentItem.instructions || "Complete this item to unlock the next part of the module."}
+                </p>
+                <div className="mt-6">{renderItem(currentItem)}</div>
+                <div className="mt-8 flex flex-wrap gap-2 border-t border-brandBorder pt-5">
+                  <button
+                    className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!previousItem}
+                    onClick={() => setSelectedItemId(previousItem?.id ?? null)}
+                    type="button"
+                  >
+                    Previous Topic
+                  </button>
+                  <button
+                    className="rounded-lg border border-brandBorder bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!nextItem || isAwaitingAssessmentMarkDone}
+                    onClick={() => setSelectedItemId(nextItem?.id ?? null)}
+                    type="button"
+                  >
+                    Next Topic
+                  </button>
+                  {!nextItem && !isAwaitingAssessmentMarkDone && isCurrentModuleFinished ? (
+                    <button
+                      className="rounded-lg bg-brandGreen px-4 py-2 text-sm font-semibold text-white"
+                      onClick={onFinishModule}
+                      type="button"
+                    >
+                      Finish Module
+                    </button>
+                  ) : null}
+                </div>
+                {isAwaitingAssessmentMarkDone ? (
+                  <p className="mt-3 rounded-xl border border-brandYellow/35 bg-brandYellowLight px-4 py-3 text-sm text-slate-800">
+                    Click Mark as Done to unlock and open the next topic.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-sm text-slate-700">No available learning item.</p>
+            )}
+
+            {certificateStatus?.eligible ? (
+              <div className="mt-6 rounded-2xl border border-brandGreen/30 bg-brandGreenLight px-4 py-4 text-sm text-slate-800">
+                Certificate requirements are complete. Go back to the modules list and download your e-certificate.
+              </div>
+            ) : null}
+
+            {showCompleteAction && currentItem ? (
+              <div className="mt-8 border-t border-brandBorder pt-5">
+                <p className="mb-3 text-xs uppercase tracking-[0.16em] text-slate-500">
+                  End of Module Item
+                </p>
+                <button
+                  className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white"
+                  onClick={() => void onCompleteReadable(currentItem)}
+                  type="button"
+                >
+                  Mark as Complete
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
       ) : null}
-      {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
     </section>
   );
 }

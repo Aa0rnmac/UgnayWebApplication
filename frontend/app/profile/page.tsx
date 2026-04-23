@@ -13,8 +13,10 @@ import {
 import {
   isStrongPassword,
   isValidEmail,
-  isValidPhilippinePhone
+  isValidPhilippinePhone,
+  normalizePhilippinePhone
 } from "@/lib/validation";
+import { useAuth } from "@/components/auth-context";
 
 type ProfileForm = {
   firstName: string;
@@ -37,6 +39,7 @@ const EMPTY_PROFILE: ProfileForm = {
 };
 
 export default function ProfilePage() {
+  const { clearMustChangePassword } = useAuth();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [form, setForm] = useState<ProfileForm>(EMPTY_PROFILE);
   const [loading, setLoading] = useState(false);
@@ -51,6 +54,8 @@ export default function ProfilePage() {
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const profileImageUrl = useMemo(() => {
     if (!user?.profile_image_path) {
@@ -88,15 +93,35 @@ export default function ProfilePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    if (user.must_change_password) {
+      setShowPasswordDialog(true);
+    }
+  }, [user]);
+
   function updateField<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
     setForm((previous) => ({ ...previous, [key]: value }));
   }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const firstName = form.firstName.trim();
+    const middleName = form.middleName.trim();
+    const lastName = form.lastName.trim();
     const email = form.email.trim();
-    const phone = form.phoneNumber.trim();
+    const phone = normalizePhilippinePhone(form.phoneNumber);
 
+    if (!firstName) {
+      setError("First name is required.");
+      return;
+    }
+    if (!lastName) {
+      setError("Last name is required.");
+      return;
+    }
     if (email && !isValidEmail(email)) {
       setError(
         "Email must be valid (example: name@gmail.com, name@hotmail.com, name@yahoo.com)."
@@ -104,7 +129,7 @@ export default function ProfilePage() {
       return;
     }
     if (phone && !isValidPhilippinePhone(phone)) {
-      setError("Phone number must be exactly 11 digits (example: 09XXXXXXXXX).");
+      setError("Phone number must start with 09 and contain exactly 11 digits (example: 09123456789).");
       return;
     }
 
@@ -114,9 +139,9 @@ export default function ProfilePage() {
 
     try {
       const updated = await updateMyProfile({
-        first_name: form.firstName.trim() || null,
-        middle_name: form.middleName.trim() || null,
-        last_name: form.lastName.trim() || null,
+        first_name: firstName,
+        middle_name: middleName || null,
+        last_name: lastName,
         email: email || null,
         phone_number: phone || null,
         address: form.address.trim() || null,
@@ -174,8 +199,11 @@ export default function ProfilePage() {
       const response = await changeMyPassword(currentPassword, newPassword);
       setCurrentPassword("");
       setNewPassword("");
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
       setPasswordMessage(response.message);
       setUser((prev) => (prev ? { ...prev, must_change_password: false } : prev));
+      clearMustChangePassword();
       setShowPasswordDialog(false);
     } catch (passwordError) {
       const message =
@@ -242,8 +270,9 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 First Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                  onChange={(event) => updateField("firstName", event.target.value)}
+                  required
                   type="text"
                   value={form.firstName}
                 />
@@ -251,8 +280,8 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Middle Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                  onChange={(event) => updateField("middleName", event.target.value)}
                   type="text"
                   value={form.middleName}
                 />
@@ -260,8 +289,9 @@ export default function ProfilePage() {
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Last Name
                 <input
-                  className="w-full rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-sm text-slate-900"
-                  readOnly
+                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                  onChange={(event) => updateField("lastName", event.target.value)}
+                  required
                   type="text"
                   value={form.lastName}
                 />
@@ -283,13 +313,16 @@ export default function ProfilePage() {
                 Phone Number
                 <input
                   className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                  onChange={(event) => updateField("phoneNumber", event.target.value)}
-                  pattern="^\\d{11}$"
+                  autoComplete="tel-national"
+                  inputMode="numeric"
+                  maxLength={11}
+                  onChange={(event) => updateField("phoneNumber", normalizePhilippinePhone(event.target.value))}
+                  pattern="09[0-9]{9}"
                   placeholder="09XXXXXXXXX"
                   type="text"
                   value={form.phoneNumber}
                 />
-                <p className="text-xs text-muted">Format: `09XXXXXXXXX` (11 digits only)</p>
+                <p className="text-xs text-muted">Format: `09XXXXXXXXX` (must start with 09 and be 11 digits)</p>
               </label>
             </div>
 
@@ -397,25 +430,46 @@ export default function ProfilePage() {
             <div className="mt-4 grid gap-3">
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 Current Password
-                <input
-                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                  onChange={(event) => setCurrentPassword(event.target.value)}
-                  required
-                  type="password"
-                  value={currentPassword}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    onChange={(event) => setCurrentPassword(event.target.value)}
+                    required
+                    type={showCurrentPassword ? "text" : "password"}
+                    value={currentPassword}
+                  />
+                  <button
+                    className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                    onClick={() => setShowCurrentPassword((value) => !value)}
+                    type="button"
+                  >
+                    {showCurrentPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
               </label>
               <label className="space-y-1 text-sm font-semibold text-slate-800">
                 New Password
-                <input
-                  className="w-full rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
-                  minLength={8}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  pattern="^(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}$"
-                  required
-                  type="password"
-                  value={newPassword}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border border-brandBorder bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brandBlue"
+                    autoComplete="new-password"
+                    minLength={8}
+                    onChange={(event) => {
+                      setNewPassword(event.target.value);
+                      setError(null);
+                    }}
+                    required
+                    type={showNewPassword ? "text" : "password"}
+                    value={newPassword}
+                  />
+                  <button
+                    className="rounded-lg border border-brandBorder bg-brandMutedSurface px-3 py-2 text-xs font-semibold text-brandBlue transition hover:bg-brandBlueLight"
+                    onClick={() => setShowNewPassword((value) => !value)}
+                    type="button"
+                  >
+                    {showNewPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
                 <p className="text-xs text-muted">
                   At least 8 chars, 1 uppercase, 1 number, and 1 symbol.
                 </p>
@@ -429,6 +483,8 @@ export default function ProfilePage() {
                   setShowPasswordDialog(false);
                   setCurrentPassword("");
                   setNewPassword("");
+                  setShowCurrentPassword(false);
+                  setShowNewPassword(false);
                 }}
                 type="button"
               >

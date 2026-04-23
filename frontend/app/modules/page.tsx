@@ -3,154 +3,222 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { getModules, ModuleItem } from "@/lib/api";
+import {
+  downloadStudentCertificate,
+  getStudentCertificateDownloadStatus,
+  getStudentCourse,
+  previewStudentCertificate,
+  type StudentCertificateDownloadStatus,
+  type StudentCourse
+} from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 
-const CARD_THEMES = [
-  {
-    shellBg: "linear-gradient(145deg, #FFF8D6 0%, #fffdf1 100%)",
-    overlayBg:
-      "radial-gradient(circle at 92% 8%, rgba(212,168,0,0.13), transparent 40%), radial-gradient(circle at 0% 100%, rgba(46,68,168,0.06), transparent 44%)",
-    mediaBg: "linear-gradient(145deg, #fff4bb 0%, #fffdf2 100%)",
-    borderColor: "#E2E2EA",
-    chipClass: "border-brandYellow/35 bg-brandYellow/15 text-[#8d6f00]"
-  },
-  {
-    shellBg: "linear-gradient(145deg, #E8ECF8 0%, #f8f9fd 100%)",
-    overlayBg:
-      "radial-gradient(circle at 92% 8%, rgba(46,68,168,0.14), transparent 40%), radial-gradient(circle at 0% 100%, rgba(42,140,63,0.06), transparent 42%)",
-    mediaBg: "linear-gradient(145deg, #dfe5f9 0%, #f6f8fe 100%)",
-    borderColor: "#E2E2EA",
-    chipClass: "border-brandBlue/30 bg-brandBlue/12 text-brandBlue"
-  },
-  {
-    shellBg: "linear-gradient(145deg, #FDE8E8 0%, #fff8f8 100%)",
-    overlayBg:
-      "radial-gradient(circle at 92% 8%, rgba(204,40,40,0.13), transparent 40%), radial-gradient(circle at 0% 100%, rgba(212,168,0,0.06), transparent 42%)",
-    mediaBg: "linear-gradient(145deg, #f9d9d9 0%, #fff5f5 100%)",
-    borderColor: "#E2E2EA",
-    chipClass: "border-brandRed/30 bg-brandRed/12 text-brandRed"
-  },
-  {
-    shellBg: "linear-gradient(145deg, #E8F5EB 0%, #f8fcf9 100%)",
-    overlayBg:
-      "radial-gradient(circle at 92% 8%, rgba(42,140,63,0.13), transparent 40%), radial-gradient(circle at 0% 100%, rgba(46,68,168,0.06), transparent 42%)",
-    mediaBg: "linear-gradient(145deg, #dff1e4 0%, #f7fcf8 100%)",
-    borderColor: "#E2E2EA",
-    chipClass: "border-brandGreen/30 bg-brandGreen/12 text-brandGreen"
-  }
-] as const;
-
-function cardTheme(module: ModuleItem) {
-  return CARD_THEMES[(module.order_index - 1) % CARD_THEMES.length];
-}
-
-const MODULE_CARD_MEDIA_BY_ORDER: Record<
-  number,
-  {
-    type: "image" | "text";
-    value: string;
-    textClass?: string;
-  }
-> = {
-  1: { type: "image", value: "/module-assets/cards/module-1.png" },
-  2: { type: "text", value: "Numbers", textClass: "text-brandBlue" },
-  3: { type: "text", value: "Hello", textClass: "text-brandRed" },
-  4: { type: "image", value: "/module-assets/cards/module-4.jpg" },
-  5: { type: "image", value: "/module-assets/cards/module-5.jpg" },
-  6: { type: "image", value: "/module-assets/cards/module-6.jpg" },
-  7: { type: "image", value: "/module-assets/cards/module-7.png" },
-  8: { type: "image", value: "/module-assets/cards/module-8.png" }
-};
-
-export default function ModulesPage() {
-  const [modules, setModules] = useState<ModuleItem[]>([]);
+export default function StudentModulesPage() {
+  const [course, setCourse] = useState<StudentCourse | null>(null);
+  const [certificateStatus, setCertificateStatus] = useState<StudentCertificateDownloadStatus | null>(null);
+  const [isPreviewingCertificate, setIsPreviewingCertificate] = useState(false);
+  const [isDownloadingCertificate, setIsDownloadingCertificate] = useState(false);
+  const [certificateRecipientName, setCertificateRecipientName] = useState("Account Holder");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [showArchiveNotice, setShowArchiveNotice] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    getModules()
-      .then((data) => {
-        setModules(data);
+    Promise.all([getStudentCourse(), getStudentCertificateDownloadStatus()])
+      .then(([courseData, certificateData]) => {
+        setCourse(courseData);
+        setCertificateStatus(certificateData);
+        setError(null);
       })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((requestError: Error) => setError(requestError.message));
   }, []);
 
+  useEffect(() => {
+    const storedName = window.localStorage.getItem("auth_username")?.trim();
+    if (storedName) {
+      setCertificateRecipientName(storedName);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+    notifySuccess(message);
+    setMessage(null);
+  }, [message]);
+
+  async function onDownloadCertificate() {
+    if (!certificateStatus?.eligible || isDownloadingCertificate) {
+      return;
+    }
+    try {
+      setIsDownloadingCertificate(true);
+      setError(null);
+      const blob = await downloadStudentCertificate();
+      const fileNameSeed =
+        (course?.section?.name || "fsl-basic-course")
+          .replace(/[^a-zA-Z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .toLowerCase() || "fsl-basic-course";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ugnay-certificate-${fileNameSeed}.html`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setMessage("Certificate downloaded successfully.");
+      setShowArchiveNotice(true);
+      const latestStatus = await getStudentCertificateDownloadStatus();
+      setCertificateStatus(latestStatus);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to download certificate.");
+    } finally {
+      setIsDownloadingCertificate(false);
+    }
+  }
+
+  async function onPreviewCertificate() {
+    if (isPreviewingCertificate) {
+      return;
+    }
+    try {
+      setIsPreviewingCertificate(true);
+      setError(null);
+      const blob = await previewStudentCertificate();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to preview certificate.");
+    } finally {
+      setIsPreviewingCertificate(false);
+    }
+  }
+
   return (
-    <section className="space-y-4">
-      <div className="panel panel-lively">
-        <h2 className="text-2xl font-semibold title-gradient">Learning Modules</h2>
+    <section className="space-y-6">
+      <div className="panel">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brandBlue">Student LMS</p>
+        <h2 className="mt-3 text-3xl font-bold title-gradient">Modules</h2>
       </div>
 
-      {loading ? <p className="text-sm text-muted">Loading modules...</p> : null}
-
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {modules.map((module) => {
-          const theme = cardTheme(module);
-          const cleanedTitle = module.title.replace(/^Module \d+:\s*/i, "");
-          const cardMedia =
-            MODULE_CARD_MEDIA_BY_ORDER[module.order_index] ?? {
-              type: "text",
-              value: `Module ${module.order_index}`,
-              textClass: "text-brandBlue"
-            };
-
-          const cardContent = (
-            <article
-              className="module-card-live relative h-full overflow-hidden rounded-[28px] border-2 p-4 shadow-soft transition duration-300 hover:-translate-y-1.5 hover:shadow-xl"
-              style={{ background: theme.shellBg, borderColor: theme.borderColor }}
-            >
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-0 opacity-85"
-                style={{ background: theme.overlayBg }}
-              />
-
-              <div
-                className="relative h-52 rounded-[22px] border-2 shadow-inner"
-                style={{ background: theme.mediaBg, borderColor: "rgba(255,255,255,0.75)" }}
-              >
-                {cardMedia.type === "image" ? (
-                  <img
-                    alt={`Module ${module.order_index} preview`}
-                    className="h-full w-full rounded-[20px] bg-white object-contain object-center p-2"
-                    loading="lazy"
-                    src={cardMedia.value}
-                  />
-                ) : (
-                  <div className={`card-hand flex h-full items-center justify-center px-4 text-center text-6xl font-black tracking-tight ${cardMedia.textClass ?? "text-brandBlue"}`}>
-                    {cardMedia.value}
-                  </div>
-                )}
-              </div>
-
-              <div className="relative mt-4 flex items-start justify-between gap-2">
-                <h3 className="text-3xl font-black leading-tight text-slate-900">
-                  Module {module.order_index}: {cleanedTitle}
-                </h3>
-              </div>
-
-              <div className="relative mt-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">
-                  Open module details
+      {error ? <p className="rounded-xl border border-brandRed/35 bg-brandRedLight px-4 py-3 text-sm text-brandRed">{error}</p> : null}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {(course?.modules ?? []).map((module) => (
+          <article className="panel panel-lively" key={module.id}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Module {module.order_index}</p>
+                <h3 className="mt-2 text-xl font-bold text-slate-900">{module.title}</h3>
+                <p className="mt-2 text-sm text-slate-700">{module.description}</p>
+                <p className="mt-2 mb-0 text-xs text-slate-600">
+                  Instructor:{" "}
+                  <span className="font-semibold">
+                    {module.instructor_name?.trim() || "Unknown Instructor"}
+                  </span>
                 </p>
-                <span className={`rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${theme.chipClass}`}>
-                  Tap
-                </span>
               </div>
-            </article>
-          );
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${module.is_locked ? "bg-brandRedLight text-brandRed" : "bg-brandBlueLight text-brandBlue"}`}>
+                {module.is_locked ? "Locked" : module.status.replaceAll("_", " ")}
+              </span>
+            </div>
+            <div className="mt-4 rounded-full bg-brandMutedSurface">
+              <div className="h-3 rounded-full bg-brandBlue" style={{ width: `${module.progress_percent}%` }} />
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Link className={`rounded-lg px-4 py-2 text-sm font-semibold ${module.is_locked ? "pointer-events-none bg-brandMutedSurface text-slate-500" : "bg-brandBlue text-white"}`} href={module.is_locked ? "#" : `/modules/${module.id}`}>
+                Continue
+              </Link>
+            </div>
+          </article>
+        ))}
+        <article className="panel panel-lively lg:col-span-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Course Completion</p>
+              <h3 className="mt-2 text-2xl font-bold text-slate-900">E-Certificate</h3>
+              <p className="mt-2 text-sm text-slate-700">
+                Your certificate is unlocked after the first 12 published modules are completed.
+              </p>
+              <p className="mt-2 rounded-xl border border-brandRed/35 bg-brandRedLight px-3 py-2 text-xs font-semibold text-brandRed">
+                Reminder: download your e-certificate within 1 month after completion.
+              </p>
+            </div>
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                certificateStatus?.eligible ? "bg-brandGreenLight text-brandGreen" : "bg-brandRedLight text-brandRed"
+              }`}
+            >
+              {certificateStatus?.eligible ? "Ready to Download" : "Locked"}
+            </span>
+          </div>
 
-          return (
-            <Link className="block h-full focus-visible:outline-none" key={module.id} href={`/modules/${module.id}`}>
-              {cardContent}
-            </Link>
-          );
-        })}
+          <div className="mt-4 rounded-2xl border border-brandBorder bg-brandOffWhite px-4 py-4 text-center">
+            <p className="mb-1 text-sm text-slate-700">This certificate is awarded to</p>
+            <p className="mb-1 text-xl font-bold text-brandBlue">{certificateRecipientName}</p>
+            <p className="mb-1 text-sm text-slate-700">for successfully completing</p>
+            <p className="mb-1 text-base font-semibold text-slate-900">FSL Basic Course</p>
+            <p className="mb-0 text-sm text-slate-700">offered by Hand and Heart</p>
+          </div>
+          <p className="mt-3 mb-0 rounded-xl border border-brandBlue/30 bg-brandBlueLight px-3 py-2 text-xs font-semibold text-brandBlue">
+            Preview includes an UGNAY watermark. The final downloaded certificate has no watermark.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="mb-0 text-sm text-slate-600">
+              {certificateStatus?.completion_date
+                ? `Completion Date: ${certificateStatus.completion_date}`
+                : certificateStatus?.message || "Finish the first 12 published modules to unlock your certificate."}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-lg border border-brandBlue bg-white px-4 py-2 text-sm font-semibold text-brandBlue disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isPreviewingCertificate}
+                onClick={() => void onPreviewCertificate()}
+                type="button"
+              >
+                {isPreviewingCertificate ? "Opening Preview..." : "Preview E-Certificate"}
+              </button>
+              <button
+                className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!certificateStatus?.eligible || isDownloadingCertificate}
+                onClick={() => void onDownloadCertificate()}
+                type="button"
+              >
+                {isDownloadingCertificate ? "Downloading..." : "Download E-Certificate"}
+              </button>
+            </div>
+          </div>
+        </article>
       </div>
-
-      {error ? <p className="text-sm text-red-600">Error: {error}</p> : null}
+      {showArchiveNotice ? (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-900/45 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-brandBorder bg-white p-5 shadow-2xl">
+            <h4 className="mb-2 text-lg font-bold text-slate-900">Notice</h4>
+            <p className="mb-4 text-sm text-slate-700">
+              Your certificate was downloaded. Please keep a copy. You have 1 month after completion to download your e-certificate.
+            </p>
+            <div className="flex justify-end">
+              <button
+                className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-semibold text-white"
+                onClick={() => setShowArchiveNotice(false)}
+                type="button"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -2,27 +2,71 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Backend: FastAPI",
-      "type": "node-terminal",
+      "name": "Backend: FastAPI (Reload)",
+      "type": "debugpy",
       "request": "launch",
-      "command": "python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+      "python": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}/backend",
-      "envFile": "${workspaceFolder}/backend/.env"
+      "module": "uvicorn",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "args": [
+        "app.main:app",
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
+      "jinja": true,
+      "justMyCode": false,
+      "subProcess": true,
+      "console": "integratedTerminal",
+      "preLaunchTask": "Backend: Prepare run"
     },
     {
-      "name": "Frontend: Next.js",
+      "name": "Frontend: Next.js Dev",
       "type": "node-terminal",
       "request": "launch",
-      "command": "npm.cmd run serve",
-      "cwd": "${workspaceFolder}/frontend"
+      "command": "npm.cmd run dev",
+      "cwd": "${workspaceFolder}/frontend",
+      "preLaunchTask": "Frontend: Prepare run"
+    },
+    {
+      "name": "Backend: FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}/backend",
+      "module": "uvicorn",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "args": [
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
+      "jinja": true,
+      "justMyCode": false,
+      "subProcess": true,
+      "console": "integratedTerminal",
+      "preLaunchTask": "Backend: Prepare run"
     }
   ],
   "compounds": [
     {
+      "name": "Run Full Stack (Reload)",
+      "configurations": [
+        "Backend: FastAPI (Reload)",
+        "Frontend: Next.js Dev"
+      ],
+      "stopAll": true
+    },
+    {
       "name": "Run Full Stack",
       "configurations": [
         "Backend: FastAPI",
-        "Frontend: Next.js"
+        "Frontend: Next.js Dev"
       ],
       "stopAll": true
     }

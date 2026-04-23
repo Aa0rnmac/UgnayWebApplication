@@ -4,9 +4,11 @@ import hmac
 import json
 import secrets
 import string
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from app.core.config import settings
+from app.core.datetime_utils import as_utc, utc_now
+from app.models.teacher_invite import TeacherInvite
 
 INVITE_PREFIX = "UGNAY:TEACHER_INVITE"
 
@@ -15,6 +17,8 @@ def _secret_bytes() -> bytes:
     secret = settings.teacher_invite_signing_secret.strip()
     if not secret:
         raise ValueError("TEACHER_INVITE_SIGNING_SECRET is not configured.")
+    if settings.is_production_like and secret == "change-me-teacher-invite-secret":
+        raise ValueError("TEACHER_INVITE_SIGNING_SECRET must be changed before production use.")
     return secret.encode("utf-8")
 
 
@@ -43,7 +47,7 @@ def parse_qr_payload(payload: str) -> str:
 def create_onboarding_token(invite_code: str, minutes: int = 10) -> str:
     payload = {
         "invite_code": invite_code,
-        "exp": (datetime.now(timezone.utc) + timedelta(minutes=minutes)).timestamp(),
+        "exp": (utc_now() + timedelta(minutes=minutes)).timestamp(),
     }
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_json).decode("utf-8").rstrip("=")
@@ -69,13 +73,28 @@ def verify_onboarding_token(token: str) -> str:
         raise ValueError("Invalid onboarding token payload.") from exc
 
     expires = float(payload.get("exp", 0))
-    if datetime.now(timezone.utc).timestamp() > expires:
+    if utc_now().timestamp() > expires:
         raise ValueError("Onboarding token expired.")
 
     invite_code = str(payload.get("invite_code", "")).strip()
     if not invite_code:
         raise ValueError("Onboarding token missing invite code.")
     return invite_code
+
+
+def ensure_invite_is_usable(invite: TeacherInvite | None) -> TeacherInvite:
+    if invite is None:
+        raise ValueError("Teacher invite is invalid or inactive.")
+    if invite.revoked_at is not None:
+        raise ValueError("Teacher invite has been revoked.")
+    expires_at = as_utc(invite.expires_at)
+    if expires_at and expires_at < utc_now():
+        raise ValueError("Teacher invite has expired.")
+    if invite.max_use_count is not None and invite.use_count >= invite.max_use_count:
+        raise ValueError("Teacher invite has reached its usage limit.")
+    if invite.status != "active":
+        raise ValueError("Teacher invite is invalid or inactive.")
+    return invite
 
 
 def generate_invite_code() -> str:

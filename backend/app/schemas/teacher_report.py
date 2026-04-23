@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TeacherAssessmentReportOut(BaseModel):
@@ -66,3 +67,167 @@ class TeacherGeneratedStudentReport(BaseModel):
     overall_score_percent: float
     modules: list[TeacherModuleSummary]
     top_improvement_areas: list[TeacherImprovementAreaItem]
+
+
+class TeacherActivityAttemptItemOut(BaseModel):
+    id: int
+    item_key: str
+    prompt: str | None = None
+    expected_answer: str | None = None
+    student_answer: str | None = None
+    is_correct: bool | None = None
+    confidence: float | None = None
+    ai_metadata: dict = Field(default_factory=dict)
+
+
+class TeacherActivityAttemptOut(BaseModel):
+    id: int
+    student_id: int
+    student_name: str
+    module_id: int
+    module_title: str
+    activity_id: int
+    activity_key: str
+    activity_title: str
+    activity_type: str
+    right_count: int
+    wrong_count: int
+    total_items: int
+    score_percent: float
+    improvement_areas: list[str] = Field(default_factory=list)
+    ai_metadata: dict = Field(default_factory=dict)
+    submitted_at: datetime
+    items: list[TeacherActivityAttemptItemOut] = Field(default_factory=list)
+
+
+class TeacherWeakItemOut(BaseModel):
+    module_id: int
+    module_title: str
+    activity_key: str
+    activity_title: str
+    item_key: str
+    prompt: str | None = None
+    expected_answer: str | None = None
+    wrong_count: int
+    attempt_count: int
+    wrong_rate_percent: float
+
+
+class TeacherAttentionStudentOut(BaseModel):
+    student_id: int
+    student_name: str
+    student_email: str | None = None
+    batch_id: int | None = None
+    batch_name: str | None = None
+    attempt_count: int
+    average_score_percent: float
+    low_score_count: int
+    latest_attempt_at: datetime
+
+
+class TeacherConcernAttemptOut(BaseModel):
+    attempt_id: int
+    student_id: int
+    student_name: str
+    batch_id: int | None = None
+    batch_name: str | None = None
+    module_id: int
+    module_title: str
+    activity_key: str
+    activity_title: str
+    score_percent: float
+    low_confidence_item_count: int
+    submitted_at: datetime
+
+
+class TeacherReportSummaryOut(BaseModel):
+    batch_id: int | None = None
+    module_id: int | None = None
+    registered_student_count: int
+    total_students: int
+    total_attempts: int
+    average_score_percent: float
+    weak_items: list[TeacherWeakItemOut] = Field(default_factory=list)
+    students_needing_attention: list[TeacherAttentionStudentOut] = Field(default_factory=list)
+    recent_concern_attempts: list[TeacherConcernAttemptOut] = Field(default_factory=list)
+
+
+class TeacherBreakdownModuleMetricOut(BaseModel):
+    module_id: int
+    module_title: str
+    count: int
+
+
+class TeacherBatchBreakdownRowOut(BaseModel):
+    student_id: int
+    student_name: str
+    average_score_percent: float
+    attempt_count: int
+    latest_attempt_at: datetime
+    highest_correct_module: TeacherBreakdownModuleMetricOut | None = None
+    highest_incorrect_module: TeacherBreakdownModuleMetricOut | None = None
+
+
+class TeacherModuleBreakdownRowOut(BaseModel):
+    batch_id: int | None = None
+    batch_name: str
+    average_score_percent: float
+    attempt_count: int
+    correct_answers: int
+    incorrect_answers: int
+
+
+class TeacherAllBreakdownRowOut(BaseModel):
+    student_id: int
+    student_name: str
+    batch_id: int | None = None
+    batch_name: str
+    average_score_percent: float | None = None
+    attempt_count: int
+    latest_attempt_at: datetime | None = None
+
+
+class TeacherBatchBreakdownResponse(BaseModel):
+    mode: Literal["batch"]
+    batch_id: int
+    batch_name: str | None = None
+    rows: list[TeacherBatchBreakdownRowOut] = Field(default_factory=list)
+
+
+class TeacherModuleBreakdownResponse(BaseModel):
+    mode: Literal["module"]
+    module_id: int
+    module_title: str | None = None
+    rows: list[TeacherModuleBreakdownRowOut] = Field(default_factory=list)
+
+
+class TeacherBatchModuleBreakdownRowOut(BaseModel):
+    student_id: int
+    student_name: str
+    average_score_percent: float
+    attempt_count: int
+    correct_answers: int
+    incorrect_answers: int
+    latest_attempt_at: datetime
+
+
+class TeacherBatchModuleBreakdownResponse(BaseModel):
+    mode: Literal["batch_module"]
+    batch_id: int
+    batch_name: str | None = None
+    module_id: int
+    module_title: str | None = None
+    rows: list[TeacherBatchModuleBreakdownRowOut] = Field(default_factory=list)
+
+
+class TeacherAllBreakdownResponse(BaseModel):
+    mode: Literal["all"]
+    rows: list[TeacherAllBreakdownRowOut] = Field(default_factory=list)
+
+
+TeacherReportBreakdownResponse = (
+    TeacherAllBreakdownResponse
+    | TeacherBatchBreakdownResponse
+    | TeacherModuleBreakdownResponse
+    | TeacherBatchModuleBreakdownResponse
+)
