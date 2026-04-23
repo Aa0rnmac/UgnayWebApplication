@@ -36,7 +36,7 @@ type CaptureOptions = {
   cropToGuideBox?: boolean;
 };
 
-const GUIDE_BOX_RATIO = 0.56;
+const GUIDE_BOX_RATIO = 0.6;
 const GUIDE_BOX_WARNING = "Please sign inside the box. Anything outside the box will not be analyzed.";
 const RECOGNIZED_INPUT_NAV_KEYS = new Set([
   "ArrowLeft",
